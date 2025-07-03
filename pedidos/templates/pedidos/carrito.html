@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Mi Carrito</title>
+    <style>
+        body { font-family: sans-serif; margin: 40px; }
+        .item-carrito { border-bottom: 1px solid #ccc; padding: 10px 0; }
+        .boton { background-color: #007bff; color: white; padding: 10px 15px; text-decoration: none; border-radius: 5px; border: none; cursor: pointer; }
+        .formulario-checkout { margin-top: 30px; border-top: 2px solid #000; padding-top: 20px; }
+        .formulario-checkout input { width: 300px; padding: 8px; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <h1>🛒 Mi Carrito de Compras 🛒</h1>
+    <a href="{% url 'index' %}">&larr; Seguir comprando</a>
+    <hr>
+
+    {% for item in carrito %}
+        <div class="item-carrito">
+            <h3>{{ item.producto_nombre }}</h3>
+            <p>Precio: ${{ item.precio }}</p>
+            </div>
+    {% empty %}
+        <p>Tu carrito está vacío.</p>
+    {% endfor %}
+
+    <div class="formulario-checkout">
+        <h2>Completa tus datos para finalizar el pedido</h2>
+        <form action="" method="post">
+            {% csrf_token %}
+            <div>
+                <label for="nombre">Nombre:</label><br>
+                <input type="text" id="nombre" name="cliente_nombre" required>
+            </div>
+            <div>
+                <label for="direccion">Dirección:</label><br>
+                <input type="text" id="direccion" name="cliente_direccion" required>
+            </div>
+            <div>
+                <label for="telefono">Teléfono (opcional):</label><br>
+                <input type="text" id="telefono" name="cliente_telefono">
+            </div>
+            <br>
+            <button type="submit" class="boton">Realizar Pedido</button>
+        </form>
+    </div>
+</body>
+</html>

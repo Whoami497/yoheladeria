@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ producto.nombre }}</title>
+    <style>
+        body { font-family: sans-serif; margin: 40px; }
+        .sabores-lista { list-style-type: none; padding: 0; }
+        .sabores-lista li { margin: 5px 0; }
+        .boton { background-color: #28a745; color: white; padding: 10px 15px; text-decoration: none; border-radius: 5px; border: none; cursor: pointer; }
+        a { color: #007bff; }
+    </style>
+</head>
+<body>
+    <a href="{% url 'index' %}">&larr; Volver al catálogo</a>
+    <h1>{{ producto.nombre }}</h1>
+    <p>Precio: ${{ producto.precio }}</p>
+    <p>Puedes elegir hasta {{ producto.sabores_maximos }} sabores.</p>
+    <hr>
+    <h3>Elige tus sabores:</h3>
+    <form action="" method="post">
+        {% csrf_token %}  <ul class="sabores-lista">
+            {% for sabor in sabores %}
+            <li>
+                <label>
+                    <input type="checkbox" name="sabores" value="{{ sabor.id }}">
+                    {{ sabor.nombre }}
+                </label>
+            </li>
+            {% endfor %}
+        </ul>
+        <button type="submit" class="boton">Añadir al Carrito</button>
+    </form>
+</body>
+</html>

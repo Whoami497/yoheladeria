@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mi Heladería</title>
+    <style>
+        body { font-family: sans-serif; margin: 40px; }
+        .catalogo { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
+        .producto { border: 1px solid #ccc; padding: 20px; text-align: center; }
+        .producto h2 { font-size: 1.2em; }
+    </style>
+</head>
+<body>
+    <h1>🍦 Heladería "El Pingüino Programador" 🍦</h1>
+    <a href="{% url 'ver_carrito' %}">Ver mi Carrito</a> <h2>Nuestro Catálogo</h2>
+    <div class="catalogo">
+        {% for producto in productos %}
+            <div class="producto">
+                <h2>{{ producto.nombre }}</h2>
+                <p>Precio: ${{ producto.precio }}</p>
+                <p>Hasta {{ producto.sabores_maximos }} sabores</p>
+                <a href="{% url 'detalle_producto' producto.id %}">Ver Detalles</a>
+            </div>
+        {% empty %}
+            <p>No hay productos disponibles en este momento.</p>
+        {% endfor %}
+    </div>
+</body>
+</html>
