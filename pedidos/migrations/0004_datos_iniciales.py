@@ -26,7 +26,7 @@ def crear_datos_iniciales(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('pedidos', '0002_pedido_detallepedido'), # Asegúrate que el número coincida con tu última migración
+        ('pedidos', '0003_pedido_detallepedido'), # Asegúrate que el número coincida con tu última migración
     ]
 
     operations = [
