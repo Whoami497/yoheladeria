@@ -3,8 +3,16 @@ from django.db import migrations
 
 def cargar_productos_finales(apps, schema_editor):
     Producto = apps.get_model('pedidos', 'Producto')
+    DetallePedido = apps.get_model('pedidos', 'DetallePedido')
+    Pedido = apps.get_model('pedidos', 'Pedido')
 
-    # Borramos los productos de ejemplo anteriores para no duplicar
+    # --- LÍNEAS NUEVAS ---
+    # Primero, borramos todos los detalles y pedidos de prueba para limpiar la base de datos
+    DetallePedido.objects.all().delete()
+    Pedido.objects.all().delete()
+    # --------------------
+
+    # Ahora sí borramos los productos de ejemplo anteriores
     Producto.objects.filter(nombre__in=[
         'Pote 1 KG',
         'Pote 1/2 KG',
