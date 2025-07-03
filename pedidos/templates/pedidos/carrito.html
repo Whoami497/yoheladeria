@@ -1,49 +1,56 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <title>Mi Carrito</title>
-    <style>
-        body { font-family: sans-serif; margin: 40px; }
-        .item-carrito { border-bottom: 1px solid #ccc; padding: 10px 0; }
-        .boton { background-color: #007bff; color: white; padding: 10px 15px; text-decoration: none; border-radius: 5px; border: none; cursor: pointer; }
-        .formulario-checkout { margin-top: 30px; border-top: 2px solid #000; padding-top: 20px; }
-        .formulario-checkout input { width: 300px; padding: 8px; margin-bottom: 10px; }
-    </style>
-</head>
-<body>
+{% extends 'pedidos/base.html' %}
+
+{% block content %}
+<div class="container mt-5">
     <h1>🛒 Mi Carrito de Compras 🛒</h1>
-    <a href="{% url 'index' %}">&larr; Seguir comprando</a>
     <hr>
+    <div class="row">
+        <div class="col-md-7">
+            <h4>Resumen de tu pedido:</h4>
+            {% if carrito %}
+                <ul class="list-group mb-3">
+                    {% for item in carrito %}
+                        <li class="list-group-item d-flex justify-content-between lh-sm">
+                            <div>
+                                <h6 class="my-0">{{ item.producto_nombre }}</h6>
+                                </div>
+                            <span class="text-muted">${{ item.precio|floatformat:2 }}</span>
+                        </li>
+                    {% endfor %}
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>Total (ARS)</span>
+                        <strong>${{ total|floatformat:2 }}</strong>
+                    </li>
+                </ul>
+            {% else %}
+                <div class="alert alert-info" role="alert">
+                    Tu carrito está vacío. <a href="{% url 'index' %}" class="alert-link">¡Empieza a comprar!</a>
+                </div>
+            {% endif %}
+        </div>
 
-    {% for item in carrito %}
-        <div class="item-carrito">
-            <h3>{{ item.producto_nombre }}</h3>
-            <p>Precio: ${{ item.precio }}</p>
+        <div class="col-md-5">
+            <h4>Completa tus datos para finalizar</h4>
+            <div class="card p-4">
+                <form action="" method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="nombre" class="form-label">Nombre Completo</label>
+                        <input type="text" class="form-control" id="nombre" name="cliente_nombre" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="direccion" class="form-label">Dirección de Entrega</label>
+                        <input type="text" class="form-control" id="direccion" name="cliente_direccion" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="telefono" class="form-label">Teléfono (opcional)</label>
+                        <input type="text" class="form-control" id="telefono" name="cliente_telefono">
+                    </div>
+                    <hr class="my-4">
+                    <button class="w-100 btn btn-primary btn-lg" type="submit">Realizar Pedido</button>
+                </form>
             </div>
-    {% empty %}
-        <p>Tu carrito está vacío.</p>
-    {% endfor %}
-
-    <div class="formulario-checkout">
-        <h2>Completa tus datos para finalizar el pedido</h2>
-        <form action="" method="post">
-            {% csrf_token %}
-            <div>
-                <label for="nombre">Nombre:</label><br>
-                <input type="text" id="nombre" name="cliente_nombre" required>
-            </div>
-            <div>
-                <label for="direccion">Dirección:</label><br>
-                <input type="text" id="direccion" name="cliente_direccion" required>
-            </div>
-            <div>
-                <label for="telefono">Teléfono (opcional):</label><br>
-                <input type="text" id="telefono" name="cliente_telefono">
-            </div>
-            <br>
-            <button type="submit" class="boton">Realizar Pedido</button>
-        </form>
+        </div>
     </div>
-</body>
-</html>
+</div>
+{% endblock %}

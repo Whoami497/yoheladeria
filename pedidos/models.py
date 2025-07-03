@@ -14,6 +14,8 @@ class Producto(models.Model):
     precio = models.DecimalField(max_digits=10, decimal_places=2)
     sabores_maximos = models.PositiveIntegerField(default=1)
     disponible = models.BooleanField(default=True)
+    # --- AÑADE ESTA LÍNEA ---
+    imagen = models.ImageField(upload_to='productos/', null=True, blank=True)
 
     def __str__(self):
         return self.nombre

@@ -1,5 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
-from .models import Producto, Sabor, Pedido, DetallePedido # Importamos todo aquí al principio
+from .models import Producto, Sabor, Pedido, DetallePedido
+from decimal import Decimal
 
 def index(request):
     productos = Producto.objects.filter(disponible=True)
@@ -37,24 +38,20 @@ def detalle_producto(request, producto_id):
     return render(request, 'pedidos/detalle_producto.html', contexto)
 
 def ver_carrito(request):
-    # La lógica para cuando se envía el formulario de checkout
+    carrito = request.session.get('carrito', {})
+    total = sum(Decimal(item['precio']) for item in carrito.values())
+
     if request.method == 'POST':
-        # Obtenemos los datos del cliente del formulario
         nombre = request.POST.get('cliente_nombre')
         direccion = request.POST.get('cliente_direccion')
         telefono = request.POST.get('cliente_telefono')
 
-        # Obtenemos el carrito de la sesión
-        carrito = request.session.get('carrito', {})
-
-        # Creamos el objeto Pedido principal
         nuevo_pedido = Pedido.objects.create(
             cliente_nombre=nombre,
             cliente_direccion=direccion,
             cliente_telefono=telefono
         )
 
-        # Recorremos los items del carrito para crear los detalles del pedido
         for key, item in carrito.items():
             producto = Producto.objects.get(id=item['producto_id'])
             sabores_seleccionados = Sabor.objects.filter(id__in=item['sabores_ids'])
@@ -63,18 +60,18 @@ def ver_carrito(request):
                 pedido=nuevo_pedido,
                 producto=producto
             )
-            detalle.sabores.set(sabores_seleccionados) # Añadimos los sabores
+            detalle.sabores.set(sabores_seleccionados)
 
-        # Limpiamos el carrito de la sesión
         del request.session['carrito']
         request.session.modified = True
 
-        # Redirigimos a una página de éxito
         return redirect('pedido_exitoso')
 
-    # La lógica para cuando solo se quiere ver la página (método GET)
-    carrito = request.session.get('carrito', {})
-    contexto = {'carrito': carrito.values()}
+    contexto = {
+        'carrito': carrito.values(),
+        'total': total,
+    }
     return render(request, 'pedidos/carrito.html', contexto)
+
 def pedido_exitoso(request):
     return render(request, 'pedidos/pedido_exitoso.html')
