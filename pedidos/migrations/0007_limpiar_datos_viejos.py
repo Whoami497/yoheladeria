@@ -17,7 +17,7 @@ def limpiar_base_de_datos(apps, schema_editor):
     Sabor.objects.all().delete()
     # Opcional: Borramos todos los usuarios menos el primer superusuario si quisiéramos mantenerlo
     # En este caso, borraremos todos para empezar 100% de cero.
-    User.objects.exclude(is_staff=False).delete() # Borra solo usuarios no-staff, para no borrar el admin
+    #User.objects.exclude(is_staff=False).delete() # Borra solo usuarios no-staff, para no borrar el admin
     print("Limpieza completada.")
 
 class Migration(migrations.Migration):
