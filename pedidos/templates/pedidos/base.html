@@ -1,4 +1,4 @@
-<<!doctype html>
+<!doctype html>
 <html lang="es">
   <head>
     <meta charset="utf-8">
@@ -10,42 +10,39 @@
     <style>
         /* Estilos generales del cuerpo */
         body { 
-            padding-top: 0; /* No padding-top para navbar fija, la manejamos con el layout */
-            background-color: #1a1a1a; /* FONDO MUY OSCURO (casi negro) */
-            color: #e0e0e0; /* Color de texto base claro */
+            padding-top: 0; /* No padding-top por defecto */
+            background-color: var(--color-principal-oscuro); 
+            color: var(--color-yo-texto-oscuro); /* Texto oscuro por defecto, para contenido principal */
             font-family: 'Arial', sans-serif; 
         }
 
         /* Variables CSS para la Paleta de Colores AZUL y BLANCO de Yo Heladerías */
         :root {
-            --color-principal-oscuro: #1a1a1a; /* Fondo principal de la página */
-            --color-secundario-oscuro: #2a2a2a; /* Fondo para elementos flotantes en oscuro */
+            --color-principal-oscuro: #1a1a1a; 
+            --color-secundario-oscuro: #2a2a2a; 
 
-            --color-yo-azul: #073653;      /* AZUL OSCURO ESPECÍFICO (para fondo de main content) */
-            --color-yo-azul-claro: #007bff; /* Azul vibrante (para botones primarios) */
-            --color-yo-azul-oscuro-hover: #052a42; /* Hover para azul oscuro */
-            --color-yo-blanco: #ffffff;    /* Blanco puro */
-            --color-yo-fondo-claro: #f8f9fa; /* Fondo claro para tarjetas */
-            --color-yo-texto-oscuro: #343a40; /* Gris muy oscuro casi negro para textos en fondos claros */
-            --color-yo-gris-texto: #6c757d; /* Gris para textos secundarios en fondos claros */
-            --color-yo-gris-borde: #dee2e6; /* Gris muy claro para bordes */
-
-            --color-borde-resaltado: var(--color-yo-azul-claro); /* Borde para resaltar secciones */
-
-            --color-sombra-suave: rgba(0,0,0,0.2);
-            --color-sombra-media: rgba(0,0,0,0.3);
-            --color-sombra-fuerte: rgba(0,0,0,0.4);
+            --color-yo-azul: #073653;      /* AZUL OSCURO ESPECÍFICO */
+            --color-yo-azul-claro: #007bff; 
+            --color-yo-azul-oscuro-hover: #052a42; 
+            --color-yo-blanco: #ffffff;    
+            --color-yo-fondo-claro: #f8f9fa; 
+            --color-yo-texto-oscuro: #343a40; 
+            --color-yo-gris-texto: #6c757d; 
+            --color-yo-gris-borde: #dee2e6; 
+            --color-sombra-suave: rgba(0,0,0,0.08);
+            --color-sombra-media: rgba(0,0,0,0.12);
+            --color-sombra-fuerte: rgba(0,0,0,0.2);
         }
 
-        /* LAYOUT PRINCIPAL */
+        /* LAYOUT PRINCIPAL (Desktop) */
         .page-wrapper {
             display: flex; 
             min-height: 100vh; 
             background-color: var(--color-principal-oscuro);
         }
 
-        /* BARRA LATERAL IZQUIERDA */
-        .sidebar {
+        /* BARRA LATERAL IZQUIERDA (Desktop) */
+        .sidebar-desktop {
             width: 250px; 
             background-color: var(--color-secundario-oscuro); 
             box-shadow: 2px 0 10px var(--color-sombra-suave);
@@ -55,22 +52,22 @@
             overflow-y: auto; 
             border-right: 1px solid rgba(255,255,255,0.05); 
         }
-        .sidebar-logo {
+        .sidebar-desktop .sidebar-logo {
             text-align: center;
             padding: 0 15px 20px;
         }
-        .sidebar-logo img {
-            max-width: 100%; /* El logo no excederá el ancho del contenedor */
-            height: auto; /* La altura se ajustará proporcionalmente */
-            max-height: 120px; /* Ajuste para que el logo sea más grande */
+        .sidebar-desktop .sidebar-logo img {
+            max-width: 100%; 
+            height: auto; 
+            max-height: 100px; /* Ajuste para que el logo sea más grande */
             display: block; 
             margin: 0 auto; 
-            object-fit: contain; /* Asegura que la imagen completa sea visible */
+            object-fit: contain; 
         }
-        .sidebar-nav .nav-item {
+        .sidebar-desktop .sidebar-nav .nav-item {
             margin-bottom: 5px;
         }
-        .sidebar-nav .nav-link {
+        .sidebar-desktop .sidebar-nav .nav-link {
             color: var(--color-yo-blanco);
             padding: 15px 20px;
             font-size: 1.1rem;
@@ -81,34 +78,63 @@
             border-radius: 8px;
             margin: 0 10px; 
         }
-        .sidebar-nav .nav-link i {
+        .sidebar-desktop .sidebar-nav .nav-link i {
             margin-right: 10px;
             font-size: 1.3rem;
         }
-        .sidebar-nav .nav-link:hover,
-        .sidebar-nav .nav-link.active { 
+        .sidebar-desktop .sidebar-nav .nav-link:hover,
+        .sidebar-desktop .sidebar-nav .nav-link.active { 
             background-color: var(--color-yo-azul-claro); 
             color: var(--color-yo-blanco) !important;
             box-shadow: 0 2px 5px var(--color-sombra-suave);
         }
 
+        /* NAVEGACIÓN SUPERIOR PARA MÓVILES */
+        .navbar-mobile {
+            display: none; /* Oculto por defecto en desktop */
+            background-color: var(--color-yo-azul) !important; 
+            box-shadow: 0 2px 8px var(--color-sombra-media);
+            border-bottom: 4px solid var(--color-yo-blanco);
+            padding: 0.7rem 1rem;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 1030; /* Asegura que esté por encima de otros elementos */
+        }
+        .navbar-mobile .navbar-brand img {
+            max-height: 45px; /* Logo más pequeño en la navbar móvil */
+            width: auto;
+        }
+        .navbar-mobile .nav-link {
+            color: var(--color-yo-blanco) !important;
+            font-weight: 600;
+        }
+
+
         /* CONTENIDO PRINCIPAL */
-        .main-content-wrapper {
-            margin-left: 250px; /* Deja espacio para la sidebar */
+        .main-content-wrapper-desktop { /* Wrapper para desktop */
+            margin-left: 250px; 
             flex-grow: 1; 
             padding: 20px; 
             background-color: var(--color-principal-oscuro); 
+        }
+        .main-content-wrapper-mobile { /* Wrapper para móvil */
+            flex-grow: 1;
+            padding: 15px;
+            padding-top: 85px; /* Espacio para la navbar móvil fija */
+            background-color: var(--color-principal-oscuro);
         }
         .main-content {
             background-color: var(--color-yo-blanco); 
             border-radius: 15px; 
             padding: 30px;
             box-shadow: 0 5px 20px var(--color-sombra-media);
-            min-height: calc(100vh - 40px); 
+            min-height: calc(100vh - 40px); /* Altura mínima para desktop */
             color: var(--color-yo-texto-oscuro); 
         }
 
-        /* Mensajes de Django (Alertas) - Ahora dentro del main-content */
+        /* Mensajes de Django (Alertas) */
         .messages {
             margin-top: 0; 
             margin-bottom: 20px;
@@ -135,13 +161,54 @@
         }
 
         /* Botones, tarjetas, etc. usarán las mismas variables de color que ya definimos */
-        /* Hero Section (nueva clase para el banner principal) */
+        .btn-primary { background-color: var(--color-yo-azul-claro); border-color: var(--color-yo-azul-claro); font-weight: bold; color: var(--color-yo-blanco); transition: all 0.2s ease-in-out; }
+        .btn-primary:hover { background-color: var(--color-yo-azul); border-color: var(--color-yo-azul); transform: translateY(-2px); box-shadow: 0 4px 8px var(--color-sombra-suave); }
+        .btn-success { background-color: var(--color-yo-azul); border-color: var(--color-yo-azul); font-weight: bold; color: var(--color-yo-blanco); transition: all 0.2s ease-in-out; }
+        .btn-success:hover { background-color: var(--color-yo-azul-oscuro-hover); border-color: var(--color-yo-azul-oscuro-hover); transform: translateY(-2px); box-shadow: 0 4px 8px var(--color-sombra-suave); }
+        .btn-secondary { background-color: var(--color-yo-blanco); border-color: var(--color-yo-blanco); color: var(--color-yo-azul); font-weight: bold; transition: all 0.2s ease-in-out; }
+        .btn-secondary:hover { background-color: var(--color-yo-gris-borde); border-color: var(--color-yo-gris-borde); color: var(--color-yo-azul-oscuro-hover); transform: translateY(-2px); box-shadow: 0 4px 8px var(--color-sombra-suave); }
+        .btn-outline-danger { color: var(--color-yo-gris-texto); border-color: var(--color-yo-gris-texto); transition: all 0.2s ease-in-out; }
+        .btn-outline-danger:hover { background-color: #dc3545; color: var(--color-yo-blanco); border-color: #dc3545; box-shadow: 0 4px 8px var(--color-sombra-suave); }
+
+        .card { border: 1px solid var(--color-yo-gris-borde); border-radius: 15px; box-shadow: 0 6px 12px var(--color-sombra-suave); transition: transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out; background-color: var(--color-yo-blanco); overflow: hidden; }
+        .card:hover { transform: translateY(-8px); box-shadow: 0 12px 24px var(--color-sombra-media); }
+        .card-title { color: var(--color-yo-azul); font-weight: bold; font-size: 1.35rem; }
+        .card-text.text-muted { color: var(--color-yo-gris-texto) !important; font-size: 0.95rem; }
+        .card-img-top { border-radius: 15px 15px 0 0; }
+
+        .display-4 { color: var(--color-yo-azul); font-weight: bold; }
+        .lead .fw-bold { color: var(--color-yo-azul); }
+        h3 { color: var(--color-yo-azul); }
+
+        table.table th { color: var(--color-yo-blanco); background-color: var(--color-yo-azul); }
+        table.table tfoot th, table.table tfoot td { font-size: 1.6rem; color: var(--color-yo-azul); font-weight: bold; }
+        table.table tfoot strong { color: var(--color-yo-azul); }
+        .alert-info .alert-link { color: var(--color-yo-azul); font-weight: bold; }
+        .alert-info .alert-link:hover { color: var(--color-yo-azul-oscuro-hover); }
+
+        .placeholder-image {
+            border: 2px dashed var(--color-yo-gris-borde) !important;
+            color: var(--color-yo-gris-texto); 
+            background-color: var(--color-yo-fondo-claro);
+            min-height: 200px; 
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            border-radius: 15px 15px 0 0; /* Coincidir con la tarjeta */
+        }
+        .placeholder-image span {
+            font-size: 0.9rem;
+        }
+
+        /* SECCIÓN HERO (PRINCIPAL) */
         .hero-section-new {
             background-color: var(--color-yo-azul); 
             color: var(--color-yo-blanco);
-            padding: 4rem 2rem; 
-            border-radius: 15px; 
-            box-shadow: 0 5px 15px var(--color-sombra-media);
+            padding: 3rem 1.5rem; /* Ajuste para desktop */
+            border-radius: 20px; 
+            box-shadow: 0 10px 25px var(--color-sombra-fuerte); 
             text-align: center;
             display: flex;
             flex-direction: column;
@@ -149,15 +216,17 @@
             justify-content: center;
         }
         .hero-section-new h1 {
-            font-size: 3rem;
+            font-size: 3rem; /* Ajuste para desktop */
             font-weight: 900;
             margin-bottom: 0.8rem;
             line-height: 1.2;
+            text-shadow: 2px 2px 6px rgba(0,0,0,0.4);
         }
         .hero-section-new p {
             font-size: 1.3rem;
             margin-bottom: 1.5rem;
             max-width: 600px;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.3);
         }
         .hero-section-new .btn {
             font-size: 1.1rem;
@@ -178,70 +247,72 @@
             box-shadow: 0 5px 10px var(--color-sombra-suave);
         }
 
+
         /* Media Queries para Responsive Design */
-        @media (max-width: 992px) { 
-            .sidebar {
-                width: 100%; 
-                height: auto; 
-                position: relative; 
-                box-shadow: none; 
-                border-right: none;
-                padding-top: 10px;
-                padding-bottom: 10px;
-                border-bottom: 1px solid rgba(255,255,255,0.05); 
-                display: flex; /* Para que los elementos se centren en móvil */
-                flex-direction: column;
+        @media (min-width: 992px) { /* Estilos de Desktop (solo se aplican a partir de 992px) */
+            body {
+                padding-top: 0; /* No padding superior en desktop */
+            }
+            .page-wrapper {
+                flex-direction: row; /* Sidebar a la izquierda, contenido a la derecha */
+            }
+            .sidebar-desktop {
+                display: block; /* Muestra la sidebar en desktop */
+            }
+            .navbar-mobile {
+                display: none; /* Oculta la navbar móvil en desktop */
+            }
+            .main-content-wrapper {
+                margin-left: 250px; /* Deja espacio para la sidebar */
+                padding: 20px;
+            }
+            .main-content {
+                min-height: calc(100vh - 40px); /* Ajuste de altura para desktop */
+            }
+        }
+
+        @media (max-width: 991.98px) { /* Estilos para Mobile (hasta 991.98px) */
+            body {
+                padding-top: 75px; /* Espacio para la navbar móvil fija */
+            }
+            .page-wrapper {
+                flex-direction: column; /* Contenido apilado en móvil */
+            }
+            .sidebar-desktop {
+                display: none; /* Oculta la sidebar en móvil */
+            }
+            .navbar-mobile {
+                display: flex; /* Muestra la navbar móvil */
+                justify-content: space-between;
                 align-items: center;
             }
-            .sidebar-logo {
-                padding-bottom: 10px; /* Menos espacio debajo del logo en móvil */
+            .navbar-mobile .container-fluid {
+                padding-left: 0.5rem;
+                padding-right: 0.5rem;
             }
-            .sidebar-logo img {
-                max-height: 70px; /* Logo más grande en móvil (sidebar) */
-            }
-            .sidebar-nav {
-                width: 100%;
-                display: flex; 
-                justify-content: space-around; 
-                padding: 0 10px;
-            }
-            .sidebar-nav .nav-item {
-                margin-bottom: 0; /* Resetear margin */
-                width: 30%; /* Ejemplo: 3 elementos por fila */
-            }
-            .sidebar-nav .nav-link {
-                padding: 8px 10px; 
-                margin: 0 2px;
-                flex-direction: column; 
-                font-size: 0.8rem; 
-                text-align: center;
-            }
-            .sidebar-nav .nav-link i {
-                margin-right: 0;
-                margin-bottom: 3px;
-                font-size: 1rem;
-            }
-
             .main-content-wrapper {
-                margin-left: 0; 
-                padding: 15px;
+                margin-left: 0; /* No hay sidebar a la izquierda */
+                padding: 15px; /* Menos padding general */
             }
             .main-content {
                 padding: 20px;
                 min-height: auto; 
             }
+            .hero-section-new {
+                padding: 2.5rem 1rem;
+            }
             .hero-section-new h1 {
-                font-size: 2.5rem;
+                font-size: 2rem;
             }
             .hero-section-new p {
-                font-size: 1.2rem;
+                font-size: 1rem;
             }
             .hero-section-new .hero-image-container-new img {
-                max-width: 200px; 
+                max-width: 180px; 
             }
             .section-title {
-                font-size: 2rem;
-                margin-top: 2rem;
+                font-size: 1.8rem;
+                margin-top: 1.5rem;
                 margin-bottom: 1.5rem;
             }
             .card .card-title {
@@ -258,14 +329,55 @@
     </style>
   </head>
   <body>
-    {% load static %} {# ¡Esta línea es crucial y debe estar aquí! #}
+    {% load static %} 
+
+    {# NAVEGACIÓN SUPERIOR PARA MÓVILES #}
+    <nav class="navbar navbar-expand-md navbar-dark navbar-mobile">
+        <div class="container-fluid">
+          <a class="navbar-brand" href="{% url 'index' %}">
+              <img src="{% static 'images/logo_yo_heladeria_blanco.png' %}" alt="Yo Heladerías Alto del Solar">
+          </a>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapseMobile">
+            <span class="navbar-toggler-icon"></span>
+          </button>
+          <div class="collapse navbar-collapse" id="navbarCollapseMobile">
+            <ul class="navbar-nav ms-auto mb-2 mb-md-0">
+              <li class="nav-item">
+                <a class="nav-link active" aria-current="page" href="{% url 'index' %}">
+                    <i class="bi bi-house-door-fill"></i> Inicio
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'ver_carrito' %}">
+                    <i class="bi bi-cart-fill"></i> Carrito
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="#">
+                    <i class="bi bi-person-fill"></i> Mi Cuenta
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="#">
+                    <i class="bi bi-star-fill"></i> Sorteos
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="#">
+                    <i class="bi bi-info-circle-fill"></i> Contacto
+                </a>
+              </li>
+            </ul>
+          </div>
+        </div>
+    </nav>
+
 
     <div class="page-wrapper">
-        {# BARRA LATERAL IZQUIERDA #}
-        <aside class="sidebar">
+        {# BARRA LATERAL IZQUIERDA (SOLO DESKTOP) #}
+        <aside class="sidebar-desktop">
             <div class="sidebar-logo">
                 <a href="{% url 'index' %}">
-                    {# LOGO BLANCO SOBRE FONDO AZUL OSCURO DE LA SIDEBAR #}
                     <img src="{% static 'images/logo_yo_heladeria_blanco.png' %}" alt="Yo Heladerías Alto del Solar">
                 </a>
             </div>
@@ -281,7 +393,6 @@
                             <i class="bi bi-cart-fill"></i> Carrito
                         </a>
                     </li>
-                    {# Futuras secciones como "Contacto", "Sorteos", "Mi Cuenta" #}
                     <li class="nav-item">
                         <a class="nav-link" href="#">
                             <i class="bi bi-person-fill"></i> Mi Cuenta
@@ -302,7 +413,7 @@
         </aside>
 
         {# CONTENIDO PRINCIPAL #}
-        <div class="main-content-wrapper">
+        <div class="main-content-wrapper main-content-wrapper-desktop"> {# Usamos wrapper desktop por defecto #}
             <div class="main-content">
                 {% if messages %}
                     <div class="messages mt-3">

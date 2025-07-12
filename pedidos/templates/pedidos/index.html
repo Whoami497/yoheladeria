@@ -2,15 +2,14 @@
 {% load static %}
 
 {% block content %}
-{# --- INICIO: SECCIÓN HERO - PEDIDOS A DOMICILIO (Ahora es lo primero y central) --- #}
-<section id="hero-domicilio" class="hero-section-new">
+{# --- INICIO: SECCIÓN HERO - PEDIDOS A DOMICILIO (Principal al cargar la página) --- #}
+<section id="hero-domicilio" class="hero-section-new mt-4"> 
     <div class="hero-content">
         <h1>El Mejor Helado Artesanal<br> de Catamarca</h1>
         <p>Disfruta el sabor inconfundible de Yo Heladerías en la comodidad de tu hogar.</p>
-        <a href="#nuestro-catalogo" class="btn btn-secondary btn-lg">¡Explorar Sabores!</a> {# Botón principal del Hero #}
+        <a href="#nuestro-catalogo" class="btn btn-secondary btn-lg">¡Explorar Sabores!</a> 
     </div>
     <div class="hero-image-container-new">
-        {# Usamos la imagen del repartidor en moto #}
         <img src="{% static 'images/helado_a_domicilio.jpg' %}" alt="Helado a Domicilio">
     </div>
 </section>
@@ -27,7 +26,10 @@
                 {% if producto.imagen %}
                     <img src="{% static producto.imagen %}" class="card-img-top" alt="{{ producto.nombre }}" style="height: 200px; object-fit: cover; border-radius: 15px 15px 0 0;">
                 {% else %}
-                    <img src="{% static 'images/placeholder_producto.jpg' %}" class="card-img-top" alt="Sin imagen" style="height: 200px; object-fit: cover; border-radius: 15px 15px 0 0;">
+                    {# Usamos la clase placeholder-image para el div #}
+                    <div class="card-img-top placeholder-image" style="height: 200px;"> 
+                        <span>Sin imagen</span>
+                    </div>
                 {% endif %}
                 <div class="card-body d-flex flex-column">
                     <h5 class="card-title">{{ producto.nombre }}</h5>

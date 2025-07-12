@@ -14,13 +14,12 @@ class Producto(models.Model):
     precio = models.DecimalField(max_digits=10, decimal_places=2)
     sabores_maximos = models.PositiveIntegerField(default=1)
     disponible = models.BooleanField(default=True)
-    # --- AÑADE ESTA LÍNEA ---
-    imagen = models.ImageField(upload_to='productos/', null=True, blank=True)
+    # --- ¡ESTA ES LA LÍNEA CRÍTICA CON EL CAMBIO! ---
+    imagen = models.CharField(max_length=255, blank=True, null=True, help_text="Ruta a la imagen estática del producto (ej: 'images/helado_vainilla.png')")
+    # -----------------------------------------------
 
     def __str__(self):
         return self.nombre
-
-# --- AGREGA ESTAS DOS NUEVAS CLASES DEBAJO ---
 
 class Pedido(models.Model):
     ESTADO_CHOICES = [
