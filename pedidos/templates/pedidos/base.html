@@ -1,93 +1,325 @@
-<!doctype html>
+<<!doctype html>
 <html lang="es">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Mi Heladería</title>
+    <title>Yo Heladerías</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
-    
-    {# Enlace a Bootstrap Icons para los íconos (como el carrito o los de agregar) #}
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 
     <style>
-        /* Estilos generales para el cuerpo */
+        /* Estilos generales del cuerpo */
         body { 
-            padding-top: 70px; /* Espacio para la barra de navegación fija */
+            padding-top: 0; /* No padding-top para navbar fija, la manejamos con el layout */
+            background-color: #1a1a1a; /* FONDO MUY OSCURO (casi negro) */
+            color: #e0e0e0; /* Color de texto base claro */
+            font-family: 'Arial', sans-serif; 
         }
 
-        /* Cambia el color de la barra de navegación */
-        .navbar.bg-dark {
-            background-color: #8A2BE2 !important; /* Reemplaza con el color de tu marca (Púrpura) */
+        /* Variables CSS para la Paleta de Colores AZUL y BLANCO de Yo Heladerías */
+        :root {
+            --color-principal-oscuro: #1a1a1a; /* Fondo principal de la página */
+            --color-secundario-oscuro: #2a2a2a; /* Fondo para elementos flotantes en oscuro */
+
+            --color-yo-azul: #073653;      /* AZUL OSCURO ESPECÍFICO (para fondo de main content) */
+            --color-yo-azul-claro: #007bff; /* Azul vibrante (para botones primarios) */
+            --color-yo-azul-oscuro-hover: #052a42; /* Hover para azul oscuro */
+            --color-yo-blanco: #ffffff;    /* Blanco puro */
+            --color-yo-fondo-claro: #f8f9fa; /* Fondo claro para tarjetas */
+            --color-yo-texto-oscuro: #343a40; /* Gris muy oscuro casi negro para textos en fondos claros */
+            --color-yo-gris-texto: #6c757d; /* Gris para textos secundarios en fondos claros */
+            --color-yo-gris-borde: #dee2e6; /* Gris muy claro para bordes */
+
+            --color-borde-resaltado: var(--color-yo-azul-claro); /* Borde para resaltar secciones */
+
+            --color-sombra-suave: rgba(0,0,0,0.2);
+            --color-sombra-media: rgba(0,0,0,0.3);
+            --color-sombra-fuerte: rgba(0,0,0,0.4);
         }
 
-        /* Cambia el color de los botones principales (btn-primary) */
-        .btn-primary {
-            background-color: #8A2BE2;
-            border-color: #8A2BE2;
+        /* LAYOUT PRINCIPAL */
+        .page-wrapper {
+            display: flex; 
+            min-height: 100vh; 
+            background-color: var(--color-principal-oscuro);
         }
 
-        .btn-primary:hover {
-            background-color: #7d26ca; /* Un tono un poco más oscuro para el hover */
-            border-color: #7d26ca;
+        /* BARRA LATERAL IZQUIERDA */
+        .sidebar {
+            width: 250px; 
+            background-color: var(--color-secundario-oscuro); 
+            box-shadow: 2px 0 10px var(--color-sombra-suave);
+            padding-top: 20px; 
+            position: fixed; 
+            height: 100%; 
+            overflow-y: auto; 
+            border-right: 1px solid rgba(255,255,255,0.05); 
+        }
+        .sidebar-logo {
+            text-align: center;
+            padding: 0 15px 20px;
+        }
+        .sidebar-logo img {
+            max-width: 100%; /* El logo no excederá el ancho del contenedor */
+            height: auto; /* La altura se ajustará proporcionalmente */
+            max-height: 120px; /* Ajuste para que el logo sea más grande */
+            display: block; 
+            margin: 0 auto; 
+            object-fit: contain; /* Asegura que la imagen completa sea visible */
+        }
+        .sidebar-nav .nav-item {
+            margin-bottom: 5px;
+        }
+        .sidebar-nav .nav-link {
+            color: var(--color-yo-blanco);
+            padding: 15px 20px;
+            font-size: 1.1rem;
+            font-weight: 500;
+            transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
+            display: flex; 
+            align-items: center;
+            border-radius: 8px;
+            margin: 0 10px; 
+        }
+        .sidebar-nav .nav-link i {
+            margin-right: 10px;
+            font-size: 1.3rem;
+        }
+        .sidebar-nav .nav-link:hover,
+        .sidebar-nav .nav-link.active { 
+            background-color: var(--color-yo-azul-claro); 
+            color: var(--color-yo-blanco) !important;
+            box-shadow: 0 2px 5px var(--color-sombra-suave);
         }
 
-        /* Estilo para los botones de éxito (btn-success) */
-        .btn-success {
-            background-color: #28a745; /* Verde Bootstrap por defecto */
-            border-color: #28a745;
+        /* CONTENIDO PRINCIPAL */
+        .main-content-wrapper {
+            margin-left: 250px; /* Deja espacio para la sidebar */
+            flex-grow: 1; 
+            padding: 20px; 
+            background-color: var(--color-principal-oscuro); 
         }
-        .btn-success:hover {
-            background-color: #218838;
-            border-color: #1e7e34;
+        .main-content {
+            background-color: var(--color-yo-blanco); 
+            border-radius: 15px; 
+            padding: 30px;
+            box-shadow: 0 5px 20px var(--color-sombra-media);
+            min-height: calc(100vh - 40px); 
+            color: var(--color-yo-texto-oscuro); 
         }
 
-        /* Estilo para los botones de alerta/peligro (btn-danger) */
-        .btn-danger {
-            background-color: #dc3545; /* Rojo Bootstrap por defecto */
-            border-color: #dc3545;
+        /* Mensajes de Django (Alertas) - Ahora dentro del main-content */
+        .messages {
+            margin-top: 0; 
+            margin-bottom: 20px;
         }
-        .btn-danger:hover {
-            background-color: #c82333;
-            border-color: #bd2130;
+        .alert {
+            border-radius: 10px;
+            font-weight: 500;
+            padding: 1.2rem 1.5rem; 
+        }
+        .alert-success { background-color: #d1ecf1; border-color: #bee5eb; color: var(--color-yo-azul); } 
+        .alert-info { background-color: #e0f7fa; border-color: #b2ebf2; color: var(--color-yo-azul); } 
+        .alert-warning { background-color: #ffecb3; border-color: #ffe082; color: #cc9900; } 
+        .alert-danger { background-color: #ffcdd2; border-color: #ef9a9a; color: #d32f2f; } 
+
+        /* Títulos de sección (dentro del main-content) */
+        .section-title {
+            color: var(--color-yo-azul); 
+            font-size: 2.5rem; 
+            font-weight: bold;
+            margin-top: 2rem; 
+            margin-bottom: 2rem; 
+            text-align: center;
+            line-height: 1.2;
+        }
+
+        /* Botones, tarjetas, etc. usarán las mismas variables de color que ya definimos */
+        /* Hero Section (nueva clase para el banner principal) */
+        .hero-section-new {
+            background-color: var(--color-yo-azul); 
+            color: var(--color-yo-blanco);
+            padding: 4rem 2rem; 
+            border-radius: 15px; 
+            box-shadow: 0 5px 15px var(--color-sombra-media);
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .hero-section-new h1 {
+            font-size: 3rem;
+            font-weight: 900;
+            margin-bottom: 0.8rem;
+            line-height: 1.2;
+        }
+        .hero-section-new p {
+            font-size: 1.3rem;
+            margin-bottom: 1.5rem;
+            max-width: 600px;
+        }
+        .hero-section-new .btn {
+            font-size: 1.1rem;
+            padding: 0.6rem 1.5rem;
+        }
+        .hero-section-new .hero-image-container-new {
+            margin-top: 2rem;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .hero-section-new .hero-image-container-new img {
+            max-width: 300px; 
+            height: auto;
+            object-fit: contain;
+            border-radius: 10px; 
+            box-shadow: 0 5px 10px var(--color-sombra-suave);
+        }
+
+        /* Media Queries para Responsive Design */
+        @media (max-width: 992px) { 
+            .sidebar {
+                width: 100%; 
+                height: auto; 
+                position: relative; 
+                box-shadow: none; 
+                border-right: none;
+                padding-top: 10px;
+                padding-bottom: 10px;
+                border-bottom: 1px solid rgba(255,255,255,0.05); 
+                display: flex; /* Para que los elementos se centren en móvil */
+                flex-direction: column;
+                align-items: center;
+            }
+            .sidebar-logo {
+                padding-bottom: 10px; /* Menos espacio debajo del logo en móvil */
+            }
+            .sidebar-logo img {
+                max-height: 70px; /* Logo más grande en móvil (sidebar) */
+            }
+            .sidebar-nav {
+                width: 100%;
+                display: flex; 
+                justify-content: space-around; 
+                padding: 0 10px;
+            }
+            .sidebar-nav .nav-item {
+                margin-bottom: 0; /* Resetear margin */
+                width: 30%; /* Ejemplo: 3 elementos por fila */
+            }
+            .sidebar-nav .nav-link {
+                padding: 8px 10px; 
+                margin: 0 2px;
+                flex-direction: column; 
+                font-size: 0.8rem; 
+                text-align: center;
+            }
+            .sidebar-nav .nav-link i {
+                margin-right: 0;
+                margin-bottom: 3px;
+                font-size: 1rem;
+            }
+
+            .main-content-wrapper {
+                margin-left: 0; 
+                padding: 15px;
+            }
+            .main-content {
+                padding: 20px;
+                min-height: auto; 
+            }
+            .hero-section-new h1 {
+                font-size: 2.5rem;
+            }
+            .hero-section-new p {
+                font-size: 1.2rem;
+            }
+            .hero-section-new .hero-image-container-new img {
+                max-width: 200px; 
+            }
+            .section-title {
+                font-size: 2rem;
+                margin-top: 2rem;
+                margin-bottom: 1.5rem;
+            }
+            .card .card-title {
+                font-size: 1.1rem;
+            }
+            .card .card-text.text-muted {
+                font-size: 0.85rem;
+            }
+            .btn-primary, .btn-secondary, .btn-success {
+                font-size: 0.9rem;
+                padding: 0.5rem 1rem;
+            }
         }
     </style>
   </head>
   <body>
-    <nav class="navbar navbar-expand-md navbar-dark fixed-top bg-dark">
-        <div class="container-fluid">
-          <a class="navbar-brand" href="{% url 'index' %}">🍦 Yo Heladerias Alto del Solar</a>
-          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse">
-            <span class="navbar-toggler-icon"></span>
-          </button>
-          <div class="collapse navbar-collapse" id="navbarCollapse">
-            <ul class="navbar-nav ms-auto mb-2 mb-md-0">
-              <li class="nav-item">
-                <a class="nav-link active" href="{% url 'ver_carrito' %}">
-                    <i class="bi bi-cart"></i> Ver Carrito {# Añadido el icono de carrito #}
+    {% load static %} {# ¡Esta línea es crucial y debe estar aquí! #}
+
+    <div class="page-wrapper">
+        {# BARRA LATERAL IZQUIERDA #}
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <a href="{% url 'index' %}">
+                    {# LOGO BLANCO SOBRE FONDO AZUL OSCURO DE LA SIDEBAR #}
+                    <img src="{% static 'images/logo_yo_heladeria_blanco.png' %}" alt="Yo Heladerías Alto del Solar">
                 </a>
-              </li>
-            </ul>
-          </div>
-        </div>
-    </nav>
-
-    <main class="container">
-        {# INICIO DEL BLOQUE PARA MOSTRAR MENSAJES #}
-        {% if messages %}
-            <div class="messages mt-3">
-                {% for message in messages %}
-                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                    {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                </div>
-                {% endfor %}
             </div>
-        {% endif %}
-        {# FIN DEL BLOQUE PARA MOSTRAR MENSAJES #}
+            <nav class="sidebar-nav">
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a class="nav-link active" aria-current="page" href="{% url 'index' %}">
+                            <i class="bi bi-house-door-fill"></i> Inicio
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'ver_carrito' %}">
+                            <i class="bi bi-cart-fill"></i> Carrito
+                        </a>
+                    </li>
+                    {# Futuras secciones como "Contacto", "Sorteos", "Mi Cuenta" #}
+                    <li class="nav-item">
+                        <a class="nav-link" href="#">
+                            <i class="bi bi-person-fill"></i> Mi Cuenta
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#">
+                            <i class="bi bi-star-fill"></i> Sorteos
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#">
+                            <i class="bi bi-info-circle-fill"></i> Contacto
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+        </aside>
 
-        {% block content %}
-        {% endblock %}
-    </main>
+        {# CONTENIDO PRINCIPAL #}
+        <div class="main-content-wrapper">
+            <div class="main-content">
+                {% if messages %}
+                    <div class="messages mt-3">
+                        {% for message in messages %}
+                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+
+                {% block content %}
+                {% endblock %}
+            </div>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
   </body>

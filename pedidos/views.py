@@ -11,14 +11,14 @@ def index(request):
 def detalle_producto(request, producto_id):
     producto = get_object_or_404(Producto, id=producto_id)
     sabores_disponibles = Sabor.objects.filter(disponible=True).order_by('nombre')
-    
+
     if request.method == 'POST':
         # Primero, obtenemos todos los IDs de sabores seleccionados, incluyendo los vacíos
         sabores_seleccionados_ids_raw = request.POST.getlist('sabores')
-        
+
         # Filtramos para quedarnos solo con los IDs que no estén vacíos
         sabores_seleccionados_ids = [s_id for s_id in sabores_seleccionados_ids_raw if s_id]
-        
+
         # Obtenemos la cantidad de sabores que el usuario seleccionó en el dropdown "Cantidad de Sabores"
         cantidad_sabores_seleccionada_en_form = int(request.POST.get('cantidad_sabores', 0))
 
@@ -33,7 +33,7 @@ def detalle_producto(request, producto_id):
                     'range_sabores': range(1, producto.sabores_maximos + 1)
                 }
                 return render(request, 'pedidos/detalle_producto.html', contexto)
-            
+
             # Validar que no exceda el máximo permitido por el producto (aunque el JS debería limitar esto)
             if len(sabores_seleccionados_ids) > producto.sabores_maximos:
                 messages.error(request, f'No puedes seleccionar más de {producto.sabores_maximos} sabor(es) para este producto.')
@@ -43,7 +43,7 @@ def detalle_producto(request, producto_id):
                     'range_sabores': range(1, producto.sabores_maximos + 1)
                 }
                 return render(request, 'pedidos/detalle_producto.html', contexto)
-        
+
         # Si el producto NO permite sabores (sabores_maximos == 0),
         # nos aseguramos de que la lista de IDs de sabores esté vacía, ignorando cualquier envío inesperado.
         if producto.sabores_maximos == 0 and sabores_seleccionados_ids:
@@ -72,7 +72,7 @@ def detalle_producto(request, producto_id):
             'cantidad': 1, # Cantidad inicial del ítem
             'sabores_maximos': producto.sabores_maximos # Para futuras referencias en el carrito
         }
-        
+
         # Si el ítem ya existe en el carrito (misma clave), incrementamos la cantidad
         if item_key in request.session['carrito']:
             request.session['carrito'][item_key]['cantidad'] += 1
@@ -82,14 +82,14 @@ def detalle_producto(request, producto_id):
             messages.success(request, f'"{producto.nombre}" ha sido añadido al carrito.') 
 
         request.session.modified = True # ¡Fundamental para que Django guarde los cambios en la sesión!
-        
+
         return redirect('index') # Redirigimos a la página principal después de añadir
 
     # Para solicitudes GET (cuando la página de detalle se carga por primera vez)
     range_sabores = []
     if producto.sabores_maximos > 0:
         range_sabores = range(1, producto.sabores_maximos + 1) # Genera una lista de números de 1 a 'sabores_maximos'
-        
+
     contexto = {
         'producto': producto,
         'sabores': sabores_disponibles,
@@ -99,7 +99,7 @@ def detalle_producto(request, producto_id):
 
 def ver_carrito(request):
     carrito = request.session.get('carrito', {}) # Obtiene el carrito de la sesión (diccionario vacío si no existe)
-    
+
     total = Decimal('0.00')
     items_carrito_procesados = []
 
@@ -110,7 +110,7 @@ def ver_carrito(request):
             item_cantidad = item.get('cantidad', 1) 
             item_subtotal = item_precio * item_cantidad
             total += item_subtotal
-            
+
             items_carrito_procesados.append({
                 'key': key, # Clave del ítem en la sesión (útil para eliminar)
                 'producto_id': item['producto_id'], 
@@ -153,7 +153,7 @@ def ver_carrito(request):
             cliente_direccion=direccion,
             cliente_telefono=telefono
         )
-        
+
         # Iteramos sobre los ítems del carrito para crear los DetallePedido asociados
         for key, item_data in carrito.items(): 
             try:
@@ -165,8 +165,8 @@ def ver_carrito(request):
                     pedido=nuevo_pedido,
                     producto=producto,
                 )
-                detalle.sabores.set(sabores_seleccionados) # Asignamos los sabores a este detalle de pedido
-                
+                detalle.sabores.set(sabores_seleccionados) 
+
             except Producto.DoesNotExist:
                 messages.warning(request, f"Advertencia: Un producto con ID {item_data['producto_id']} no pudo ser añadido al pedido porque no existe.") 
                 continue
