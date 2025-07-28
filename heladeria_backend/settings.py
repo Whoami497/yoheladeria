@@ -27,8 +27,15 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-tu-clave-secreta-loca
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '127.0.0.1').split(',')
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '127.0.0.1,yoheladeria.onrender.com').split(',')
+# ... (otras configuraciones) ...
 
+# --- INICIO: NUEVAS LÍNEAS PARA CSRF_TRUSTED_ORIGINS ---
+# Esto es crucial para despliegues donde el dominio no es localhost
+CSRF_TRUSTED_ORIGINS = [
+    'https://yoheladeria.onrender.com', # <-- Añade la URL completa de tu dominio en Render
+    # Si usas algún subdominio personalizado en el futuro, también deberás añadirlo aquí.
+]
 
 # Application definition
 
