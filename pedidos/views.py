@@ -1,189 +1,308 @@
+# pedidos/views.py
+
 from django.shortcuts import render, redirect, get_object_or_404
-from .models import Producto, Sabor, Pedido, DetallePedido
+from django.contrib.auth import login, logout # Importaciones para autenticación
+from django.contrib.auth.decorators import login_required # Decorador para vistas protegidas
+from django.db import transaction # Para asegurar que las operaciones de canje sean atómicas
+from django.core.exceptions import ObjectDoesNotExist # Para manejar objetos no encontrados
+
+from .forms import ClienteRegisterForm, ClienteProfileForm # Importamos nuestros formularios personalizados
+from .models import Producto, Sabor, Pedido, DetallePedido, Categoria, OpcionProducto, ClienteProfile, ProductoCanje
 from decimal import Decimal
-from django.contrib import messages # Importación necesaria para el sistema de mensajes
+from django.contrib import messages
+
+# --- NUEVAS IMPORTACIONES PARA CHANNELS ---
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+import json
+# --- FIN: NUEVAS IMPORTACIONES PARA CHANNELS ---
+
 
 def index(request):
-    productos = Producto.objects.filter(disponible=True)
-    contexto = {'productos': productos}
+    productos = Producto.objects.filter(disponible=True).order_by('nombre')
+    categorias = Categoria.objects.filter(disponible=True).order_by('orden')
+    
+    contexto = {
+        'productos': productos,
+        'categorias': categorias,
+    }
     return render(request, 'pedidos/index.html', contexto)
 
 def detalle_producto(request, producto_id):
     producto = get_object_or_404(Producto, id=producto_id)
     sabores_disponibles = Sabor.objects.filter(disponible=True).order_by('nombre')
+    
+    opciones_disponibles = None
+    if producto.opciones.exists():
+        opciones_disponibles = OpcionProducto.objects.filter(producto_base=producto, disponible=True)
 
     if request.method == 'POST':
-        # Primero, obtenemos todos los IDs de sabores seleccionados, incluyendo los vacíos
         sabores_seleccionados_ids_raw = request.POST.getlist('sabores')
-
-        # Filtramos para quedarnos solo con los IDs que no estén vacíos
         sabores_seleccionados_ids = [s_id for s_id in sabores_seleccionados_ids_raw if s_id]
-
-        # Obtenemos la cantidad de sabores que el usuario seleccionó en el dropdown "Cantidad de Sabores"
-        cantidad_sabores_seleccionada_en_form = int(request.POST.get('cantidad_sabores', 0))
+        
+        opcion_id = request.POST.get('opcion_id')
+        opcion_seleccionada_obj = None
+        if producto.opciones.exists() and opcion_id:
+            opcion_seleccionada_obj = get_object_or_404(OpcionProducto, id=opcion_id, producto_base=producto)
+            
+        if producto.opciones.exists() and not opcion_seleccionada_obj:
+            messages.error(request, 'Por favor, selecciona una opción para este producto.')
+            contexto = {
+                'producto': producto,
+                'sabores': sabores_disponibles,
+                'opciones': opciones_disponibles,
+                'range_sabores': range(1, producto.sabores_maximos + 1) if producto.sabores_maximos > 0 else []
+            }
+            return render(request, 'pedidos/detalle_producto.html', contexto)
 
         # --- Validaciones de Sabores ---
-        if producto.sabores_maximos > 0: # Si el producto permite selección de sabores
-            # Validar que el número de sabores seleccionados (limpios) coincida con el número elegido en el dropdown
+        if producto.sabores_maximos > 0:
+            cantidad_sabores_seleccionada_en_form = int(request.POST.get('cantidad_sabores', 0))
+
             if len(sabores_seleccionados_ids) != cantidad_sabores_seleccionada_en_form:
                 messages.error(request, f'Por favor, selecciona {cantidad_sabores_seleccionada_en_form} sabor(es) o ajusta la cantidad de sabores a seleccionar.')
                 contexto = {
                     'producto': producto,
                     'sabores': sabores_disponibles,
-                    'range_sabores': range(1, producto.sabores_maximos + 1)
+                    'opciones': opciones_disponibles,
+                    'range_sabores': range(1, producto.sabores_maximos + 1) if producto.sabores_maximos > 0 else []
                 }
                 return render(request, 'pedidos/detalle_producto.html', contexto)
-
-            # Validar que no exceda el máximo permitido por el producto (aunque el JS debería limitar esto)
+            
             if len(sabores_seleccionados_ids) > producto.sabores_maximos:
                 messages.error(request, f'No puedes seleccionar más de {producto.sabores_maximos} sabor(es) para este producto.')
                 contexto = {
                     'producto': producto,
                     'sabores': sabores_disponibles,
-                    'range_sabores': range(1, producto.sabores_maximos + 1)
+                    'opciones': opciones_disponibles,
+                    'range_sabores': range(1, producto.sabores_maximos + 1) if producto.sabores_maximos > 0 else []
                 }
                 return render(request, 'pedidos/detalle_producto.html', contexto)
-
-        # Si el producto NO permite sabores (sabores_maximos == 0),
-        # nos aseguramos de que la lista de IDs de sabores esté vacía, ignorando cualquier envío inesperado.
+            
         if producto.sabores_maximos == 0 and sabores_seleccionados_ids:
-            sabores_seleccionados_ids = [] 
+            sabores_seleccionados_ids = []
 
         # --- Lógica de Carrito ---
         if 'carrito' not in request.session:
             request.session['carrito'] = {}
 
+        # --- INICIO: Leer la cantidad del input ---
+        try:
+            cantidad_a_agregar = int(request.POST.get('cantidad_item', 1))
+            if cantidad_a_agregar < 1:
+                cantidad_a_agregar = 1
+        except ValueError:
+            cantidad_a_agregar = 1
+        # --- FIN: Leer la cantidad del input ---
+
         sabores_nombres = []
-        if sabores_seleccionados_ids: # Si hay IDs de sabores válidos para procesar
+        if sabores_seleccionados_ids:
             sabores_objetos = Sabor.objects.filter(id__in=sabores_seleccionados_ids)
             sabores_nombres = [sabor.nombre for sabor in sabores_objetos]
-            sabores_nombres.sort() # Para consistencia en la visualización
+            sabores_nombres.sort()
 
-        # La clave del ítem en el carrito se construye con el ID del producto y los IDs de los sabores (ordenados)
-        item_key = f"{producto.id}_" + "_".join(sorted(sabores_seleccionados_ids))
+        # Ajustar precio y nombre si hay opción seleccionada
+        precio_final_item = producto.precio
+        nombre_item_carrito = producto.nombre
+        opcion_id_para_carrito = None
+        opcion_nombre_para_carrito = None
+        opcion_imagen_para_carrito = None
 
-        # Creamos el diccionario que representa el ítem del carrito
+        if opcion_seleccionada_obj:
+            precio_final_item += opcion_seleccionada_obj.precio_adicional
+            nombre_item_carrito = f"{producto.nombre} - {opcion_seleccionada_obj.nombre_opcion}"
+            opcion_id_para_carrito = opcion_seleccionada_obj.id
+            opcion_nombre_para_carrito = opcion_seleccionada_obj.nombre_opcion
+            opcion_imagen_para_carrito = opcion_seleccionada_obj.imagen_opcion if opcion_seleccionada_obj.imagen_opcion else producto.imagen
+
+
+        item_key = f"{producto.id}_"
+        if opcion_id_para_carrito:
+            item_key += f"opcion-{opcion_id_para_carrito}_"
+        item_key += "_".join(sorted(sabores_seleccionados_ids))
+
+
         item = {
             'producto_id': producto.id,
-            'producto_nombre': producto.nombre,
-            'precio': str(producto.precio), # Se guarda como string para evitar problemas de serialización
+            'producto_nombre': nombre_item_carrito,
+            'precio': str(precio_final_item),
             'sabores_ids': sabores_seleccionados_ids,
             'sabores_nombres': sabores_nombres,
-            'cantidad': 1, # Cantidad inicial del ítem
-            'sabores_maximos': producto.sabores_maximos # Para futuras referencias en el carrito
+            'cantidad': cantidad_a_agregar,
+            'sabores_maximos': producto.sabores_maximos,
+            'opcion_id': opcion_id_para_carrito,
+            'opcion_nombre': opcion_nombre_para_carrito,
+            'imagen_mostrada': opcion_imagen_para_carrito if opcion_imagen_para_carrito else producto.imagen,
         }
-
-        # Si el ítem ya existe en el carrito (misma clave), incrementamos la cantidad
+        
         if item_key in request.session['carrito']:
-            request.session['carrito'][item_key]['cantidad'] += 1
-            messages.info(request, f'Se ha añadido otra unidad de "{producto.nombre}" al carrito.') 
-        else: # Si es un ítem nuevo, lo añadimos al carrito
+            request.session['carrito'][item_key]['cantidad'] += cantidad_a_agregar
+            messages.info(request, f'Se han añadido {cantidad_a_agregar} unidades más de "{nombre_item_carrito}" al carrito.')
+        else:
             request.session['carrito'][item_key] = item
-            messages.success(request, f'"{producto.nombre}" ha sido añadido al carrito.') 
+            messages.success(request, f'"{nombre_item_carrito}" ha sido añadido al carrito ({cantidad_a_agregar} unidad{"es" if cantidad_a_agregar > 1 else ""}).')
 
-        request.session.modified = True # ¡Fundamental para que Django guarde los cambios en la sesión!
+        request.session.modified = True
+        
+        return redirect('detalle_producto', producto_id=producto.id)
 
-        return redirect('index') # Redirigimos a la página principal después de añadir
-
-    # Para solicitudes GET (cuando la página de detalle se carga por primera vez)
     range_sabores = []
     if producto.sabores_maximos > 0:
-        range_sabores = range(1, producto.sabores_maximos + 1) # Genera una lista de números de 1 a 'sabores_maximos'
-
+        range_sabores = range(1, producto.sabores_maximos + 1)
+        
     contexto = {
         'producto': producto,
         'sabores': sabores_disponibles,
+        'opciones': opciones_disponibles,
         'range_sabores': range_sabores,
     }
     return render(request, 'pedidos/detalle_producto.html', contexto)
 
-def ver_carrito(request):
-    carrito = request.session.get('carrito', {}) # Obtiene el carrito de la sesión (diccionario vacío si no existe)
 
+def ver_carrito(request):
+    carrito = request.session.get('carrito', {})
+    
     total = Decimal('0.00')
     items_carrito_procesados = []
 
-    # Iteramos sobre los ítems del carrito para calcular totales y prepararlos para el template
     for key, item in carrito.items():
         try:
-            item_precio = Decimal(item.get('precio', '0.00')) 
-            item_cantidad = item.get('cantidad', 1) 
+            item_precio = Decimal(item.get('precio', '0.00'))
+            item_cantidad = item.get('cantidad', 1)
             item_subtotal = item_precio * item_cantidad
             total += item_subtotal
-
+            
             items_carrito_procesados.append({
-                'key': key, # Clave del ítem en la sesión (útil para eliminar)
-                'producto_id': item['producto_id'], 
-                'producto_nombre': item['producto_nombre'], 
-                'precio_unidad': item_precio, 
-                'cantidad': item_cantidad, 
-                'sabores_nombres': item.get('sabores_nombres', []), 
-                'sabores_maximos': item.get('sabores_maximos', 0), 
-                'subtotal': item_subtotal 
+                'key': key,
+                'producto_id': item['producto_id'],
+                'producto_nombre': item['producto_nombre'],
+                'precio_unidad': item_precio,
+                'cantidad': item_cantidad,
+                'sabores_nombres': item.get('sabores_nombres', []),
+                'sabores_maximos': item.get('sabores_maximos', 0),
+                'opcion_id': item.get('opcion_id'),
+                'opcion_nombre': item.get('opcion_nombre'),
+                'imagen_mostrada': item.get('imagen_mostrada'),
+                'subtotal': item_subtotal
             })
         except Exception as e:
             print(f"Error procesando ítem en carrito: {e} - Item: {item}")
-            messages.warning(request, "Hubo un problema con uno de los ítems en tu carrito y fue omitido.") 
+            messages.warning(request, "Hubo un problema con uno de los ítems en tu carrito y fue omitido.")
             continue
 
     if request.method == 'POST':
-        # Obtenemos los datos del formulario de envío
         nombre = request.POST.get('cliente_nombre')
         direccion = request.POST.get('cliente_direccion')
         telefono = request.POST.get('cliente_telefono')
+        metodo_pago = request.POST.get('metodo_pago')
 
-        # Validaciones básicas del formulario
-        if not nombre or not direccion: 
-            messages.error(request, 'Por favor, completa los campos Nombre y Dirección para finalizar el pedido.') 
-            contexto = { # Retornamos el contexto con los ítems del carrito y el total para que el usuario no pierda lo que ya tenía
-                'carrito_items': items_carrito_procesados,
-                'total': total,
-            }
-            return render(request, 'pedidos/carrito.html', contexto)
+        # --- INICIO: Asignar user al Pedido y método de pago ---
+        pedido_kwargs = {
+            'cliente_nombre': nombre,
+            'cliente_direccion': direccion,
+            'cliente_telefono': telefono,
+            'metodo_pago': metodo_pago
+        }
+        if request.user.is_authenticated:
+            pedido_kwargs['user'] = request.user
+            if hasattr(request.user, 'clienteprofile'):
+                profile = request.user.clienteprofile
+                if not nombre and profile.first_name and profile.last_name:
+                    pedido_kwargs['cliente_nombre'] = f"{profile.first_name} {profile.last_name}"
+                if not direccion and profile.direccion:
+                    pedido_kwargs['cliente_direccion'] = profile.direccion
+                if not telefono and profile.telefono:
+                    pedido_kwargs['cliente_telefono'] = profile.telefono
 
-        # Validar que el carrito no esté vacío al intentar finalizar el pedido
-        if not items_carrito_procesados: 
-            messages.error(request, 'No puedes finalizar un pedido con el carrito vacío.') 
-            return redirect('ver_carrito')
+        nuevo_pedido = Pedido.objects.create(**pedido_kwargs)
+        # --- FIN: Asignar user al Pedido y método de pago ---
+        
+        # --- INICIO: Ajuste en la creación de DetallePedido para la cantidad y suma de puntos ---
+        puntos_ganados = 0
+        total_del_pedido_para_puntos = Decimal('0.00')
 
+        detalles_para_notificacion = [] # Lista para almacenar los detalles del pedido para la notificación
 
-        # Creamos el nuevo objeto Pedido en la base de datos
-        nuevo_pedido = Pedido.objects.create(
-            cliente_nombre=nombre,
-            cliente_direccion=direccion,
-            cliente_telefono=telefono
-        )
-
-        # Iteramos sobre los ítems del carrito para crear los DetallePedido asociados
-        for key, item_data in carrito.items(): 
+        for key, item_data in carrito.items():
             try:
                 producto = Producto.objects.get(id=item_data['producto_id'])
-                sabores_seleccionados_ids = item_data.get('sabores_ids', []) 
+                sabores_seleccionados_ids = item_data.get('sabores_ids', [])
                 sabores_seleccionados = Sabor.objects.filter(id__in=sabores_seleccionados_ids)
+                
+                opcion_obj_pedido = None
+                if item_data.get('opcion_id'):
+                    opcion_obj_pedido = OpcionProducto.objects.get(id=item_data['opcion_id'])
 
                 detalle = DetallePedido.objects.create(
                     pedido=nuevo_pedido,
                     producto=producto,
+                    opcion_seleccionada=opcion_obj_pedido,
+                    cantidad=item_data['cantidad'],
                 )
-                detalle.sabores.set(sabores_seleccionados) 
+                detalle.sabores.set(sabores_seleccionados)
+
+                precio_unitario_item = Decimal(item_data['precio'])
+                total_del_pedido_para_puntos += precio_unitario_item * item_data['cantidad']
+                
+                # Añadir detalles para la notificación
+                detalles_para_notificacion.append({
+                    'producto_nombre': producto.nombre,
+                    'opcion_nombre': opcion_obj_pedido.nombre_opcion if opcion_obj_pedido else None,
+                    'cantidad': item_data['cantidad'],
+                    'sabores_nombres': [s.nombre for s in sabores_seleccionados],
+                })
 
             except Producto.DoesNotExist:
-                messages.warning(request, f"Advertencia: Un producto con ID {item_data['producto_id']} no pudo ser añadido al pedido porque no existe.") 
+                messages.warning(request, f"Advertencia: Un producto con ID {item_data['producto_id']} no pudo ser añadido al pedido porque no existe.")
+                continue
+            except OpcionProducto.DoesNotExist:
+                messages.warning(request, f"Advertencia: La opción de producto con ID {item_data['opcion_id']} no pudo ser añadida al pedido porque no existe.")
                 continue
             except Exception as e:
-                messages.error(request, f"Error al procesar el detalle del pedido para {item_data.get('producto_nombre', 'un producto')}: {e}") 
+                messages.error(request, f"Error al procesar el detalle del pedido para {item_data.get('producto_nombre', 'un producto')}: {e}")
                 continue
 
-        del request.session['carrito'] # Vaciamos el carrito de la sesión después de crear el pedido
-        request.session.modified = True # Fundamental para guardar el cambio de la sesión
+        if request.user.is_authenticated:
+            puntos_ganados = int(total_del_pedido_para_puntos / Decimal('500')) * 100
+            request.user.clienteprofile.puntos_fidelidad += puntos_ganados
+            request.user.clienteprofile.save()
+            messages.success(request, f"¡Has ganado {puntos_ganados} puntos de fidelidad con este pedido!")
 
-        messages.success(request, f'¡Tu pedido #{nuevo_pedido.id} ha sido realizado con éxito! Pronto nos contactaremos.') 
+        # --- INICIO: LÓGICA DE ENVÍO DE NOTIFICACIÓN A CHANNELS (CON DEBUGGING) ---
+        try:
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                'pedidos_new_orders',
+                {
+                    'type': 'send_order_notification',
+                    'message': f'¡Nuevo pedido #{nuevo_pedido.id} recibido!',
+                    'order_id': nuevo_pedido.id,
+                    'order_data': {
+                        'cliente_nombre': nuevo_pedido.cliente_nombre,
+                        'cliente_direccion': nuevo_pedido.cliente_direccion,
+                        'cliente_telefono': nuevo_pedido.cliente_telefono,
+                        'metodo_pago': nuevo_pedido.metodo_pago,
+                        'total_pedido': str(nuevo_pedido.total_pedido), # <-- ¡Cambiado aquí!
+                        'detalles': detalles_para_notificacion,
+                    }
+                }
+            )
+            print(f"Notificación de pedido #{nuevo_pedido.id} enviada a Channels.")
+        except Exception as e:
+            print(f"ERROR al enviar notificación de pedido a Channels: {e}")
+            messages.error(request, f"ERROR INTERNO: No se pudo enviar la alerta en tiempo real. Contacta a soporte. Error: {e}")
+        # --- FIN: LÓGICA DE ENVÍO DE NOTIFICACIÓN A CHANNELS ---
+
+
+        del request.session['carrito']
+        request.session.modified = True
+        
+        messages.success(request, f'¡Tu pedido #{nuevo_pedido.id} ha sido realizado con éxito! Pronto nos contactaremos.')
 
         return redirect('pedido_exitoso')
 
-    # Para solicitudes GET
     contexto = {
-        'carrito_items': items_carrito_procesados, 
+        'carrito_items': items_carrito_procesados,
         'total': total,
     }
     return render(request, 'pedidos/carrito.html', contexto)
@@ -195,10 +314,173 @@ def eliminar_del_carrito(request, item_key):
             nombre_producto_eliminado = carrito[item_key]['producto_nombre']
             del carrito[item_key]
             request.session.modified = True
-            messages.info(request, f'"{nombre_producto_eliminado}" ha sido eliminado de tu carrito.') 
+            messages.info(request, f'"{nombre_producto_eliminado}" ha sido eliminado de tu carrito.')
         else:
-            messages.warning(request, 'El producto que intentaste eliminar ya no está en tu carrito.') 
+            messages.warning(request, 'El producto que intentaste eliminar ya no está en tu carrito.')
     return redirect('ver_carrito')
+
+def productos_por_categoria(request, categoria_id):
+    """
+    Vista para mostrar productos filtrados por una categoría específica.
+    """
+    categoria = get_object_or_404(Categoria, pk=categoria_id)
+    productos = Producto.objects.filter(categoria=categoria, disponible=True).order_by('nombre')
+    
+    contexto = {
+        'categoria_seleccionada': categoria,
+        'productos': productos,
+        'categorias': Categoria.objects.filter(disponible=True).order_by('orden'),
+    }
+    return render(request, 'pedidos/productos_por_categoria.html', contexto)
 
 def pedido_exitoso(request):
     return render(request, 'pedidos/pedido_exitoso.html')
+
+# --- Vistas para Autenticación y Perfil de Cliente ---
+
+def register_cliente(request):
+    if request.user.is_authenticated:
+        messages.info(request, "Ya has iniciado sesión.")
+        return redirect('index')
+
+    if request.method == 'POST':
+        form = ClienteRegisterForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            login(request, user)
+            messages.success(request, f"¡Bienvenido, {user.username}! Tu cuenta ha sido creada y has iniciado sesión.")
+            return redirect('index')
+        else:
+            for field, errors in form.errors.items():
+                for error in errors:
+                    messages.error(request, f"Error en {field}: {error}")
+            for error in form.non_field_errors():
+                messages.error(request, error)
+    else:
+        form = ClienteRegisterForm()
+
+    contexto = {'form': form}
+    return render(request, 'pedidos/register.html', contexto)
+
+
+@login_required
+def perfil_cliente(request):
+    user = request.user
+    cliente_profile, created = ClienteProfile.objects.get_or_create(user=user)
+
+    if request.method == 'POST':
+        form = ClienteProfileForm(request.POST, instance=cliente_profile)
+        if form.is_valid():
+            user.first_name = form.cleaned_data['first_name']
+            user.last_name = form.cleaned_data['last_name']
+            user.email = form.cleaned_data['email']
+            user.save()
+
+            form.save()
+
+            messages.success(request, "¡Tu perfil ha sido actualizado con éxito!")
+            return redirect('perfil_cliente')
+        else:
+            for field, errors in form.errors.items():
+                for error in errors:
+                    messages.error(request, f"Error en {field}: {error}")
+            for error in form.non_field_errors():
+                messages.error(request, error)
+    else:
+        form = ClienteProfileForm(instance=cliente_profile, initial={
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'email': user.email,
+        })
+
+    contexto = {'form': form, 'user': user, 'cliente_profile': cliente_profile}
+    return render(request, 'pedidos/perfil.html', contexto)
+
+
+@login_required
+def historial_pedidos_cliente(request):
+    """
+    Vista para mostrar el historial de pedidos de un cliente autenticado.
+    """
+    pedidos = Pedido.objects.filter(user=request.user).order_by('-fecha_pedido')
+    
+    cliente_profile = None
+    if hasattr(request.user, 'clienteprofile'):
+        cliente_profile = request.user.clienteprofile
+
+    contexto = {
+        'pedidos': pedidos,
+        'cliente_profile': cliente_profile,
+    }
+    return render(request, 'pedidos/historial_pedidos.html', contexto)
+
+
+def logout_cliente(request):
+    logout(request)
+    messages.info(request, "Has cerrado sesión exitosamente.")
+    return redirect('index')
+
+# --- INICIO: NUEVA VISTA PARA EL PANEL DE ALERTAS ---
+def panel_alertas(request):
+    """
+    Vista para mostrar el panel de alertas de nuevos pedidos en la heladería.
+    """
+    return render(request, 'pedidos/panel_alertas.html')
+# --- FIN: NUEVA VISTA PARA EL PANEL DE ALERTAS ---
+
+# --- INICIO: NUEVA VISTA PARA CANJEAR PUNTOS ---
+@login_required
+def canjear_puntos(request):
+    cliente_profile = request.user.clienteprofile
+    productos_canje = ProductoCanje.objects.filter(disponible=True).order_by('puntos_requeridos')
+
+    if request.method == 'POST':
+        producto_canje_id = request.POST.get('producto_canje_id')
+        try:
+            producto_canje = ProductoCanje.objects.get(id=producto_canje_id, disponible=True)
+        except ObjectDoesNotExist:
+            messages.error(request, "El producto de canje seleccionado no es válido.")
+            return redirect('canjear_puntos')
+
+        if cliente_profile.puntos_fidelidad >= producto_canje.puntos_requeridos:
+            with transaction.atomic():
+                cliente_profile.puntos_fidelidad -= producto_canje.puntos_requeridos
+                cliente_profile.save()
+                
+                messages.success(request, f"¡Has canjeado '{producto_canje.nombre}' por {producto_canje.puntos_requeridos} puntos! Tus puntos actuales son {cliente_profile.puntos_fidelidad}.")
+                
+                try:
+                    producto_ficticio_canje_obj = Producto.objects.get(nombre="Canje de Puntos - No Comprar")
+                    
+                    nuevo_pedido_canje = Pedido.objects.create(
+                        user=request.user,
+                        cliente_nombre=request.user.get_full_name() or request.user.username,
+                        cliente_direccion=f"Canje de Puntos: {producto_canje.nombre}",
+                        cliente_telefono=cliente_profile.telefono or "",
+                        estado='RECIBIDO',
+                    )
+
+                    DetallePedido.objects.create(
+                        pedido=nuevo_pedido_canje,
+                        producto=producto_ficticio_canje_obj,
+                        opcion_seleccionada=None,
+                        cantidad=1,
+                    )
+                    messages.info(request, f"Se ha generado un pedido de canje (ID #{nuevo_pedido_canje.id}). Puedes consultarlo en tu historial.")
+
+                except Producto.DoesNotExist:
+                    messages.error(request, "Error: El producto ficticio 'Canje de Puntos - No Comprar' no se encontró. No se pudo registrar el detalle del canje. Asegúrate de crearlo en el admin como un Producto.")
+                except Exception as e:
+                    messages.error(request, f"Hubo un problema al registrar el canje como pedido: {e}")
+
+        else:
+            messages.error(request, f"No tienes suficientes puntos para canjear '{producto_canje.nombre}'. Necesitas {producto_canje.puntos_requeridos} puntos y solo tienes {cliente_profile.puntos_fidelidad}.")
+        
+        return redirect('canjear_puntos')
+
+    contexto = {
+        'cliente_profile': cliente_profile,
+        'productos_canje': productos_canje,
+    }
+    return render(request, 'pedidos/canjear_puntos.html', contexto)
+# --- FIN: NUEVA VISTA PARA CANJEAR PUNTOS ---

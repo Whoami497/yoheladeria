@@ -1,0 +1,37 @@
+{% extends 'pedidos/base.html' %}
+{% load static %}
+
+{% block content %}
+<section class="container my-5">
+    {# Título de sección dinámico #}
+    <h2 class="section-title">Productos de la categoría: {{ categoria_seleccionada.nombre }}</h2> 
+
+    <div class="row">
+        {% for producto in productos %}
+        <div class="col-md-4 mb-4">
+            <div class="card h-100 shadow-sm">
+                {% if producto.imagen %}
+                    <img src="{% static producto.imagen.url %}" class="card-img-top" alt="{{ producto.nombre }}" style="height: 200px; object-fit: cover; border-radius: 15px 15px 0 0;">
+                {% else %}
+                    <div class="card-img-top placeholder-image" style="height: 200px;"> 
+                        <span>Sin imagen</span>
+                    </div>
+                {% endif %}
+                <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">{{ producto.nombre }}</h5>
+                    <p class="card-text text-muted">Precio: <span class="fw-bold">${{ producto.precio|floatformat:2 }}</span></p>
+                    <p class="card-text">{{ producto.descripcion|truncatechars:100|default:"No hay descripción disponible." }}</p>
+                    <a href="{% url 'detalle_producto' producto.id %}" class="btn btn-primary mt-auto">Ver Detalles y Pedir</a>
+                </div>
+            </div>
+        </div>
+        {% empty %}
+            <p class="col-12 text-center alert alert-info">No hay productos en esta categoría en este momento.</p>
+        {% endfor %}
+    </div>
+    
+    <div class="text-center mt-5">
+        <a href="{% url 'index' %}" class="btn btn-secondary">← Volver al inicio</a>
+    </div>
+</section>
+{% endblock %}

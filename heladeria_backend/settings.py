@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'pedidos',   # <-- NUESTRA APP DE PEDIDOS
+    'channels',  # <-- ¡NUEVA LÍNEA AQUÍ!
 ]
 
 MIDDLEWARE = [
@@ -58,8 +59,10 @@ ROOT_URLCONF = 'heladeria_backend.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True, # Busca templates dentro de las apps
+        'DIRS': [
+            os.path.join(BASE_DIR, 'pedidos', 'templates'), # Agrega esta línea
+        ],
+        'APP_DIRS': True, # Mantener en True para buscar en otras apps si hay
         'OPTIONS': {
             'context_processors': [
                 'django.template.context_processors.request',
@@ -144,3 +147,20 @@ STORAGES = {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
+
+# --- INICIO: REDIRECCIONES DE AUTENTICACIÓN (MOVIDO Y CORREGIDO) ---
+LOGIN_REDIRECT_URL = '/'  # URL a la que el usuario será redirigido después de iniciar sesión con éxito.
+LOGOUT_REDIRECT_URL = '/' # URL a la que el usuario será redirigido después de cerrar sesión con éxito.
+LOGIN_URL = '/accounts/login/' # URL de la página de inicio de sesión si el usuario no está autenticado.
+# --- FIN: REDIRECCIONES DE AUTENTICACIÓN ---
+
+# --- INICIO: CONFIGURACIÓN DE DJANGO CHANNELS (PARA DESARROLLO SIN REDIS) ---
+ASGI_APPLICATION = 'heladeria_backend.asgi.application' # El punto de entrada para ASGI
+
+# Configuración de los Channel Layers (para comunicación en tiempo real)
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer', # <-- ¡CAMBIO CLAVE AQUÍ! Usamos la capa en memoria
+    },
+}
+# --- FIN: CONFIGURACIÓN DE DJANGO CHANNELS ---

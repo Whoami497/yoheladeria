@@ -10,31 +10,34 @@
     <style>
         /* Estilos generales del cuerpo */
         body { 
-            padding-top: 0; /* No padding-top por defecto */
-            background-color: var(--color-principal-oscuro); 
-            color: var(--color-yo-texto-oscuro); /* Texto oscuro por defecto, para contenido principal */
+            padding-top: 0; 
+            background-color: #1a1a1a; /* FONDO MUY OSCURO (casi negro) */
+            color: #e0e0e0; /* Color de texto base claro */
             font-family: 'Arial', sans-serif; 
         }
 
         /* Variables CSS para la Paleta de Colores AZUL y BLANCO de Yo Heladerías */
         :root {
-            --color-principal-oscuro: #1a1a1a; 
-            --color-secundario-oscuro: #2a2a2a; 
+            --color-principal-oscuro: #1a1a1a; /* Fondo principal de la página */
+            --color-secundario-oscuro: #2a2a2a; /* Fondo para elementos flotantes en oscuro */
 
-            --color-yo-azul: #073653;      /* AZUL OSCURO ESPECÍFICO */
-            --color-yo-azul-claro: #007bff; 
-            --color-yo-azul-oscuro-hover: #052a42; 
-            --color-yo-blanco: #ffffff;    
-            --color-yo-fondo-claro: #f8f9fa; 
-            --color-yo-texto-oscuro: #343a40; 
-            --color-yo-gris-texto: #6c757d; 
-            --color-yo-gris-borde: #dee2e6; 
-            --color-sombra-suave: rgba(0,0,0,0.08);
-            --color-sombra-media: rgba(0,0,0,0.12);
-            --color-sombra-fuerte: rgba(0,0,0,0.2);
+            --color-yo-azul: #073653;       /* AZUL OSCURO ESPECÍFICO */
+            --color-yo-azul-claro: #007bff; /* Azul vibrante (para botones primarios) */
+            --color-yo-azul-oscuro-hover: #052a42; /* Hover para azul oscuro */
+            --color-yo-blanco: #ffffff;    /* Blanco puro */
+            --color-yo-fondo-claro: #f8f9fa; /* Fondo claro para tarjetas */
+            --color-yo-texto-oscuro: #343a40; /* Gris muy oscuro casi negro para textos en fondos claros */
+            --color-yo-gris-texto: #6c757d; /* Gris para textos secundarios en fondos claros */
+            --color-yo-gris-borde: #dee2e6; /* Gris muy claro para bordes */
+
+            --color-borde-resaltado: var(--color-yo-azul-claro); /* Borde para resaltar secciones */
+
+            --color-sombra-suave: rgba(0,0,0,0.2);
+            --color-sombra-media: rgba(0,0,0,0.3);
+            --color-sombra-fuerte: rgba(0,0,0,0.4);
         }
 
-        /* LAYOUT PRINCIPAL (Desktop) */
+        /* LAYOUT PRINCIPAL */
         .page-wrapper {
             display: flex; 
             min-height: 100vh; 
@@ -100,7 +103,7 @@
             top: 0;
             left: 0;
             width: 100%;
-            z-index: 1030; /* Asegura que esté por encima de otros elementos */
+            z-index: 1030; 
         }
         .navbar-mobile .navbar-brand img {
             max-height: 45px; /* Logo más pequeño en la navbar móvil */
@@ -113,17 +116,11 @@
 
 
         /* CONTENIDO PRINCIPAL */
-        .main-content-wrapper-desktop { /* Wrapper para desktop */
-            margin-left: 250px; 
+        .main-content-wrapper { 
             flex-grow: 1; 
-            padding: 20px; 
             background-color: var(--color-principal-oscuro); 
-        }
-        .main-content-wrapper-mobile { /* Wrapper para móvil */
-            flex-grow: 1;
-            padding: 15px;
-            padding-top: 85px; /* Espacio para la navbar móvil fija */
-            background-color: var(--color-principal-oscuro);
+            /* Padding base que se ajustará por media queries */
+            padding: 20px; 
         }
         .main-content {
             background-color: var(--color-yo-blanco); 
@@ -135,22 +132,15 @@
         }
 
         /* Mensajes de Django (Alertas) */
-        .messages {
-            margin-top: 0; 
-            margin-bottom: 20px;
-        }
-        .alert {
-            border-radius: 10px;
-            font-weight: 500;
-            padding: 1.2rem 1.5rem; 
-        }
+        .messages { margin-top: 0; margin-bottom: 20px; }
+        .alert { border-radius: 10px; font-weight: 500; padding: 1.2rem 1.5rem; }
         .alert-success { background-color: #d1ecf1; border-color: #bee5eb; color: var(--color-yo-azul); } 
         .alert-info { background-color: #e0f7fa; border-color: #b2ebf2; color: var(--color-yo-azul); } 
         .alert-warning { background-color: #ffecb3; border-color: #ffe082; color: #cc9900; } 
         .alert-danger { background-color: #ffcdd2; border-color: #ef9a9a; color: #d32f2f; } 
 
         /* Títulos de sección (dentro del main-content) */
-        .section-title {
+        .section-title { 
             color: var(--color-yo-azul); 
             font-size: 2.5rem; 
             font-weight: bold;
@@ -196,7 +186,7 @@
             align-items: center;
             justify-content: center;
             text-align: center;
-            border-radius: 15px 15px 0 0; /* Coincidir con la tarjeta */
+            border-radius: 15px 15px 0 0; 
         }
         .placeholder-image span {
             font-size: 0.9rem;
@@ -206,7 +196,7 @@
         .hero-section-new {
             background-color: var(--color-yo-azul); 
             color: var(--color-yo-blanco);
-            padding: 3rem 1.5rem; /* Ajuste para desktop */
+            padding: 3rem 1.5rem; 
             border-radius: 20px; 
             box-shadow: 0 10px 25px var(--color-sombra-fuerte); 
             text-align: center;
@@ -216,7 +206,7 @@
             justify-content: center;
         }
         .hero-section-new h1 {
-            font-size: 3rem; /* Ajuste para desktop */
+            font-size: 3rem; 
             font-weight: 900;
             margin-bottom: 0.8rem;
             line-height: 1.2;
@@ -249,25 +239,25 @@
 
 
         /* Media Queries para Responsive Design */
-        @media (min-width: 992px) { /* Estilos de Desktop (solo se aplican a partir de 992px) */
+        @media (min-width: 992px) { /* Estilos de Desktop (se aplican a partir de 992px) */
             body {
-                padding-top: 0; /* No padding superior en desktop */
+                padding-top: 0; 
             }
             .page-wrapper {
-                flex-direction: row; /* Sidebar a la izquierda, contenido a la derecha */
+                flex-direction: row; 
             }
             .sidebar-desktop {
-                display: block; /* Muestra la sidebar en desktop */
+                display: block; 
             }
             .navbar-mobile {
-                display: none; /* Oculta la navbar móvil en desktop */
+                display: none; 
             }
             .main-content-wrapper {
-                margin-left: 250px; /* Deja espacio para la sidebar */
+                margin-left: 250px; 
                 padding: 20px;
             }
             .main-content {
-                min-height: calc(100vh - 40px); /* Ajuste de altura para desktop */
+                min-height: calc(100vh - 40px); 
             }
         }
 
@@ -276,10 +266,10 @@
                 padding-top: 75px; /* Espacio para la navbar móvil fija */
             }
             .page-wrapper {
-                flex-direction: column; /* Contenido apilado en móvil */
+                flex-direction: column; 
             }
             .sidebar-desktop {
-                display: none; /* Oculta la sidebar en móvil */
+                display: none; 
             }
             .navbar-mobile {
                 display: flex; /* Muestra la navbar móvil */
@@ -291,15 +281,15 @@
                 padding-right: 0.5rem;
             }
             .main-content-wrapper {
-                margin-left: 0; /* No hay sidebar a la izquierda */
-                padding: 15px; /* Menos padding general */
+                margin-left: 0; 
+                padding: 15px; 
             }
             .main-content {
                 padding: 20px;
                 min-height: auto; 
             }
             .hero-section-new {
-                padding: 2.5rem 1rem;
+                padding: 2rem 1rem; 
             }
             .hero-section-new h1 {
                 font-size: 2rem;
@@ -308,7 +298,7 @@
                 font-size: 1rem;
             }
             .hero-section-new .hero-image-container-new img {
-                max-width: 180px; 
+                max-width: 150px; 
             }
             .section-title {
                 font-size: 1.8rem;
@@ -352,11 +342,43 @@
                     <i class="bi bi-cart-fill"></i> Carrito
                 </a>
               </li>
+              {# --- INICIO: ENLACES DE AUTENTICACIÓN MÓVIL --- #}
+              {% if user.is_authenticated %}
               <li class="nav-item">
-                <a class="nav-link" href="#">
-                    <i class="bi bi-person-fill"></i> Mi Cuenta
+                <a class="nav-link" href="{% url 'perfil_cliente' %}">
+                    <i class="bi bi-person-fill"></i> Mi Perfil ({{ user.username }})
                 </a>
               </li>
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'historial_pedidos_cliente' %}"> {# <-- NUEVA LÍNEA #}
+                    <i class="bi bi-clock-history"></i> Historial de Pedidos
+                </a>
+              </li>
+              {# --- NUEVA LÍNEA PARA CANJEAR PUNTOS MÓVIL --- #}
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'canjear_puntos' %}">
+                    <i class="bi bi-gift-fill"></i> Canjear Puntos
+                </a>
+              </li>
+              {# --- FIN: NUEVA LÍNEA PARA CANJEAR PUNTOS MÓVIL --- #}
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'logout_cliente' %}">
+                    <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
+                </a>
+              </li>
+              {% else %}
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'login' %}">
+                    <i class="bi bi-box-arrow-in-right"></i> Iniciar Sesión
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'register_cliente' %}">
+                    <i class="bi bi-person-plus-fill"></i> Registrarse
+                </a>
+              </li>
+              {% endif %}
+              {# --- FIN: ENLACES DE AUTENTICACIÓN MÓVIL --- #}
               <li class="nav-item">
                 <a class="nav-link" href="#">
                     <i class="bi bi-star-fill"></i> Sorteos
@@ -393,11 +415,57 @@
                             <i class="bi bi-cart-fill"></i> Carrito
                         </a>
                     </li>
+                    {# MENÚ DE CATEGORÍAS PARA DESKTOP #}
+                    {% if categorias %}
+                        <li class="nav-item nav-category-title">Categorías</li>
+                        {% for categoria in categorias %}
+                        <li class="nav-item">
+                            <a class="nav-link" href="{% url 'productos_por_categoria' categoria.id %}">
+                                <i class="bi bi-dot"></i> {{ categoria.nombre }}
+                            </a>
+                        </li>
+                        {% endfor %}
+                    {% endif %}
+                    
+                    {# SECCIONES ADICIONALES #}
+                    <li class="nav-item nav-category-title">Más Opciones</li> 
+                    {# --- INICIO: ENLACES DE AUTENTICACIÓN DESKTOP --- #}
+                    {% if user.is_authenticated %}
                     <li class="nav-item">
-                        <a class="nav-link" href="#">
-                            <i class="bi bi-person-fill"></i> Mi Cuenta
+                        <a class="nav-link" href="{% url 'perfil_cliente' %}">
+                            <i class="bi bi-person-fill"></i> Mi Perfil ({{ user.username }})
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'historial_pedidos_cliente' %}">
+                            <i class="bi bi-clock-history"></i> Historial de Pedidos
+                        </a>
+                    </li>
+                    {# --- NUEVA LÍNEA PARA CANJEAR PUNTOS DESKTOP --- #}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'canjear_puntos' %}">
+                            <i class="bi bi-gift-fill"></i> Canjear Puntos
+                        </a>
+                    </li>
+                    {# --- FIN: NUEVA LÍNEA PARA CANJEAR PUNTOS DESKTOP --- #}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'logout_cliente' %}">
+                            <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
+                        </a>
+                    </li>
+                    {% else %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'login' %}">
+                            <i class="bi bi-box-arrow-in-right"></i> Iniciar Sesión
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'register_cliente' %}">
+                            <i class="bi bi-person-plus-fill"></i> Registrarse
+                        </a>
+                    </li>
+                    {% endif %}
+                    {# --- FIN: ENLACES DE AUTENTICACIÓN DESKTOP --- #}
                     <li class="nav-item">
                         <a class="nav-link" href="#">
                             <i class="bi bi-star-fill"></i> Sorteos
@@ -413,7 +481,7 @@
         </aside>
 
         {# CONTENIDO PRINCIPAL #}
-        <div class="main-content-wrapper main-content-wrapper-desktop"> {# Usamos wrapper desktop por defecto #}
+        <div class="main-content-wrapper">
             <div class="main-content">
                 {% if messages %}
                     <div class="messages mt-3">

@@ -5,37 +5,66 @@
 <div class="container mt-5">
     <div class="row">
         <div class="col-md-6">
+            {% comment %} Si el producto tiene opciones y la opción tiene imagen, se podría mostrar esa. Por ahora, usa la del producto base. {% endcomment %}
             {% if producto.imagen %}
-                <img src="{{ producto.imagen.url }}" class="img-fluid rounded shadow-sm" alt="{{ producto.nombre }}" style="max-height: 450px; object-fit: contain;">
+                {# **CORRECCIÓN AQUÍ**: Si producto.imagen es un CharField con la ruta relativa (ej. "images/bomboneiro.png"), el {% static %} tag necesita la ruta directamente. No uses .url si es CharField. #}
+                <img src="{% static producto.imagen %}" class="img-fluid rounded shadow-sm" alt="{{ producto.nombre }}" style="max-height: 450px; object-fit: contain;">
             {% else %}
-                {# Si no hay imagen, puedes poner una imagen de placeholder #}
-                <img src="{% static 'images/placeholder_producto.jpg' %}" class="img-fluid rounded shadow-sm" alt="Sin imagen" style="max-height: 450px; object-fit: contain;">
+                <div class="placeholder-image" style="height: 450px;">
+                    <span>Sin imagen</span>
+                </div>
             {% endif %}
         </div>
 
         <div class="col-md-6">
             <a href="{% url 'index' %}" class="text-decoration-none text-muted">&larr; Volver al catálogo</a>
             <h1 class="mt-3 display-4">{{ producto.nombre }}</h1>
-            <p class="lead">Precio: <span class="fw-bold">${{ producto.precio|floatformat:2 }}</span></p>
+            {# --- INICIO: Precio base del producto para JS --- #}
+            <p class="lead">Precio: <span class="fw-bold fs-3" id="precioProductoDisplay">${{ producto.precio|floatformat:2 }}</span></p>
+            {# --- FIN: Precio base del producto para JS --- #}
 
             <p>{{ producto.descripcion|default:"No hay descripción disponible para este producto." }}</p>
 
-            {% if error_mensaje %}
-                <div class="alert alert-danger" role="alert">
-                    {{ error_mensaje }}
+            {% if messages %}
+                <div class="messages mt-3">
+                    {% for message in messages %}
+                    <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                    {% endfor %}
                 </div>
             {% endif %}
 
-            {% if producto.sabores_maximos > 0 %}
-                <hr>
-                <h3>Selecciona tus sabores</h3>
-                <form method="post" action="{% url 'detalle_producto' producto.id %}">
-                    {% csrf_token %}
+            <form method="post" action="{% url 'detalle_producto' producto.id %}" class="needs-validation" novalidate> 
+                {% csrf_token %}
+                
+                {# Selector de Opciones de Producto #}
+                {% if opciones %} 
+                    <hr>
+                    <h3>Elige tu opción:</h3>
+                    <div class="mb-3">
+                        <label for="opcionSelect" class="form-label">Opciones de {{ producto.nombre }}:</label>
+                        <select class="form-select" id="opcionSelect" name="opcion_id" {% if opciones %}required{% endif %}> {# Hace que el select sea requerido solo si hay opciones #}
+                            <option value="">--- Selecciona una opción ---</option>
+                            {% for opcion in opciones %}
+                                <option value="{{ opcion.id }}" data-precio-adicional="{{ opcion.precio_adicional|floatformat:2 }}">
+                                    {{ opcion.nombre_opcion }} 
+                                    {% if opcion.precio_adicional > 0 %} (+${{ opcion.precio_adicional|floatformat:2 }}) {% endif %}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <div class="invalid-feedback">Por favor, selecciona una opción para {{ producto.nombre }}.</div> 
+                    </div>
+                {% endif %}
 
+                {# Selector de Sabores (si el producto base lo permite) #}
+                {% if producto.sabores_maximos > 0 %}
+                    <hr>
+                    <h3>Selecciona tus sabores</h3>
                     <div class="mb-3">
                         <label for="cantidadSabores" class="form-label">Cantidad de Sabores:</label>
                         <select class="form-select" id="cantidadSabores" name="cantidad_sabores" onchange="actualizarSeleccionSabores(this.value)">
-                            {# Aquí usamos 'range_sabores' que viene de la vista #}
                             {% for num_sabor in range_sabores %}
                                 <option value="{{ num_sabor }}">{{ num_sabor }}</option>
                             {% endfor %}
@@ -46,51 +75,102 @@
                     <div id="saboresContainer">
                         {# Los campos de selección de sabores se renderizarán aquí con JavaScript #}
                     </div>
+                {% endif %}
 
-                    <button type="submit" class="btn btn-primary btn-lg mt-3">
-                        <i class="bi bi-cart-plus"></i> Añadir al Carrito
-                    </button>
-                </form>
-            {% else %}
-                <p class="mt-4 text-info">Este producto no permite la selección de sabores.</p>
-                <form method="post" action="{% url 'detalle_producto' producto.id %}">
-                    {% csrf_token %}
-                    <button type="submit" class="btn btn-primary btn-lg mt-3">
-                        <i class="bi bi-cart-plus"></i> Añadir al Carrito
-                    </button>
-                </form>
-            {% endif %}
+                {# --- INICIO: NUEVA SECCIÓN PARA LA CANTIDAD DE PRODUCTOS --- #}
+                <hr>
+                <div class="mb-3">
+                    <label for="cantidad_item" class="form-label fw-bold">Cantidad de unidades:</label>
+                    <input type="number" id="cantidad_item" name="cantidad_item" class="form-control" value="1" min="1" max="99" style="width: 100px;" required>
+                    <div class="invalid-feedback">La cantidad debe ser al menos 1.</div>
+                </div>
+                {# --- FIN: NUEVA SECCIÓN PARA LA CANTIDAD DE PRODUCTOS --- #}
+
+                <button type="submit" class="btn btn-primary btn-lg mt-3">
+                    <i class="bi bi-cart-plus"></i> Añadir al Carrito
+                </button>
+            </form>
         </div>
     </div>
 </div>
 
 <script>
+    // Inicialización del precio base del producto para JavaScript
+    const productoPrecioBase = parseFloat("{{ producto.precio|floatformat:2 }}");
+    const precioProductoDisplay = document.getElementById('precioProductoDisplay');
+    const opcionSelect = document.getElementById('opcionSelect');
+
+    function actualizarPrecioDisplay() {
+        let precioActual = productoPrecioBase;
+        if (opcionSelect && opcionSelect.value) {
+            const selectedOption = opcionSelect.options[opcionSelect.selectedIndex];
+            const precioAdicional = parseFloat(selectedOption.dataset.precioAdicional || 0);
+            precioActual += precioAdicional;
+        }
+        if (precioProductoDisplay) {
+            precioProductoDisplay.textContent = `$${precioActual.toFixed(2)}`;
+        }
+    }
+
     function actualizarSeleccionSabores(numSabores) {
         const saboresContainer = document.getElementById('saboresContainer');
-        saboresContainer.innerHTML = ''; // Limpiar selecciones previas
+        saboresContainer.innerHTML = ''; 
 
         for (let i = 0; i < numSabores; i++) {
             const selectDiv = document.createElement('div');
             selectDiv.className = 'mb-3';
             selectDiv.innerHTML = `
                 <label for="sabor${i}" class="form-label">Sabor ${i + 1}:</label>
-                <select class="form-select" id="sabor${i}" name="sabores">
+                <select class="form-select" id="sabor${i}" name="sabores" required>
                     <option value="">--- Selecciona un sabor ---</option>
                     {% for sabor in sabores %}
                         <option value="{{ sabor.id }}">{{ sabor.nombre }}</option>
                     {% endfor %}
                 </select>
+                <div class="invalid-feedback">Por favor, selecciona el sabor ${i + 1}.</div>
             `;
             saboresContainer.appendChild(selectDiv);
         }
+        // Llamar a las validaciones de Bootstrap para los nuevos campos
+        const forms = document.querySelectorAll('.needs-validation')
+        Array.from(forms).forEach(function (form) {
+            form.classList.remove('was-validated'); // Limpiar validación previa si se regeneran los campos
+        });
     }
 
-    // Inicializar la selección de sabores al cargar la página
     document.addEventListener('DOMContentLoaded', () => {
         const cantidadSaboresSelect = document.getElementById('cantidadSabores');
+        
         if (cantidadSaboresSelect) {
+            cantidadSaboresSelect.addEventListener('change', () => {
+                actualizarSeleccionSabores(cantidadSaboresSelect.value);
+            });
+            // Inicializar al cargar la página
             actualizarSeleccionSabores(cantidadSaboresSelect.value);
         }
+
+        // Event listener para actualizar el precio si la opción cambia
+        if (opcionSelect) {
+            opcionSelect.addEventListener('change', actualizarPrecioDisplay);
+        }
+        // Inicializar el precio al cargar la página
+        actualizarPrecioDisplay();
+
+        // Validaciones de formularios Bootstrap
+        (function () {
+            'use strict'
+            var forms = document.querySelectorAll('.needs-validation')
+            Array.prototype.slice.call(forms)
+                .forEach(function (form) {
+                    form.addEventListener('submit', function (event) {
+                        if (!form.checkValidity()) {
+                            event.preventDefault()
+                            event.stopPropagation()
+                        }
+                        form.classList.add('was-validated')
+                    }, false)
+                })
+        })()
     });
 </script>
 

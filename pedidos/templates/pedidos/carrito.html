@@ -2,121 +2,116 @@
 {% load static %}
 
 {% block content %}
-<div class="container mt-5">
-    <h1 class="mb-4">🛒 Tu Carrito de Compras</h1>
+<div class="container my-5">
+    <h2 class="section-title">Tu Carrito de Compras</h2>
+    <hr>
 
-    {% if error_mensaje %}
-        <div class="alert alert-danger" role="alert">
-            {{ error_mensaje }}
+    {% if messages %}
+        <div class="messages mt-3">
+            {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {% endfor %}
         </div>
     {% endif %}
 
     {% if carrito_items %}
-        <div class="table-responsive">
-            <table class="table table-striped table-hover align-middle">
-                <thead class="table-dark">
-                    <tr>
-                        <th scope="col">Producto</th>
-                        <th scope="col">Sabores</th>
-                        <th scope="col">Cantidad</th>
-                        <th scope="col">Precio Unitario</th>
-                        <th scope="col">Subtotal</th>
-                        <th scope="col">Acciones</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in carrito_items %}
-                    <tr>
-                        <td>
-                            <p class="mb-0 fw-bold">{{ item.producto_nombre }}</p>
-                        </td>
-                        <td>
-                            {% if item.sabores_nombres %}
-                                <ul class="list-unstyled mb-0 small text-muted">
-                                    {% for sabor_nombre in item.sabores_nombres %}
-                                        <li>{{ sabor_nombre }}</li>
-                                    {% endfor %}
-                                </ul>
-                            {% else %}
-                                <span class="text-muted small">N/A</span>
-                            {% endif %}
-                        </td>
-                        <td>{{ item.cantidad }}</td>
-                        <td>${{ item.precio_unidad|floatformat:2 }}</td>
-                        <td><span class="fw-bold">${{ item.subtotal|floatformat:2 }}</span></td>
-                        <td>
-                            {# INICIO DEL CAMBIO: FORMULARIO PARA ELIMINAR #}
-                            <form action="{% url 'eliminar_del_carrito' item.key %}" method="post">
-                                {% csrf_token %}
-                                <button type="submit" class="btn btn-outline-danger btn-sm">Eliminar</button>
-                            </form>
-                            {# FIN DEL CAMBIO #}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-                <tfoot>
-                    <tr>
-                        <th colspan="4" class="text-end h4">Total:</th>
-                        <td colspan="2" class="h4 fw-bold">${{ total|floatformat:2 }}</td>
-                    </tr>
-                </tfoot>
-            </table>
+    <div class="table-responsive mb-4">
+        <table class="table table-striped table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th>Producto</th>
+                    <th>Sabores</th>
+                    <th>Cantidad</th>
+                    <th>Precio Unitario</th>
+                    <th>Subtotal</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in carrito_items %}
+                <tr>
+                    <td>
+                        {% if item.imagen_mostrada %}
+                            <img src="{% static item.imagen_mostrada %}" alt="{{ item.producto_nombre }}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 5px;">
+                        {% endif %}
+                        {{ item.producto_nombre }}
+                    </td>
+                    <td>
+                        {% if item.sabores_nombres %}
+                            {{ item.sabores_nombres|join:", " }}
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </td>
+                    <td>{{ item.cantidad }}</td>
+                    <td>${{ item.precio_unidad|floatformat:2 }}</td>
+                    <td>${{ item.subtotal|floatformat:2 }}</td>
+                    <td>
+                        <a href="{% url 'eliminar_del_carrito' item.key %}" class="btn btn-outline-danger btn-sm">Eliminar</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <th colspan="4" class="text-end">Total:</th>
+                    <td colspan="2" class="text-start fw-bold fs-4">${{ total|floatformat:2 }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+
+    <h3 class="section-title-small">Datos de Envío y Contacto</h3>
+    <hr>
+    <form method="post" class="needs-validation" novalidate>
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="cliente_nombre" class="form-label">Nombre Completo:</label>
+            <input type="text" class="form-control" id="cliente_nombre" name="cliente_nombre" 
+                   value="{{ request.user.get_full_name|default:'' }}" required>
+            <div class="invalid-feedback">Por favor, ingresa tu nombre completo.</div>
+        </div>
+        <div class="mb-3">
+            <label for="cliente_direccion" class="form-label">Dirección de Envío:</label>
+            <input type="text" class="form-control" id="cliente_direccion" name="cliente_direccion" 
+                   value="{{ request.user.clienteprofile.direccion|default:'' }}" required>
+            <div class="invalid-feedback">Por favor, ingresa tu dirección de envío.</div>
+        </div>
+        <div class="mb-3">
+            <label for="cliente_telefono" class="form-label">Teléfono:</label>
+            <input type="tel" class="form-control" id="cliente_telefono" name="cliente_telefono" 
+                   value="{{ request.user.clienteprofile.telefono|default:'' }}">
+            <div class="invalid-feedback">Por favor, ingresa tu número de teléfono.</div>
         </div>
 
-        <hr class="my-5">
+        {# --- INICIO: NUEVA SECCIÓN PARA MÉTODO DE PAGO --- #}
+        <h3 class="section-title-small mt-5">Método de Pago</h3>
+        <hr>
+        <div class="mb-3">
+            <label for="metodo_pago" class="form-label">Selecciona el método de pago:</label>
+            <select class="form-select" id="metodo_pago" name="metodo_pago" required>
+                <option value="EFECTIVO" selected>Efectivo</option>
+                <option value="MERCADOPAGO">Mercado Pago (Próximamente)</option>
+            </select>
+            <div class="invalid-feedback">Por favor, selecciona un método de pago.</div>
+        </div>
+        {# --- FIN: NUEVA SECCIÓN PARA MÉTODO DE PAGO --- #}
 
-        <h2 class="mb-4">Datos de Envío y Contacto</h2>
-        <form method="post" action="{% url 'ver_carrito' %}" class="needs-validation" novalidate>
-            {% csrf_token %}
-            <div class="mb-3">
-                <label for="cliente_nombre" class="form-label">Nombre Completo:</label>
-                <input type="text" class="form-control" id="cliente_nombre" name="cliente_nombre" required>
-                <div class="invalid-feedback">
-                    Por favor, ingresa tu nombre completo.
-                </div>
-            </div>
-            <div class="mb-3">
-                <label for="cliente_direccion" class="form-label">Dirección de Envío:</label>
-                <input type="text" class="form-control" id="cliente_direccion" name="cliente_direccion" required>
-                <div class="invalid-feedback">
-                    Por favor, ingresa tu dirección de envío.
-                </div>
-            </div>
-            <div class="mb-3">
-                <label for="cliente_telefono" class="form-label">Número de Teléfono (opcional):</label>
-                <input type="tel" class="form-control" id="cliente_telefono" name="cliente_telefono">
-            </div>
-
-            <button type="submit" class="btn btn-success btn-lg mt-3">
-                <i class="bi bi-bag-check"></i> Finalizar Pedido
-            </button>
-            <a href="{% url 'index' %}" class="btn btn-secondary btn-lg mt-3 ms-2">Seguir Comprando</a>
-        </form>
+        <button type="submit" class="btn btn-success btn-lg w-100 mt-4">Finalizar Pedido</button>
+    </form>
 
     {% else %}
-        <div class="alert alert-info text-center" role="alert">
-            Tu carrito está vacío. ¡Empieza a añadir deliciosos helados!
-            <br><a href="{% url 'index' %}" class="btn btn-primary mt-3">Ver Nuestro Catálogo</a>
-        </div>
+    <div class="alert alert-info text-center" role="alert">
+        Tu carrito está vacío. ¡Empieza a llenarlo ahora!
+        <a href="{% url 'index' %}" class="alert-link">Ver Catálogo</a>
+    </div>
     {% endif %}
+
+    <div class="text-center mt-5">
+        <a href="{% url 'index' %}" class="btn btn-secondary">← Volver al inicio</a>
+    </div>
 </div>
-
-<script>
-    (function () {
-      'use strict'
-      var forms = document.querySelectorAll('.needs-validation')
-      Array.prototype.slice.call(forms)
-        .forEach(function (form) {
-          form.addEventListener('submit', function (event) {
-            if (!form.checkValidity()) {
-              event.preventDefault()
-              event.stopPropagation()
-            }
-            form.classList.add('was-validated')
-          }, false)
-        })
-    })()
-</script>
-
 {% endblock %}

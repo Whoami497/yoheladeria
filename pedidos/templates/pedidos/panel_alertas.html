@@ -1,0 +1,120 @@
+{% extends 'pedidos/base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container my-5">
+    <h2 class="section-title text-center mb-4">Panel de Alertas de Pedidos</h2>
+    <p class="text-center text-muted">Esta pantalla recibirá notificaciones de nuevos pedidos en tiempo real.</p>
+    <hr>
+
+    <div id="alerts-container" class="mt-4">
+        {# Aquí se mostrarán las alertas de pedidos en tiempo real #}
+        <div class="alert alert-info text-center" role="alert">
+            Esperando nuevos pedidos...
+        </div>
+    </div>
+
+    <div class="text-center mt-5">
+        <button id="clear-alerts" class="btn btn-secondary">Limpiar Alertas Mostradas</button>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const alertsContainer = document.getElementById('alerts-container');
+        const clearAlertsButton = document.getElementById('clear-alerts');
+
+        // Determinar el protocolo WebSocket (ws:// para HTTP, wss:// para HTTPS)
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+        // Construir la URL del WebSocket
+        const websocketUrl = wsProtocol + window.location.host + '/ws/pedidos/notifications/';
+        
+        console.log("Intentando conectar a WebSocket:", websocketUrl);
+        const chatSocket = new WebSocket(websocketUrl);
+
+        chatSocket.onopen = function(e) {
+            console.log('Conexión WebSocket establecida.', e);
+            alertsContainer.innerHTML = '<div class="alert alert-success text-center" role="alert">Conectado. Esperando pedidos...</div>';
+        };
+
+        chatSocket.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+            const message = data.message;
+            const orderId = data.order_id;
+            const orderData = data.order_data; // Obtenemos los datos del pedido
+
+            console.log('Mensaje recibido:', message, 'ID:', orderId, 'Datos:', orderData);
+
+            // Crear un nuevo elemento de alerta
+            const alertDiv = document.createElement('div');
+            alertDiv.className = 'alert alert-primary alert-dismissible fade show new-order-alert';
+            alertDiv.setAttribute('role', 'alert');
+            
+            let alertContent = `<strong>¡Nuevo Pedido Recibido!</strong> Pedido #${orderId}<br>`;
+            alertContent += `Cliente: ${orderData.cliente_nombre || 'N/A'}<br>`;
+            alertContent += `Dirección: ${orderData.cliente_direccion || 'N/A'}<br>`;
+            alertContent += `Teléfono: ${orderData.cliente_telefono || 'N/A'}<br>`;
+            alertContent += `Total: $${parseFloat(orderData.total_pedido || 0).toFixed(2)}<br>`;
+            alertContent += `Método de Pago: ${orderData.metodo_pago || 'N/A'}<br>`;
+            
+            // Mostrar los detalles de los productos
+            if (orderData.detalles && orderData.detalles.length > 0) {
+                alertContent += `<strong>Productos:</strong><ul>`;
+                orderData.detalles.forEach(detail => {
+                    let productName = detail.producto_nombre;
+                    if (detail.opcion_nombre) {
+                        productName += ` - ${detail.opcion_nombre}`;
+                    }
+                    let flavors = detail.sabores_nombres.join(', ') || 'N/A';
+                    alertContent += `<li>${productName} (x${detail.cantidad}) - Sabores: ${flavors}</li>`;
+                });
+                alertContent += `</ul>`;
+            } else {
+                alertContent += `No hay detalles de productos para este pedido.<br>`;
+            }
+
+
+            alertDiv.innerHTML = `
+                ${alertContent}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            `;
+            
+            alertsContainer.prepend(alertDiv); // Añadir la alerta al principio de la lista
+
+            // Opcional: Sonido de alerta (descomenta si tienes un archivo de sonido en static/sonido_alerta.mp3)
+            // new Audio('{% static "sonido_alerta.mp3" %}').play(); 
+        };
+
+        chatSocket.onclose = function(e) {
+            console.error('Conexión WebSocket cerrada inesperadamente.', e);
+            alertsContainer.innerHTML = '<div class="alert alert-danger text-center" role="alert">Conexión perdida. Recarga la página.</div>';
+        };
+
+        chatSocket.onerror = function(e) {
+            console.error('Error WebSocket:', e);
+            alertsContainer.innerHTML = '<div class="alert alert-danger text-center" role="alert">Error de conexión.</div>';
+        };
+
+        clearAlertsButton.addEventListener('click', function() {
+            while (alertsContainer.firstChild) {
+                alertsContainer.removeChild(alertsContainer.firstChild);
+            }
+            alertsContainer.innerHTML = '<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
+        });
+    });
+</script>
+
+<style>
+    .new-order-alert {
+        border: 2px solid var(--color-yo-azul-claro);
+        box-shadow: 0 4px 10px rgba(0, 123, 255, 0.5);
+        animation: pulse 1.5s infinite alternate;
+    }
+
+    @keyframes pulse {
+        0% { transform: scale(1); }
+        100% { transform: scale(1.02); }
+    }
+</style>
+
+{% endblock %}

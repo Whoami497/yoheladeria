@@ -1,0 +1,87 @@
+{% extends 'pedidos/base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container my-5">
+    <h2 class="section-title">Mi Historial de Pedidos</h2>
+    <hr>
+
+    {% if messages %}
+        <div class="messages mt-3">
+            {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    {% if pedidos %}
+        <div class="accordion" id="accordionPedidos">
+            {% for pedido in pedidos %}
+            <div class="accordion-item mb-3 shadow-sm rounded">
+                <h2 class="accordion-header" id="heading{{ pedido.id }}">
+                    <button class="accordion-button {% if not forloop.first %}collapsed{% endif %}" type="button" data-bs-toggle="collapse" data-bs-target="#collapse{{ pedido.id }}" aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}" aria-controls="collapse{{ pedido.id }}">
+                        <strong>Pedido #{{ pedido.id }}</strong> - {{ pedido.fecha_pedido|date:"d M Y H:i" }} 
+                        <span class="badge {% if pedido.estado == 'RECIBIDO' %}bg-info{% elif pedido.estado == 'EN_PREPARACION' %}bg-warning{% elif pedido.estado == 'EN_CAMINO' %}bg-primary{% elif pedido.estado == 'ENTREGADO' %}bg-success{% else %}bg-danger{% endif %} ms-3">
+                            {{ pedido.get_estado_display }}
+                        </span>
+                    </button>
+                </h2>
+                <div id="collapse{{ pedido.id }}" class="accordion-collapse collapse {% if forloop.first %}show{% endif %}" aria-labelledby="heading{{ pedido.id }}" data-bs-parent="#accordionPedidos">
+                    <div class="accordion-body">
+                        <p><strong>Cliente:</strong> {{ pedido.cliente_nombre }}</p>
+                        <p><strong>Dirección:</strong> {{ pedido.cliente_direccion }}</p>
+                        <p><strong>Teléfono:</strong> {{ pedido.cliente_telefono }}</p>
+                        <p><strong>Estado Actual:</strong> 
+                            <span class="badge {% if pedido.estado == 'RECIBIDO' %}bg-info{% elif pedido.estado == 'EN_PREPARACION' %}bg-warning{% elif pedido.estado == 'EN_CAMINO' %}bg-primary{% elif pedido.estado == 'ENTREGADO' %}bg-success{% else %}bg-danger{% endif %}">
+                                {{ pedido.get_estado_display }}
+                            </span>
+                        </p>
+                        
+                        <h5 class="mt-4">Detalles del Pedido:</h5>
+                        <ul class="list-group list-group-flush">
+                            {% for detalle in pedido.detalles.all %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong>{{ detalle.producto.nombre }}</strong>
+                                    {% if detalle.opcion_seleccionada %}
+                                        - {{ detalle.opcion_seleccionada.nombre_opcion }}
+                                    {% endif %}
+                                    {% if detalle.sabores.all %}
+                                        <br><small class="text-muted">Sabores: 
+                                            {% for sabor in detalle.sabores.all %}
+                                                {{ sabor.nombre }}{% if not forloop.last %}, {% endif %}
+                                            {% endfor %}
+                                        </small>
+                                    {% endif %}
+                                </div>
+                                <span class="badge bg-secondary rounded-pill">x{{ detalle.cantidad }}</span> {# Asumiendo que DetallePedido tiene campo 'cantidad' #}
+                                {# O si DetallePedido NO tiene cantidad (como en tu modelo actual), puedes omitir el x{{ detalle.cantidad }} o indicar 1 #}
+                            </li>
+                            {% empty %}
+                            <li class="list-group-item">No hay detalles para este pedido.</li>
+                            {% endfor %}
+                        </ul>
+                        <div class="text-end mt-3">
+                            <strong>Total del Pedido: ${{ pedido.total_pedido|floatformat:2 }}</strong> {# Asumiendo que Pedido tiene un método total_pedido #}
+                            {# O si no hay método, calcular el total aquí sumando los precios de los detalles #}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="alert alert-info text-center" role="alert">
+            No tienes pedidos anteriores en tu historial. ¡Haz tu primer pedido ahora!
+            <a href="{% url 'index' %}" class="alert-link">Ver Catálogo</a>
+        </div>
+    {% endif %}
+
+    <div class="text-center mt-5">
+        <a href="{% url 'index' %}" class="btn btn-secondary">← Volver al inicio</a>
+    </div>
+</div>
+{% endblock %}

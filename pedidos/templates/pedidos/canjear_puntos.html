@@ -1,0 +1,81 @@
+{% extends 'pedidos/base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container my-5">
+    <h2 class="section-title">Canjear Mis Puntos</h2>
+    <hr>
+
+    {% if messages %}
+        <div class="messages mt-3">
+            {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    <div class="row mb-4">
+        <div class="col-12 text-center">
+            <h3>Tus Puntos Actuales: <span class="badge bg-primary fs-4">{{ cliente_profile.puntos_fidelidad|floatformat:0 }}</span></h3>
+            <p class="text-muted">¡Junta más puntos realizando pedidos!</p>
+        </div>
+    </div>
+
+    <h3 class="section-title-small">Recompensas Disponibles:</h3>
+
+    {% if productos_canje %}
+        <div class="row">
+            {% for producto_canje in productos_canje %}
+            <div class="col-md-4 mb-4">
+                <div class="card h-100 shadow-sm {% if cliente_profile.puntos_fidelidad < producto_canje.puntos_requeridos %}border-warning{% endif %}">
+                    {% if producto_canje.imagen %}
+                        <img src="{% static producto_canje.imagen %}" class="card-img-top" alt="{{ producto_canje.nombre }}" style="height: 200px; object-fit: cover; border-radius: 15px 15px 0 0;">
+                    {% else %}
+                        <div class="card-img-top placeholder-image" style="height: 200px;">
+                            <span>Sin imagen</span>
+                        </div>
+                    {% endif %}
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title">{{ producto_canje.nombre }}</h5>
+                        <p class="card-text text-muted">{{ producto_canje.descripcion|default:"Sin descripción." }}</p>
+                        <p class="card-text">
+                            Puntos Requeridos: <span class="fw-bold fs-5">{{ producto_canje.puntos_requeridos|floatformat:0 }}</span>
+                        </p>
+
+                        <form method="post" action="{% url 'canjear_puntos' %}" class="mt-auto">
+                            {% csrf_token %}
+                            <input type="hidden" name="producto_canje_id" value="{{ producto_canje.id }}">
+                            {% if cliente_profile.puntos_fidelidad >= producto_canje.puntos_requeridos %}
+                                <button type="submit" class="btn btn-success w-100">
+                                    Canjear Ahora
+                                </button>
+                            {% else %}
+                                <button type="button" class="btn btn-warning w-100" disabled>
+                                    Puntos Insuficientes
+                                </button>
+                                <small class="text-danger d-block mt-1">Necesitas {{ producto_canje.puntos_requeridos|floatformat:0 }} puntos.</small>
+                            {% endif %}
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% empty %}
+                <div class="col-12 text-center alert alert-info">
+                    No hay recompensas disponibles para canjear en este momento.
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="alert alert-info text-center" role="alert">
+            No hay recompensas disponibles para canjear en este momento. Vuelve más tarde.
+        </div>
+    {% endif %}
+
+    <div class="text-center mt-5">
+        <a href="{% url 'index' %}" class="btn btn-secondary">← Volver al inicio</a>
+    </div>
+</div>
+{% endblock %}
