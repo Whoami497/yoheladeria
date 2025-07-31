@@ -66,7 +66,7 @@ class OpcionProducto(models.Model):
         unique_together = ('producto_base', 'nombre_opcion') 
 
 
-# --- INICIO: NUEVO MODELO ZonaEnvio ---
+# Modelo ZonaEnvio
 class ZonaEnvio(models.Model):
     nombre = models.CharField(max_length=100, unique=True, help_text="Nombre de la zona de envío (ej: Centro, Norte, Sur).")
     costo = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, help_text="Costo de envío para esta zona.")
@@ -79,7 +79,6 @@ class ZonaEnvio(models.Model):
 
     def __str__(self):
         return f"{self.nombre} (${self.costo})"
-# --- FIN: NUEVO MODELO ZonaEnvio ---
 
 
 class Pedido(models.Model):
@@ -103,10 +102,7 @@ class Pedido(models.Model):
     fecha_pedido = models.DateTimeField(auto_now_add=True)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='RECIBIDO')
     metodo_pago = models.CharField(max_length=20, choices=METODO_PAGO_CHOICES, default='EFECTIVO')
-    
-    # --- INICIO: NUEVO CAMPO zona_envio ---
     zona_envio = models.ForeignKey(ZonaEnvio, on_delete=models.SET_NULL, null=True, blank=True, related_name='pedidos_en_zona')
-    # --- FIN: NUEVO CAMPO zona_envio ---
 
     def __str__(self):
         if self.user:
@@ -122,10 +118,8 @@ class Pedido(models.Model):
                 precio_unitario += detalle.opcion_seleccionada.precio_adicional
             total += precio_unitario * detalle.cantidad 
         
-        # --- INICIO: Sumar costo de envío al total ---
         if self.zona_envio and self.zona_envio.costo:
             total += self.zona_envio.costo
-        # --- FIN: Sumar costo de envío al total ---
         return total
 
 
@@ -142,13 +136,13 @@ class DetallePedido(models.Model):
         return f'{self.cantidad}x {self.producto.nombre} en Pedido #{self.pedido.id}'
 
 
-# --- INICIO: NUEVO MODELO ProductoCanje ---
+# Modelo ProductoCanje
 class ProductoCanje(models.Model):
-    nombre = models.CharField(max_length=100, unique=True, help_text="Nombre del producto o descuento a canjear (ej: '1 Kg de Helado GRATIS', '50% Descuento en Tortas').")
+    nombre = models.CharField(max_length=100, unique=True, help_text="Nombre del producto o descuento a canjear.")
     descripcion = models.TextField(blank=True, null=True, help_text="Descripción de la recompensa.")
-    puntos_requeridos = models.PositiveIntegerField(default=0, help_text="Cantidad de puntos de fidelidad necesarios para canjear este ítem.")
+    puntos_requeridos = models.PositiveIntegerField(default=0, help_text="Puntos necesarios para canjear.")
     disponible = models.BooleanField(default=True)
-    imagen = models.CharField(max_length=255, blank=True, null=True, help_text="Ruta a la imagen estática del producto canjeable (ej: 'images/canje_kilo.png')")
+    imagen = models.CharField(max_length=255, blank=True, null=True, help_text="Ruta a la imagen estática.")
 
     class Meta:
         verbose_name = "Producto de Canje"
@@ -157,10 +151,9 @@ class ProductoCanje(models.Model):
 
     def __str__(self):
         return f"{self.nombre} ({self.puntos_requeridos} puntos)"
-# --- FIN: NUEVO MODELO ProductoCanje ---
 
 
-# --- INICIO: MODELO CADETEPROFILE ---
+# Modelo CadeteProfile
 class CadeteProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='cadeteprofile')
     telefono = models.CharField(max_length=20, unique=True, help_text="Número de teléfono único del cadete.")
@@ -174,7 +167,15 @@ class CadeteProfile(models.Model):
     
     disponible = models.BooleanField(default=False, help_text="Marcar si el cadete está disponible para recibir pedidos.")
     
-    # Campos para la futura integración con mapas
+    # --- INICIO: NUEVO CAMPO PARA SUSCRIPCIÓN WEBPUSH ---
+    subscription_info = models.JSONField(
+        null=True, 
+        blank=True, 
+        verbose_name="Información de Suscripción WebPush",
+        help_text="Contiene la información de la suscripción push del navegador del cadete."
+    )
+    # --- FIN: NUEVO CAMPO PARA SUSCRIPCIÓN WEBPUSH ---
+
     latitud_actual = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitud_actual = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
 
@@ -183,16 +184,14 @@ class CadeteProfile(models.Model):
         verbose_name_plural = "Perfiles de Cadetes"
 
     def __str__(self):
-        # Muestra el nombre completo si está disponible, si no, el username.
         if self.user.first_name and self.user.last_name:
             return f'Cadete: {self.user.first_name} {self.user.last_name}'
         return f'Cadete: {self.user.username}'
-# --- FIN: MODELO CADETEPROFILE ---
 
 
-# --- INICIO: MODELO CLIENTEPROFILE Y SEÑALES ---
+# Modelo ClienteProfile y Señales
 class ClienteProfile(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='clienteprofile') # related_name añadido
     direccion = models.CharField(max_length=255, blank=True, null=True)
     telefono = models.CharField(max_length=20, blank=True, null=True)
     puntos_fidelidad = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
@@ -202,10 +201,9 @@ class ClienteProfile(models.Model):
 
 @receiver(post_save, sender=User)
 def create_or_update_user_profile(sender, instance, created, **kwargs):
-    # Esta señal crea un Perfil de Cliente para CUALQUIER usuario nuevo.
-    # Por ahora lo dejamos así. Los cadetes se crearán desde el admin.
     if created:
         if not hasattr(instance, 'clienteprofile'):
             ClienteProfile.objects.create(user=instance)
-    instance.clienteprofile.save()
-# --- FIN: MODELO CLIENTEPROFILE Y SEÑALES ---
+    # Asegurarse de que el perfil se guarde en cada actualización del usuario también
+    if hasattr(instance, 'clienteprofile'):
+        instance.clienteprofile.save()

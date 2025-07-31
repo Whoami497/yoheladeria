@@ -25,9 +25,12 @@ urlpatterns = [
     # --- URL PARA PANEL DE ALERTAS DE LA TIENDA ---
     path('panel-alertas/', views.panel_alertas, name='panel_alertas'),
 
-    # --- INICIO: NUEVAS URLS PARA PANEL DE CADETES ---
+    # --- URLs PARA PANEL DE CADETES ---
     path('cadete/login/', views.login_cadete, name='login_cadete'),
     path('cadete/panel/', views.panel_cadete, name='panel_cadete'),
     path('cadete/logout/', views.logout_cadete, name='logout_cadete'),
-    # --- FIN: NUEVAS URLS PARA PANEL DE CADETES ---
+    
+    # --- INICIO: NUEVA URL PARA GUARDAR SUSCRIPCIÓN PUSH ---
+    path('save-subscription/', views.save_subscription, name='save_subscription'),
+    # --- FIN: NUEVA URL PARA GUARDAR SUSCRIPCIÓN PUSH ---
 ]

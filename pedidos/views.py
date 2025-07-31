@@ -1,12 +1,14 @@
 # pedidos/views.py
 
-from django.conf import settings # <-- NUEVA IMPORTACIÓN
+from django.conf import settings
+from django.http import JsonResponse # <-- NUEVA IMPORTACIÓN
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
+from django.views.decorators.http import require_POST # <-- NUEVA IMPORTACIÓN
 
 from .forms import ClienteRegisterForm, ClienteProfileForm
 from .models import Producto, Sabor, Pedido, DetallePedido, Categoria, OpcionProducto, ClienteProfile, ProductoCanje
@@ -450,7 +452,7 @@ def canjear_puntos(request):
         return redirect('canjear_puntos')
 
     contexto = {
-        'cliente__profile': cliente_profile,
+        'cliente_profile': cliente_profile,
         'productos_canje': productos_canje,
     }
     return render(request, 'pedidos/canjear_puntos.html', contexto)
@@ -488,10 +490,11 @@ def login_cadete(request):
 
 @login_required
 def panel_cadete(request):
-    # Lógica del panel de cadetes irá aquí.
-    # Por ahora, solo muestra la página.
-    # Futuro: verificar que el usuario logueado es realmente un cadete.
-    return render(request, 'pedidos/panel_cadete.html')
+    vapid_public_key = settings.WEBPUSH_SETTINGS.get('VAPID_PUBLIC_KEY')
+    contexto = {
+        'vapid_public_key': vapid_public_key
+    }
+    return render(request, 'pedidos/panel_cadete.html', contexto)
 
 @login_required
 def logout_cadete(request):
