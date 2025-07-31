@@ -121,6 +121,6 @@ CHANNEL_LAYERS = {
 WEBPUSH_SETTINGS = {
     "VAPID_PUBLIC_KEY": 'BJHORO_YlWpEBAqFc271eQ0-KBlVW0rhGC4vnEmDxFs23h6UImslGYBaOxwlJPtHwOR1-Wf9nIYvc3z1dQZV8qo',
     "VAPID_PRIVATE_KEY": '12t89bMz2AJXajwXScfPzWjTfqeO3mRvNf1eSaj4fW8',
-    "VAPID_ADMIN_EMAIL": "lucas548_888@hotmail.com" # Email del administrador
+    "VAPID_ADMIN_EMAIL": "lucas548_888@hotmail.com"
 }
 # --- FIN: CONFIGURACIÓN DE DJANGO WEBPUSH ---
