@@ -9,15 +9,18 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
 from django.views.decorators.http import require_POST
+from django.contrib.admin.views.decorators import staff_member_required # <-- NUEVA IMPORTACIÓN
+from django.urls import reverse # <-- NUEVA IMPORTACIÓN
 
 from .forms import ClienteRegisterForm, ClienteProfileForm
-from .models import Producto, Sabor, Pedido, DetallePedido, Categoria, OpcionProducto, ClienteProfile, ProductoCanje
+from .models import Producto, Sabor, Pedido, DetallePedido, Categoria, OpcionProducto, ClienteProfile, ProductoCanje, CadeteProfile # <-- CadeteProfile añadido
 from decimal import Decimal
 from django.contrib import messages
 
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 import json
+from webpush import send_notification # <-- NUEVA IMPORTACIÓN
 
 
 def index(request):
@@ -30,6 +33,7 @@ def index(request):
     }
     return render(request, 'pedidos/index.html', contexto)
 
+# ... (todas las demás vistas como detalle_producto, ver_carrito, etc. se mantienen igual)...
 def detalle_producto(request, producto_id):
     producto = get_object_or_404(Producto, id=producto_id)
     sabores_disponibles = Sabor.objects.filter(disponible=True).order_by('nombre')
@@ -457,7 +461,46 @@ def canjear_puntos(request):
     }
     return render(request, 'pedidos/canjear_puntos.html', contexto)
 
-# --- Vistas para Panel de Cadetes ---
+# --- Vistas para Tienda y Cadetes ---
+
+@staff_member_required
+def confirmar_pedido(request, pedido_id):
+    pedido = get_object_or_404(Pedido, id=pedido_id)
+    
+    # Prevenir que se confirme un pedido que no está en estado 'RECIBIDO'
+    if pedido.estado != 'RECIBIDO':
+        messages.warning(request, f"El Pedido #{pedido.id} ya fue procesado o cancelado.")
+        return redirect('panel_alertas')
+
+    # 1. Cambiar el estado del pedido
+    pedido.estado = 'EN_PREPARACION'
+    pedido.save()
+
+    # 2. Preparar el contenido (payload) de la notificación
+    payload = {
+        "head": "¡Nuevo Pedido Disponible!",
+        "body": f"Pedido #{pedido.id} para entregar en: {pedido.cliente_direccion}",
+        "icon": request.build_absolute_uri(settings.STATIC_URL + 'images/logo_yo_heladeria_blanco.png'),
+        "url": request.build_absolute_uri(reverse('panel_cadete'))
+    }
+
+    # 3. Buscar a todos los cadetes disponibles y suscritos
+    cadetes_suscritos = CadeteProfile.objects.filter(disponible=True).exclude(subscription_info__isnull=True)
+    
+    # 4. Enviar la notificación a cada uno
+    for perfil in cadetes_suscritos:
+        try:
+            send_notification(perfil.subscription_info, json.dumps(payload), ttl=1000)
+            print(f"Notificación enviada a {perfil.user.username}")
+        except Exception as e:
+            # Es importante registrar errores pero no detener el proceso por un cadete que falle
+            print(f"ERROR enviando notificación a {perfil.user.username}: {e}")
+
+    # 5. Redirigir de vuelta al panel con un mensaje de éxito
+    messages.success(request, f"Pedido #{pedido.id} confirmado. Notificando a {cadetes_suscritos.count()} cadete(s) disponible(s).")
+    return redirect('panel_alertas')
+
+
 def login_cadete(request):
     if request.user.is_authenticated:
         if hasattr(request.user, 'cadeteprofile'):

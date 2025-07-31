@@ -24,9 +24,7 @@
         const alertsContainer = document.getElementById('alerts-container');
         const clearAlertsButton = document.getElementById('clear-alerts');
 
-        // Determinar el protocolo WebSocket (ws:// para HTTP, wss:// para HTTPS)
         const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-        // Construir la URL del WebSocket
         const websocketUrl = wsProtocol + window.location.host + '/ws/pedidos/notifications/';
         
         console.log("Intentando conectar a WebSocket:", websocketUrl);
@@ -34,55 +32,67 @@
 
         chatSocket.onopen = function(e) {
             console.log('Conexión WebSocket establecida.', e);
-            alertsContainer.innerHTML = '<div class="alert alert-success text-center" role="alert">Conectado. Esperando pedidos...</div>';
+            // Limpiamos el contenedor antes de mostrar el mensaje de conectado
+            alertsContainer.innerHTML = ''; 
+            const connectedDiv = document.createElement('div');
+            connectedDiv.className = 'alert alert-success text-center';
+            connectedDiv.textContent = 'Conectado. Esperando pedidos...';
+            alertsContainer.appendChild(connectedDiv);
         };
 
         chatSocket.onmessage = function(e) {
             const data = JSON.parse(e.data);
             const message = data.message;
             const orderId = data.order_id;
-            const orderData = data.order_data; // Obtenemos los datos del pedido
+            const orderData = data.order_data;
 
             console.log('Mensaje recibido:', message, 'ID:', orderId, 'Datos:', orderData);
+            
+            // Si es el primer pedido, quitamos el mensaje de "Esperando..."
+            const waitingMessage = alertsContainer.querySelector('.alert-info, .alert-success');
+            if (waitingMessage) {
+                waitingMessage.remove();
+            }
 
-            // Crear un nuevo elemento de alerta
             const alertDiv = document.createElement('div');
             alertDiv.className = 'alert alert-primary alert-dismissible fade show new-order-alert';
             alertDiv.setAttribute('role', 'alert');
             
-            let alertContent = `<strong>¡Nuevo Pedido Recibido!</strong> Pedido #${orderId}<br>`;
-            alertContent += `Cliente: ${orderData.cliente_nombre || 'N/A'}<br>`;
-            alertContent += `Dirección: ${orderData.cliente_direccion || 'N/A'}<br>`;
-            alertContent += `Teléfono: ${orderData.cliente_telefono || 'N/A'}<br>`;
-            alertContent += `Total: $${parseFloat(orderData.total_pedido || 0).toFixed(2)}<br>`;
-            alertContent += `Método de Pago: ${orderData.metodo_pago || 'N/A'}<br>`;
-            
-            // Mostrar los detalles de los productos
+            let detailsHtml = '';
             if (orderData.detalles && orderData.detalles.length > 0) {
-                alertContent += `<strong>Productos:</strong><ul>`;
+                detailsHtml += `<strong>Productos:</strong><ul class="mb-0">`;
                 orderData.detalles.forEach(detail => {
                     let productName = detail.producto_nombre;
                     if (detail.opcion_nombre) {
                         productName += ` - ${detail.opcion_nombre}`;
                     }
-                    let flavors = detail.sabores_nombres.join(', ') || 'N/A';
-                    alertContent += `<li>${productName} (x${detail.cantidad}) - Sabores: ${flavors}</li>`;
+                    let flavors = detail.sabores_nombres.join(', ') || 'Sin sabores especificados';
+                    detailsHtml += `<li>${productName} (x${detail.cantidad}) <br><small class="text-muted">Sabores: ${flavors}</small></li>`;
                 });
-                alertContent += `</ul>`;
+                detailsHtml += `</ul>`;
             } else {
-                alertContent += `No hay detalles de productos para este pedido.<br>`;
+                detailsHtml = `No hay detalles de productos para este pedido.<br>`;
             }
 
-
             alertDiv.innerHTML = `
-                ${alertContent}
+                <h4 class="alert-heading">¡Nuevo Pedido #${orderId}!</h4>
+                <p class="mb-1"><strong>Cliente:</strong> ${orderData.cliente_nombre || 'N/A'}</p>
+                <p class="mb-1"><strong>Dirección:</strong> ${orderData.cliente_direccion || 'N/A'}</p>
+                <p class="mb-1"><strong>Teléfono:</strong> ${orderData.cliente_telefono || 'N/A'}</p>
+                <p class="mb-1"><strong>Total:</strong> $${parseFloat(orderData.total_pedido || 0).toFixed(2)}</p>
+                <p class="mb-1"><strong>Método de Pago:</strong> ${orderData.metodo_pago || 'N/A'}</p>
+                <hr>
+                ${detailsHtml}
+                <div class="mt-3 pt-3 border-top">
+                    <a href="/confirmar-pedido/${orderId}/" class="btn btn-success w-100 fw-bold">
+                        <i class="bi bi-check-circle-fill"></i> Confirmar y Buscar Cadete
+                    </a>
+                </div>
                 <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
             `;
             
-            alertsContainer.prepend(alertDiv); // Añadir la alerta al principio de la lista
+            alertsContainer.prepend(alertDiv);
 
-            // Opcional: Sonido de alerta (descomenta si tienes un archivo de sonido en static/sonido_alerta.mp3)
-            // new Audio('{% static "sonido_alerta.mp3" %}').play(); 
         };
 
         chatSocket.onclose = function(e) {
@@ -96,9 +106,6 @@
         };
 
         clearAlertsButton.addEventListener('click', function() {
-            while (alertsContainer.firstChild) {
-                alertsContainer.removeChild(alertsContainer.firstChild);
-            }
             alertsContainer.innerHTML = '<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
         });
     });
@@ -106,14 +113,14 @@
 
 <style>
     .new-order-alert {
-        border: 2px solid var(--color-yo-azul-claro);
-        box-shadow: 0 4px 10px rgba(0, 123, 255, 0.5);
+        border: 2px solid #0d6efd;
+        box-shadow: 0 4px 12px rgba(13, 110, 253, 0.4);
         animation: pulse 1.5s infinite alternate;
     }
 
     @keyframes pulse {
-        0% { transform: scale(1); }
-        100% { transform: scale(1.02); }
+        from { transform: scale(1); box-shadow: 0 4px 12px rgba(13, 110, 253, 0.2); }
+        to { transform: scale(1.01); box-shadow: 0 6px 16px rgba(13, 110, 253, 0.5); }
     }
 </style>
 
