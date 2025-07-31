@@ -1,14 +1,14 @@
 # pedidos/views.py
 
 from django.conf import settings
-from django.http import JsonResponse # <-- NUEVA IMPORTACIÓN
+from django.http import JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
-from django.views.decorators.http import require_POST # <-- NUEVA IMPORTACIÓN
+from django.views.decorators.http import require_POST
 
 from .forms import ClienteRegisterForm, ClienteProfileForm
 from .models import Producto, Sabor, Pedido, DetallePedido, Categoria, OpcionProducto, ClienteProfile, ProductoCanje
@@ -452,7 +452,7 @@ def canjear_puntos(request):
         return redirect('canjear_puntos')
 
     contexto = {
-        'cliente_profile': cliente_profile,
+        'cliente_profile': cliente_profile, # Corregido de cliente__profile
         'productos_canje': productos_canje,
     }
     return render(request, 'pedidos/canjear_puntos.html', contexto)
@@ -472,7 +472,6 @@ def login_cadete(request):
             password = form.cleaned_data.get('password')
             user = authenticate(username=username, password=password)
             if user is not None:
-                # Comprobar que el usuario tiene un perfil de cadete
                 if hasattr(user, 'cadeteprofile'):
                     login(request, user)
                     messages.success(request, f'¡Bienvenido de vuelta, {user.first_name or user.username}!')
@@ -490,11 +489,13 @@ def login_cadete(request):
 
 @login_required
 def panel_cadete(request):
+    # Futuro: verificar que el usuario logueado es realmente un cadete.
     vapid_public_key = settings.WEBPUSH_SETTINGS.get('VAPID_PUBLIC_KEY')
     contexto = {
         'vapid_public_key': vapid_public_key
     }
     return render(request, 'pedidos/panel_cadete.html', contexto)
+
 
 @login_required
 def logout_cadete(request):
