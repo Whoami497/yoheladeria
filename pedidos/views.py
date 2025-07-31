@@ -20,7 +20,7 @@ from django.contrib import messages
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 import json
-from webpush import send_user_notification # <-- ¡CAMBIO IMPORTANTE AQUÍ!
+from webpush import send_user_notification
 
 
 def index(request):
@@ -463,6 +463,37 @@ def canjear_puntos(request):
 
 # --- Vistas para Tienda y Cadetes ---
 
+@staff_member_required
+def confirmar_pedido(request, pedido_id):
+    pedido = get_object_or_404(Pedido, id=pedido_id)
+    
+    if pedido.estado != 'RECIBIDO':
+        messages.warning(request, f"El Pedido #{pedido.id} ya fue procesado.")
+        return redirect('panel_alertas')
+
+    pedido.estado = 'EN_PREPARACION'
+    pedido.save()
+
+    payload = {
+        "head": "¡Nuevo Pedido Disponible!",
+        "body": f"Pedido #{pedido.id} para entregar en {pedido.cliente_direccion}",
+        "icon": request.build_absolute_uri(settings.STATIC_URL + 'images/logo_yo_heladeria_blanco.png'),
+        "url": request.build_absolute_uri(reverse('panel_cadete'))
+    }
+
+    cadetes_suscritos = CadeteProfile.objects.filter(disponible=True).exclude(subscription_info__isnull=True)
+    
+    for perfil in cadetes_suscritos:
+        try:
+            send_user_notification(user=perfil.user, payload=payload, ttl=1000)
+            print(f"Notificación enviada a {perfil.user.username}")
+        except Exception as e:
+            print(f"ERROR enviando a {perfil.user.username}: {e}")
+
+    messages.success(request, f"Pedido #{pedido.id} confirmado. Notificando a {cadetes_suscritos.count()} cadete(s).")
+    return redirect('panel_alertas')
+
+
 def login_cadete(request):
     if request.user.is_authenticated:
         if hasattr(request.user, 'cadeteprofile'):
@@ -500,6 +531,7 @@ def panel_cadete(request):
     }
     return render(request, 'pedidos/panel_cadete.html', contexto)
 
+
 @login_required
 def logout_cadete(request):
     logout(request)
@@ -524,33 +556,3 @@ def save_subscription(request):
         return JsonResponse({'status': 'ok', 'message': 'Subscription saved'})
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
-
-@staff_member_required
-def confirmar_pedido(request, pedido_id):
-    pedido = get_object_or_404(Pedido, id=pedido_id)
-    
-    if pedido.estado != 'RECIBIDO':
-        messages.warning(request, f"El Pedido #{pedido.id} ya fue procesado.")
-        return redirect('panel_alertas')
-
-    pedido.estado = 'EN_PREPARACION'
-    pedido.save()
-
-    payload = {
-        "head": "¡Nuevo Pedido Disponible!",
-        "body": f"Pedido #{pedido.id} para entregar en {pedido.cliente_direccion}",
-        "icon": request.build_absolute_uri(settings.STATIC_URL + 'images/logo_yo_heladeria_blanco.png'),
-        "url": request.build_absolute_uri(reverse('panel_cadete'))
-    }
-
-    cadetes_suscritos = CadeteProfile.objects.filter(disponible=True).exclude(subscription_info__isnull=True)
-    
-    for perfil in cadetes_suscritos:
-        try:
-            send_user_notification(user=perfil.user, payload=payload, ttl=1000)
-            print(f"Notificación enviada a {perfil.user.username}")
-        except Exception as e:
-            print(f"ERROR enviando a {perfil.user.username}: {e}")
-
-    messages.success(request, f"Pedido #{pedido.id} confirmado. Notificando a {cadetes_suscritos.count()} cadete(s).")
-    return redirect('panel_alertas')
