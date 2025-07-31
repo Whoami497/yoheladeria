@@ -11,21 +11,23 @@ urlpatterns = [
     path('pedido_exitoso/', views.pedido_exitoso, name='pedido_exitoso'),
     path('categoria/<int:categoria_id>/', views.productos_por_categoria, name='productos_por_categoria'),
 
-    # --- INICIO: NUEVAS URLS PARA AUTENTICACIÓN Y PERFIL ---
+    # --- URLs para AUTENTICACIÓN Y PERFIL DE CLIENTES ---
     path('register/', views.register_cliente, name='register_cliente'),
     path('perfil/', views.perfil_cliente, name='perfil_cliente'),
     path('logout/', views.logout_cliente, name='logout_cliente'),
-    # --- FIN: NUEVAS URLS PARA AUTENTICACIÓN Y PERFIL ---
-
-    # --- INICIO: NUEVA URL PARA HISTORIAL DE PEDIDOS ---
+    
+    # --- URL PARA HISTORIAL DE PEDIDOS DEL CLIENTE ---
     path('historial-pedidos/', views.historial_pedidos_cliente, name='historial_pedidos_cliente'),
-    # --- FIN: NUEVA URL PARA HISTORIAL DE PEDIDOS ---
 
-    # --- INICIO: NUEVA URL PARA CANJEAR PUNTOS ---
+    # --- URL PARA CANJEAR PUNTOS DEL CLIENTE ---
     path('canjear/', views.canjear_puntos, name='canjear_puntos'),
-    # --- FIN: NUEVA URL PARA CANJEAR PUNTOS ---
 
-    # --- INICIO: NUEVA URL PARA PANEL DE ALERTAS ---
-    path('panel-alertas/', views.panel_alertas, name='panel_alertas'), # <-- NUEVA LÍNEA
-    # --- FIN: NUEVA URL PARA PANEL DE ALERTAS ---
+    # --- URL PARA PANEL DE ALERTAS DE LA TIENDA ---
+    path('panel-alertas/', views.panel_alertas, name='panel_alertas'),
+
+    # --- INICIO: NUEVAS URLS PARA PANEL DE CADETES ---
+    path('cadete/login/', views.login_cadete, name='login_cadete'),
+    path('cadete/panel/', views.panel_cadete, name='panel_cadete'),
+    path('cadete/logout/', views.logout_cadete, name='logout_cadete'),
+    # --- FIN: NUEVAS URLS PARA PANEL DE CADETES ---
 ]

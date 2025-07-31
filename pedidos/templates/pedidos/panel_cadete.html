@@ -1,0 +1,150 @@
+{% extends 'pedidos/base.html' %}
+{% load static %}
+
+{% block title %}Panel de Cadete - {{ block.super }}{% endblock %}
+
+{% block content %}
+<div class="container mt-5 mb-5">
+    <div class="row">
+        <div class="col-12">
+            
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert alert-{% if message.tags %}{{ message.tags }}{% else %}info{% endif %} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+
+            <div class="card shadow-sm">
+                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                    <h3 class="mb-0"><i class="bi bi-speedometer2"></i> Panel de Control</h3>
+                    <a href="{% url 'logout_cadete' %}" class="btn btn-outline-light btn-sm">
+                        Cerrar Sesión <i class="bi bi-box-arrow-right"></i>
+                    </a>
+                </div>
+                <div class="card-body">
+                    <h4>¡Bienvenido, {{ user.first_name|default:user.username }}!</h4>
+                    <p>Este es tu centro de operaciones. Desde aquí podrás ver y gestionar los pedidos asignados.</p>
+                    <hr>
+                    <h5>Tu Estado Actual:</h5>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item"><strong>Usuario:</strong> {{ user.username }}</li>
+                        <li class="list-group-item"><strong>Teléfono:</strong> {{ user.cadeteprofile.telefono }}</li>
+                        <li class="list-group-item"><strong>Vehículo:</strong> {{ user.cadeteprofile.get_vehiculo_display }}</li>
+                        <li class="list-group-item">
+                            <strong>Disponible para entregas:</strong>
+                            {% if user.cadeteprofile.disponible %}
+                                <span class="badge bg-success fs-6">SÍ</span>
+                            {% else %}
+                                <span class="badge bg-danger fs-6">NO</span>
+                            {% endif %}
+                        </li>
+                    </ul>
+                    
+                    <div class="mt-3 pt-3 border-top">
+                        <h5>Notificaciones Push</h5>
+                        <p class="text-muted small">Activa las notificaciones para recibir alertas de nuevos pedidos directamente en tu dispositivo, incluso si no tienes esta página abierta.</p>
+                        <button id="subscribe-button" class="btn btn-primary">
+                            <i class="bi bi-bell-fill"></i> Activar Notificaciones
+                        </button>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="mb-0"><i class="bi bi-box-seam"></i> Pedidos Asignados</h4>
+                </div>
+                <div class="card-body text-center">
+                    <p class="text-muted fs-5">De momento no hay pedidos para mostrar.</p>
+                    <p class="text-muted">Próximamente: ¡Aquí aparecerá la lista de nuevos pedidos para que puedas aceptarlos y entregarlos!</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 1. Tomamos la clave pública que Django nos envió desde la vista
+    const VAPID_PUBLIC_KEY = '{{ vapid_public_key }}';
+
+    // 2. Función auxiliar para convertir la clave a un formato que el navegador necesita
+    function urlBase64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding)
+            .replace(/\-/g, '+')
+            .replace(/_/g, '/');
+
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+    }
+
+    // 3. Función principal para suscribirse a las notificaciones
+    async function subscribeUser() {
+        try {
+            // 3.1. Registramos el Service Worker
+            const registration = await navigator.serviceWorker.register("{% static 'js/service-worker.js' %}");
+            console.log('Service Worker registrado con éxito:', registration);
+
+            // 3.2. Pedimos permiso para las notificaciones
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') {
+                console.log('Permiso de notificación denegado.');
+                alert('Necesitas aceptar las notificaciones para recibir alertas.');
+                return;
+            }
+
+            // 3.3. Nos suscribimos al servicio de notificaciones push del navegador
+            const subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+            });
+            console.log('Suscripción exitosa:', JSON.stringify(subscription));
+
+            // 3.4. Enviamos la suscripción a nuestro backend para guardarla
+            const response = await fetch('/save-subscription/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}' // Token de seguridad de Django
+                },
+                body: JSON.stringify(subscription)
+            });
+
+            if (response.ok) {
+                console.log('Suscripción enviada al servidor con éxito.');
+                alert('¡Notificaciones activadas correctamente!');
+            } else {
+                console.error('Falló el envío de la suscripción al servidor.');
+                alert('Hubo un error al activar las notificaciones. Inténtalo de nuevo.');
+            }
+
+        } catch (error) {
+            console.error('Error durante el proceso de suscripción:', error);
+            alert('Hubo un error al activar las notificaciones.');
+        }
+    }
+
+    // 4. Conectamos la función al clic del botón
+    const subscribeButton = document.getElementById('subscribe-button');
+    if ('serviceWorker' in navigator && 'PushManager' in window) {
+        subscribeButton.addEventListener('click', subscribeUser);
+    } else {
+        console.warn('Las notificaciones push no son soportadas por este navegador.');
+        subscribeButton.textContent = 'Notificaciones no soportadas';
+        subscribeButton.disabled = true;
+    }
+</script>
+{% endblock %}

@@ -5,8 +5,13 @@ from django.conf import settings
 from django.utils.html import format_html
 from django import forms
 from django.db import models
+from django.urls import reverse # Necesario para el enlace al usuario
 
-from .models import Categoria, Producto, OpcionProducto, Sabor, Pedido, DetallePedido, ClienteProfile, ProductoCanje
+# Importa todos tus modelos, incluyendo el nuevo CadeteProfile
+from .models import (
+    Categoria, Producto, OpcionProducto, Sabor, Pedido, DetallePedido, 
+    ClienteProfile, ProductoCanje, ZonaEnvio, CadeteProfile
+)
 
 
 # Admin para Categorias
@@ -88,27 +93,24 @@ class DetallePedidoInline(admin.TabularInline):
 # Admin para Pedidos
 @admin.register(Pedido)
 class PedidoAdmin(admin.ModelAdmin):
-    # --- INICIO: CAMBIO CLAVE AQUÍ ---
-    list_display = ('id', 'usuario_asociado', 'cliente_nombre', 'cliente_telefono', 'fecha_pedido', 'estado', 'metodo_pago', 'valor_total') # Añadido 'metodo_pago'
-    list_filter = ('estado', 'metodo_pago', 'fecha_pedido') # Añadido 'metodo_pago'
-    # --- FIN: CAMBIO CLAVE AQUÍ ---
+    list_display = ('id', 'usuario_asociado', 'cliente_nombre', 'cliente_telefono', 'fecha_pedido', 'estado', 'metodo_pago', 'zona_envio', 'valor_total')
+    list_filter = ('estado', 'metodo_pago', 'zona_envio', 'fecha_pedido')
     search_fields = ('cliente_nombre', 'cliente_telefono', 'user__username', 'detalles__producto__nombre')
     date_hierarchy = 'fecha_pedido'
-    readonly_fields = ('fecha_pedido', 'valor_total')
+    readonly_fields = ('fecha_pedido', 'valor_total') 
     
     inlines = [DetallePedidoInline] 
 
-    # Mejoramos la organización de los campos en el formulario de edición de Pedido
     fieldsets = (
         (None, {
-            'fields': (('user', 'estado'),)
+            'fields': (('user', 'estado'), ('metodo_pago', 'zona_envio'))
         }),
         ('Detalles del Cliente', {
             'fields': ('cliente_nombre', 'cliente_direccion', 'cliente_telefono'),
             'classes': ('collapse',)
         }),
         ('Información del Pedido', {
-            'fields': ('fecha_pedido', 'valor_total', 'metodo_pago'), # --- CAMBIO CLAVE AQUÍ ---
+            'fields': ('fecha_pedido', 'valor_total'),
         }),
     )
 
@@ -158,6 +160,22 @@ class ClienteProfileAdmin(admin.ModelAdmin):
         return obj.user.email
     user_email.short_description = 'Email'
 
+# --- INICIO: NUEVO ADMIN PARA CadeteProfile ---
+@admin.register(CadeteProfile)
+class CadeteProfileAdmin(admin.ModelAdmin):
+    list_display = ('user_link', 'telefono', 'vehiculo', 'disponible')
+    list_filter = ('disponible', 'vehiculo')
+    search_fields = ('user__username', 'user__first_name', 'user__last_name', 'telefono')
+    list_editable = ('disponible', 'vehiculo', 'telefono') # Permite editar estos campos directamente en la lista
+
+    def user_link(self, obj):
+        # Crea un enlace clickeable al perfil del usuario en el admin
+        link = reverse("admin:auth_user_change", args=[obj.user.id])
+        return format_html('<a href="{}">{}</a>', link, obj.user.username)
+    user_link.short_description = 'Usuario (Cadete)'
+# --- FIN: NUEVO ADMIN PARA CadeteProfile ---
+
+
 # Admin para ProductoCanje
 @admin.register(ProductoCanje)
 class ProductoCanjeAdmin(admin.ModelAdmin):
@@ -172,3 +190,12 @@ class ProductoCanjeAdmin(admin.ModelAdmin):
                                settings.STATIC_URL + obj.imagen)
         return "Sin Imagen"
     mostrar_imagen_miniatura.short_description = 'Miniatura'
+
+
+# Admin para ZonaEnvio
+@admin.register(ZonaEnvio)
+class ZonaEnvioAdmin(admin.ModelAdmin):
+    list_display = ('nombre', 'costo', 'disponible')
+    list_filter = ('disponible',)
+    search_fields = ('nombre',)
+    ordering = ('nombre',)

@@ -66,6 +66,22 @@ class OpcionProducto(models.Model):
         unique_together = ('producto_base', 'nombre_opcion') 
 
 
+# --- INICIO: NUEVO MODELO ZonaEnvio ---
+class ZonaEnvio(models.Model):
+    nombre = models.CharField(max_length=100, unique=True, help_text="Nombre de la zona de envío (ej: Centro, Norte, Sur).")
+    costo = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, help_text="Costo de envío para esta zona.")
+    disponible = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Zona de Envío"
+        verbose_name_plural = "Zonas de Envío"
+        ordering = ['nombre']
+
+    def __str__(self):
+        return f"{self.nombre} (${self.costo})"
+# --- FIN: NUEVO MODELO ZonaEnvio ---
+
+
 class Pedido(models.Model):
     ESTADO_CHOICES = [
         ('RECIBIDO', 'Recibido'),
@@ -75,7 +91,7 @@ class Pedido(models.Model):
         ('CANCELADO', 'Cancelado'),
     ]
 
-    METODO_PAGO_CHOICES = [ # --- NUEVO: Opciones para método de pago ---
+    METODO_PAGO_CHOICES = [
         ('EFECTIVO', 'Efectivo'),
         ('MERCADOPAGO', 'Mercado Pago'),
     ]
@@ -86,8 +102,12 @@ class Pedido(models.Model):
     cliente_telefono = models.CharField(max_length=20, blank=True)
     fecha_pedido = models.DateTimeField(auto_now_add=True)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='RECIBIDO')
-    metodo_pago = models.CharField(max_length=20, choices=METODO_PAGO_CHOICES, default='EFECTIVO') # --- NUEVO CAMPO ---
+    metodo_pago = models.CharField(max_length=20, choices=METODO_PAGO_CHOICES, default='EFECTIVO')
     
+    # --- INICIO: NUEVO CAMPO zona_envio ---
+    zona_envio = models.ForeignKey(ZonaEnvio, on_delete=models.SET_NULL, null=True, blank=True, related_name='pedidos_en_zona')
+    # --- FIN: NUEVO CAMPO zona_envio ---
+
     def __str__(self):
         if self.user:
             return f'Pedido #{self.id} - {self.user.username}'
@@ -101,12 +121,17 @@ class Pedido(models.Model):
             if detalle.opcion_seleccionada:
                 precio_unitario += detalle.opcion_seleccionada.precio_adicional
             total += precio_unitario * detalle.cantidad 
+        
+        # --- INICIO: Sumar costo de envío al total ---
+        if self.zona_envio and self.zona_envio.costo:
+            total += self.zona_envio.costo
+        # --- FIN: Sumar costo de envío al total ---
         return total
 
 
 class DetallePedido(models.Model):
     pedido = models.ForeignKey(Pedido, related_name='detalles', on_delete=models.CASCADE)
-    producto = models.ForeignKey(Producto, on_delete=models.PROTECT) # El producto base
+    producto = models.ForeignKey(Producto, on_delete=models.PROTECT)
     opcion_seleccionada = models.ForeignKey(OpcionProducto, on_delete=models.PROTECT, null=True, blank=True) 
     sabores = models.ManyToManyField(Sabor)
     cantidad = models.PositiveIntegerField(default=1)
@@ -135,6 +160,36 @@ class ProductoCanje(models.Model):
 # --- FIN: NUEVO MODELO ProductoCanje ---
 
 
+# --- INICIO: MODELO CADETEPROFILE ---
+class CadeteProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='cadeteprofile')
+    telefono = models.CharField(max_length=20, unique=True, help_text="Número de teléfono único del cadete.")
+    
+    VEHICULO_CHOICES = [
+        ('MOTO', 'Motocicleta'),
+        ('BICI', 'Bicicleta'),
+        ('AUTO', 'Automóvil'),
+    ]
+    vehiculo = models.CharField(max_length=4, choices=VEHICULO_CHOICES, default='MOTO')
+    
+    disponible = models.BooleanField(default=False, help_text="Marcar si el cadete está disponible para recibir pedidos.")
+    
+    # Campos para la futura integración con mapas
+    latitud_actual = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitud_actual = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Perfil de Cadete"
+        verbose_name_plural = "Perfiles de Cadetes"
+
+    def __str__(self):
+        # Muestra el nombre completo si está disponible, si no, el username.
+        if self.user.first_name and self.user.last_name:
+            return f'Cadete: {self.user.first_name} {self.user.last_name}'
+        return f'Cadete: {self.user.username}'
+# --- FIN: MODELO CADETEPROFILE ---
+
+
 # --- INICIO: MODELO CLIENTEPROFILE Y SEÑALES ---
 class ClienteProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
@@ -147,7 +202,10 @@ class ClienteProfile(models.Model):
 
 @receiver(post_save, sender=User)
 def create_or_update_user_profile(sender, instance, created, **kwargs):
+    # Esta señal crea un Perfil de Cliente para CUALQUIER usuario nuevo.
+    # Por ahora lo dejamos así. Los cadetes se crearán desde el admin.
     if created:
-        ClienteProfile.objects.create(user=instance)
+        if not hasattr(instance, 'clienteprofile'):
+            ClienteProfile.objects.create(user=instance)
     instance.clienteprofile.save()
 # --- FIN: MODELO CLIENTEPROFILE Y SEÑALES ---

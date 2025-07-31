@@ -1,21 +1,21 @@
 # pedidos/views.py
 
+from django.conf import settings # <-- NUEVA IMPORTACIÓN
 from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth import login, logout # Importaciones para autenticación
-from django.contrib.auth.decorators import login_required # Decorador para vistas protegidas
-from django.db import transaction # Para asegurar que las operaciones de canje sean atómicas
-from django.core.exceptions import ObjectDoesNotExist # Para manejar objetos no encontrados
+from django.contrib.auth import login, logout, authenticate
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.forms import AuthenticationForm
+from django.db import transaction
+from django.core.exceptions import ObjectDoesNotExist
 
-from .forms import ClienteRegisterForm, ClienteProfileForm # Importamos nuestros formularios personalizados
+from .forms import ClienteRegisterForm, ClienteProfileForm
 from .models import Producto, Sabor, Pedido, DetallePedido, Categoria, OpcionProducto, ClienteProfile, ProductoCanje
 from decimal import Decimal
 from django.contrib import messages
 
-# --- NUEVAS IMPORTACIONES PARA CHANNELS ---
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 import json
-# --- FIN: NUEVAS IMPORTACIONES PARA CHANNELS ---
 
 
 def index(request):
@@ -55,7 +55,6 @@ def detalle_producto(request, producto_id):
             }
             return render(request, 'pedidos/detalle_producto.html', contexto)
 
-        # --- Validaciones de Sabores ---
         if producto.sabores_maximos > 0:
             cantidad_sabores_seleccionada_en_form = int(request.POST.get('cantidad_sabores', 0))
 
@@ -82,18 +81,15 @@ def detalle_producto(request, producto_id):
         if producto.sabores_maximos == 0 and sabores_seleccionados_ids:
             sabores_seleccionados_ids = []
 
-        # --- Lógica de Carrito ---
         if 'carrito' not in request.session:
             request.session['carrito'] = {}
 
-        # --- INICIO: Leer la cantidad del input ---
         try:
             cantidad_a_agregar = int(request.POST.get('cantidad_item', 1))
             if cantidad_a_agregar < 1:
                 cantidad_a_agregar = 1
         except ValueError:
             cantidad_a_agregar = 1
-        # --- FIN: Leer la cantidad del input ---
 
         sabores_nombres = []
         if sabores_seleccionados_ids:
@@ -101,7 +97,6 @@ def detalle_producto(request, producto_id):
             sabores_nombres = [sabor.nombre for sabor in sabores_objetos]
             sabores_nombres.sort()
 
-        # Ajustar precio y nombre si hay opción seleccionada
         precio_final_item = producto.precio
         nombre_item_carrito = producto.nombre
         opcion_id_para_carrito = None
@@ -115,12 +110,10 @@ def detalle_producto(request, producto_id):
             opcion_nombre_para_carrito = opcion_seleccionada_obj.nombre_opcion
             opcion_imagen_para_carrito = opcion_seleccionada_obj.imagen_opcion if opcion_seleccionada_obj.imagen_opcion else producto.imagen
 
-
         item_key = f"{producto.id}_"
         if opcion_id_para_carrito:
             item_key += f"opcion-{opcion_id_para_carrito}_"
         item_key += "_".join(sorted(sabores_seleccionados_ids))
-
 
         item = {
             'producto_id': producto.id,
@@ -196,7 +189,6 @@ def ver_carrito(request):
         telefono = request.POST.get('cliente_telefono')
         metodo_pago = request.POST.get('metodo_pago')
 
-        # --- INICIO: Asignar user al Pedido y método de pago ---
         pedido_kwargs = {
             'cliente_nombre': nombre,
             'cliente_direccion': direccion,
@@ -207,21 +199,19 @@ def ver_carrito(request):
             pedido_kwargs['user'] = request.user
             if hasattr(request.user, 'clienteprofile'):
                 profile = request.user.clienteprofile
-                if not nombre and profile.first_name and profile.last_name:
-                    pedido_kwargs['cliente_nombre'] = f"{profile.first_name} {profile.last_name}"
+                if not nombre and request.user.first_name and request.user.last_name:
+                    pedido_kwargs['cliente_nombre'] = f"{request.user.first_name} {request.user.last_name}"
                 if not direccion and profile.direccion:
                     pedido_kwargs['cliente_direccion'] = profile.direccion
                 if not telefono and profile.telefono:
                     pedido_kwargs['cliente_telefono'] = profile.telefono
 
         nuevo_pedido = Pedido.objects.create(**pedido_kwargs)
-        # --- FIN: Asignar user al Pedido y método de pago ---
         
-        # --- INICIO: Ajuste en la creación de DetallePedido para la cantidad y suma de puntos ---
         puntos_ganados = 0
         total_del_pedido_para_puntos = Decimal('0.00')
 
-        detalles_para_notificacion = [] # Lista para almacenar los detalles del pedido para la notificación
+        detalles_para_notificacion = []
 
         for key, item_data in carrito.items():
             try:
@@ -244,7 +234,6 @@ def ver_carrito(request):
                 precio_unitario_item = Decimal(item_data['precio'])
                 total_del_pedido_para_puntos += precio_unitario_item * item_data['cantidad']
                 
-                # Añadir detalles para la notificación
                 detalles_para_notificacion.append({
                     'producto_nombre': producto.nombre,
                     'opcion_nombre': opcion_obj_pedido.nombre_opcion if opcion_obj_pedido else None,
@@ -252,23 +241,19 @@ def ver_carrito(request):
                     'sabores_nombres': [s.nombre for s in sabores_seleccionados],
                 })
 
-            except Producto.DoesNotExist:
-                messages.warning(request, f"Advertencia: Un producto con ID {item_data['producto_id']} no pudo ser añadido al pedido porque no existe.")
-                continue
-            except OpcionProducto.DoesNotExist:
-                messages.warning(request, f"Advertencia: La opción de producto con ID {item_data['opcion_id']} no pudo ser añadida al pedido porque no existe.")
+            except (Producto.DoesNotExist, OpcionProducto.DoesNotExist) as e:
+                messages.warning(request, f"Advertencia: Un ítem no pudo ser añadido al pedido final porque ya no existe. Error: {e}")
                 continue
             except Exception as e:
                 messages.error(request, f"Error al procesar el detalle del pedido para {item_data.get('producto_nombre', 'un producto')}: {e}")
                 continue
 
-        if request.user.is_authenticated:
+        if request.user.is_authenticated and hasattr(request.user, 'clienteprofile'):
             puntos_ganados = int(total_del_pedido_para_puntos / Decimal('500')) * 100
             request.user.clienteprofile.puntos_fidelidad += puntos_ganados
             request.user.clienteprofile.save()
             messages.success(request, f"¡Has ganado {puntos_ganados} puntos de fidelidad con este pedido!")
 
-        # --- INICIO: LÓGICA DE ENVÍO DE NOTIFICACIÓN A CHANNELS (CON DEBUGGING) ---
         try:
             channel_layer = get_channel_layer()
             async_to_sync(channel_layer.group_send)(
@@ -282,7 +267,7 @@ def ver_carrito(request):
                         'cliente_direccion': nuevo_pedido.cliente_direccion,
                         'cliente_telefono': nuevo_pedido.cliente_telefono,
                         'metodo_pago': nuevo_pedido.metodo_pago,
-                        'total_pedido': str(nuevo_pedido.total_pedido), # <-- ¡Cambiado aquí!
+                        'total_pedido': str(nuevo_pedido.total_pedido),
                         'detalles': detalles_para_notificacion,
                     }
                 }
@@ -291,8 +276,6 @@ def ver_carrito(request):
         except Exception as e:
             print(f"ERROR al enviar notificación de pedido a Channels: {e}")
             messages.error(request, f"ERROR INTERNO: No se pudo enviar la alerta en tiempo real. Contacta a soporte. Error: {e}")
-        # --- FIN: LÓGICA DE ENVÍO DE NOTIFICACIÓN A CHANNELS ---
-
 
         del request.session['carrito']
         request.session.modified = True
@@ -320,9 +303,6 @@ def eliminar_del_carrito(request, item_key):
     return redirect('ver_carrito')
 
 def productos_por_categoria(request, categoria_id):
-    """
-    Vista para mostrar productos filtrados por una categoría específica.
-    """
     categoria = get_object_or_404(Categoria, pk=categoria_id)
     productos = Producto.objects.filter(categoria=categoria, disponible=True).order_by('nombre')
     
@@ -399,9 +379,6 @@ def perfil_cliente(request):
 
 @login_required
 def historial_pedidos_cliente(request):
-    """
-    Vista para mostrar el historial de pedidos de un cliente autenticado.
-    """
     pedidos = Pedido.objects.filter(user=request.user).order_by('-fecha_pedido')
     
     cliente_profile = None
@@ -420,15 +397,9 @@ def logout_cliente(request):
     messages.info(request, "Has cerrado sesión exitosamente.")
     return redirect('index')
 
-# --- INICIO: NUEVA VISTA PARA EL PANEL DE ALERTAS ---
 def panel_alertas(request):
-    """
-    Vista para mostrar el panel de alertas de nuevos pedidos en la heladería.
-    """
     return render(request, 'pedidos/panel_alertas.html')
-# --- FIN: NUEVA VISTA PARA EL PANEL DE ALERTAS ---
 
-# --- INICIO: NUEVA VISTA PARA CANJEAR PUNTOS ---
 @login_required
 def canjear_puntos(request):
     cliente_profile = request.user.clienteprofile
@@ -479,8 +450,51 @@ def canjear_puntos(request):
         return redirect('canjear_puntos')
 
     contexto = {
-        'cliente_profile': cliente_profile,
+        'cliente__profile': cliente_profile,
         'productos_canje': productos_canje,
     }
     return render(request, 'pedidos/canjear_puntos.html', contexto)
-# --- FIN: NUEVA VISTA PARA CANJEAR PUNTOS ---
+
+# --- Vistas para Panel de Cadetes ---
+def login_cadete(request):
+    if request.user.is_authenticated:
+        if hasattr(request.user, 'cadeteprofile'):
+            return redirect('panel_cadete')
+        else:
+            return redirect('index')
+
+    if request.method == 'POST':
+        form = AuthenticationForm(request, data=request.POST)
+        if form.is_valid():
+            username = form.cleaned_data.get('username')
+            password = form.cleaned_data.get('password')
+            user = authenticate(username=username, password=password)
+            if user is not None:
+                # Comprobar que el usuario tiene un perfil de cadete
+                if hasattr(user, 'cadeteprofile'):
+                    login(request, user)
+                    messages.success(request, f'¡Bienvenido de vuelta, {user.first_name or user.username}!')
+                    return redirect('panel_cadete')
+                else:
+                    messages.error(request, 'Acceso denegado. Este usuario no es un cadete.')
+            else:
+                messages.error(request, 'Usuario o contraseña incorrectos.')
+        else:
+            messages.error(request, 'Usuario o contraseña incorrectos.')
+    else:
+        form = AuthenticationForm()
+    
+    return render(request, 'pedidos/login_cadete.html', {'form': form})
+
+@login_required
+def panel_cadete(request):
+    # Lógica del panel de cadetes irá aquí.
+    # Por ahora, solo muestra la página.
+    # Futuro: verificar que el usuario logueado es realmente un cadete.
+    return render(request, 'pedidos/panel_cadete.html')
+
+@login_required
+def logout_cadete(request):
+    logout(request)
+    messages.info(request, "Has cerrado sesión como cadete.")
+    return redirect('login_cadete')
