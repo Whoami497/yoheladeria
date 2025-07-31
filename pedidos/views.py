@@ -452,7 +452,7 @@ def canjear_puntos(request):
         return redirect('canjear_puntos')
 
     contexto = {
-        'cliente_profile': cliente_profile, # Corregido de cliente__profile
+        'cliente_profile': cliente_profile,
         'productos_canje': productos_canje,
     }
     return render(request, 'pedidos/canjear_puntos.html', contexto)
@@ -489,7 +489,6 @@ def login_cadete(request):
 
 @login_required
 def panel_cadete(request):
-    # Futuro: verificar que el usuario logueado es realmente un cadete.
     vapid_public_key = settings.WEBPUSH_SETTINGS.get('VAPID_PUBLIC_KEY')
     contexto = {
         'vapid_public_key': vapid_public_key
@@ -502,3 +501,22 @@ def logout_cadete(request):
     logout(request)
     messages.info(request, "Has cerrado sesión como cadete.")
     return redirect('login_cadete')
+
+@login_required
+@require_POST
+def save_subscription(request):
+    if not hasattr(request.user, 'cadeteprofile'):
+        return JsonResponse({'status': 'error', 'message': 'User is not a cadete'}, status=403)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'status': 'error', 'message': 'Invalid JSON'}, status=400)
+
+    try:
+        profile = request.user.cadeteprofile
+        profile.subscription_info = data
+        profile.save()
+        return JsonResponse({'status': 'ok', 'message': 'Subscription saved'})
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
