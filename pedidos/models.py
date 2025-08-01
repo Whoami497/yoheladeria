@@ -81,10 +81,45 @@ class ZonaEnvio(models.Model):
         return f"{self.nombre} (${self.costo})"
 
 
+# Modelo CadeteProfile (Movido aquí para que Pedido pueda referenciarlo)
+class CadeteProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='cadeteprofile')
+    telefono = models.CharField(max_length=20, unique=True, help_text="Número de teléfono único del cadete.")
+    
+    VEHICULO_CHOICES = [
+        ('MOTO', 'Motocicleta'),
+        ('BICI', 'Bicicleta'),
+        ('AUTO', 'Automóvil'),
+    ]
+    vehiculo = models.CharField(max_length=4, choices=VEHICULO_CHOICES, default='MOTO')
+    
+    disponible = models.BooleanField(default=False, help_text="Marcar si el cadete está disponible para recibir pedidos.")
+    
+    subscription_info = models.JSONField(
+        null=True, 
+        blank=True, 
+        verbose_name="Información de Suscripción WebPush",
+        help_text="Contiene la información de la suscripción push del navegador del cadete."
+    )
+
+    latitud_actual = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitud_actual = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Perfil de Cadete"
+        verbose_name_plural = "Perfiles de Cadetes"
+
+    def __str__(self):
+        if self.user.first_name and self.user.last_name:
+            return f'Cadete: {self.user.first_name} {self.user.last_name}'
+        return f'Cadete: {self.user.username}'
+
+
 class Pedido(models.Model):
     ESTADO_CHOICES = [
         ('RECIBIDO', 'Recibido'),
         ('EN_PREPARACION', 'En Preparación'),
+        ('ASIGNADO', 'Asignado a Cadete'), # <-- NUEVO ESTADO
         ('EN_CAMINO', 'En Camino'),
         ('ENTREGADO', 'Entregado'),
         ('CANCELADO', 'Cancelado'),
@@ -103,6 +138,17 @@ class Pedido(models.Model):
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='RECIBIDO')
     metodo_pago = models.CharField(max_length=20, choices=METODO_PAGO_CHOICES, default='EFECTIVO')
     zona_envio = models.ForeignKey(ZonaEnvio, on_delete=models.SET_NULL, null=True, blank=True, related_name='pedidos_en_zona')
+
+    # --- INICIO: NUEVO CAMPO PARA ASIGNAR CADETE ---
+    cadete_asignado = models.ForeignKey(
+        CadeteProfile, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='pedidos_asignados',
+        help_text="El cadete que ha aceptado este pedido."
+    )
+    # --- FIN: NUEVO CAMPO PARA ASIGNAR CADETE ---
 
     def __str__(self):
         if self.user:
@@ -153,42 +199,6 @@ class ProductoCanje(models.Model):
         return f"{self.nombre} ({self.puntos_requeridos} puntos)"
 
 
-# Modelo CadeteProfile
-class CadeteProfile(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='cadeteprofile')
-    telefono = models.CharField(max_length=20, unique=True, help_text="Número de teléfono único del cadete.")
-    
-    VEHICULO_CHOICES = [
-        ('MOTO', 'Motocicleta'),
-        ('BICI', 'Bicicleta'),
-        ('AUTO', 'Automóvil'),
-    ]
-    vehiculo = models.CharField(max_length=4, choices=VEHICULO_CHOICES, default='MOTO')
-    
-    disponible = models.BooleanField(default=False, help_text="Marcar si el cadete está disponible para recibir pedidos.")
-    
-    # --- INICIO: NUEVO CAMPO PARA SUSCRIPCIÓN WEBPUSH ---
-    subscription_info = models.JSONField(
-        null=True, 
-        blank=True, 
-        verbose_name="Información de Suscripción WebPush",
-        help_text="Contiene la información de la suscripción push del navegador del cadete."
-    )
-    # --- FIN: NUEVO CAMPO PARA SUSCRIPCIÓN WEBPUSH ---
-
-    latitud_actual = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-    longitud_actual = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-
-    class Meta:
-        verbose_name = "Perfil de Cadete"
-        verbose_name_plural = "Perfiles de Cadetes"
-
-    def __str__(self):
-        if self.user.first_name and self.user.last_name:
-            return f'Cadete: {self.user.first_name} {self.user.last_name}'
-        return f'Cadete: {self.user.username}'
-
-
 # Modelo ClienteProfile y Señales
 class ClienteProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='clienteprofile') # related_name añadido
@@ -204,6 +214,5 @@ def create_or_update_user_profile(sender, instance, created, **kwargs):
     if created:
         if not hasattr(instance, 'clienteprofile'):
             ClienteProfile.objects.create(user=instance)
-    # Asegurarse de que el perfil se guarde en cada actualización del usuario también
     if hasattr(instance, 'clienteprofile'):
         instance.clienteprofile.save()

@@ -17,7 +17,7 @@
                 {% endfor %}
             {% endif %}
 
-            <div class="card shadow-sm">
+            <div class="card shadow-sm mb-4">
                 <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
                     <h3 class="mb-0"><i class="bi bi-speedometer2"></i> Panel de Control</h3>
                     <a href="{% url 'logout_cadete' %}" class="btn btn-outline-light btn-sm">
@@ -42,71 +42,48 @@
                             {% endif %}
                         </li>
                     </ul>
-                    
-                    <div class="mt-3 pt-3 border-top">
-                        <h5>Notificaciones Push (Opcional)</h5>
-                        <p class="text-muted small">Activa las notificaciones para recibir alertas si cierras el navegador. Si mantienes esta página abierta, recibirás las alertas aquí mismo.</p>
-                        <button id="subscribe-button" class="btn btn-primary">
-                            <i class="bi bi-bell-fill"></i> Activar Notificaciones Push
-                        </button>
-                    </div>
                 </div>
             </div>
-        </div>
-    </div>
 
-    <div class="row mt-4">
-        <div class="col-12">
+            <div class="card mb-4">
+                <div class="card-header bg-warning">
+                    <h4 class="mb-0"><i class="bi bi-list-check"></i> Mis Pedidos en Curso</h4>
+                </div>
+                <div class="card-body">
+                    {% if pedidos_en_curso %}
+                        {% for pedido in pedidos_en_curso %}
+                            <div class="card mb-3">
+                                <div class="card-header">
+                                    <strong>Pedido Asignado #${{ pedido.id }}</strong> (Estado: {{ pedido.get_estado_display }})
+                                </div>
+                                <div class="card-body">
+                                    <p class="mb-1"><strong>Cliente:</strong> {{ pedido.cliente_nombre }}</p>
+                                    <p class="mb-1"><strong>Dirección:</strong> {{ pedido.cliente_direccion }}</p>
+                                    <p class="mb-1"><strong>Total:</strong> ${{ pedido.total_pedido }}</p>
+                                </div>
+                                <div class="card-footer d-flex justify-content-around">
+                                    <button class="btn btn-info btn-sm">Marcar EN CAMINO</button>
+                                    <button class="btn btn-primary btn-sm">Marcar ENTREGADO</button>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted text-center">No tienes pedidos asignados en este momento.</p>
+                    {% endif %}
+                </div>
+            </div>
             <div class="card">
                 <div class="card-header">
                     <h4 class="mb-0"><i class="bi bi-box-seam"></i> Pedidos Disponibles</h4>
                 </div>
                 <div id="pedidos-container" class="card-body">
-                    <p class="text-muted text-center fs-5">De momento no hay pedidos para mostrar.</p>
+                    <p class="text-muted text-center fs-5">Conectado. Esperando nuevos pedidos...</p>
                 </div>
             </div>
+
         </div>
     </div>
 </div>
-
-<script>
-    const VAPID_PUBLIC_KEY = 'BJHORO_YlWpEBAqFc271eQ0-KBlVW0rhGC4vnEmDxFs23h6UImslGYBaOxwlJPtHwOR1-Wf9nIYvc3z1dQZV8qo';
-    function getCookie(name) {
-        let cookieValue = null;
-        if (document.cookie && document.cookie !== '') {
-            const cookies = document.cookie.split(';');
-            for (let i = 0; i < cookies.length; i++) {
-                const cookie = cookies[i].trim();
-                if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                    break;
-                }
-            }
-        }
-        return cookieValue;
-    }
-    const csrftoken = getCookie('csrftoken');
-    function urlBase64ToUint8Array(base64String) {
-        const padding = '='.repeat((4 - base64String.length % 4) % 4);
-        const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
-        const rawData = window.atob(base64);
-        const outputArray = new Uint8Array(rawData.length);
-        for (let i = 0; i < rawData.length; ++i) { outputArray[i] = rawData.charCodeAt(i); }
-        return outputArray;
-    }
-    async function subscribeUser() {
-        try {
-            const registration = await navigator.serviceWorker.register("{% static 'js/service-worker.js' %}");
-            const permission = await Notification.requestPermission();
-            if (permission !== 'granted') { alert('Necesitas aceptar las notificaciones para recibir alertas.'); return; }
-            const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) });
-            const response = await fetch('/save-subscription/', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify(subscription) });
-            if (response.ok) { alert('¡Notificaciones Push activadas correctamente!'); } else { alert('Hubo un error al activar las Notificaciones Push.'); }
-        } catch (error) { console.error('Error durante el proceso de suscripción a Push:', error); alert('Hubo un error al activar las Notificaciones Push.'); }
-    }
-    const subscribeButton = document.getElementById('subscribe-button');
-    if ('serviceWorker' in navigator && 'PushManager' in window) { subscribeButton.addEventListener('click', subscribeUser); } else { subscribeButton.textContent = 'Push no soportado'; subscribeButton.disabled = true; }
-</script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -120,7 +97,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     cadeteSocket.onopen = function(e) {
         console.log('Conexión WebSocket de cadete establecida.');
-        pedidosContainer.innerHTML = '<p class="text-success text-center">Conectado. Esperando nuevos pedidos...</p>';
     };
 
     cadeteSocket.onmessage = function(e) {
@@ -161,14 +137,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 ${detailsHtml}
             </div>
             <div class="card-footer text-center">
-                <a href="#" class="btn btn-warning w-100 fw-bold">Aceptar Pedido</a>
+                <a href="/cadete/aceptar-pedido/${orderData.id}/" class="btn btn-warning w-100 fw-bold">Aceptar Pedido</a>
             </div>
         `;
         
         pedidosContainer.prepend(pedidoCard);
-
-        // Opcional: Sonido de alerta
-        // new Audio('{% static "sonido_alerta.mp3" %}').play(); 
     };
 
     cadeteSocket.onclose = function(e) {

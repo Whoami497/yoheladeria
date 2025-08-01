@@ -24,11 +24,12 @@ urlpatterns = [
 
     # --- URLs PARA LA TIENDA ---
     path('panel-alertas/', views.panel_alertas, name='panel_alertas'),
-    path('confirmar-pedido/<int:pedido_id>/', views.confirmar_pedido, name='confirmar_pedido'), # <-- NUEVA LÍNEA
+    path('confirmar-pedido/<int:pedido_id>/', views.confirmar_pedido, name='confirmar_pedido'),
 
     # --- URLs PARA PANEL DE CADETES ---
     path('cadete/login/', views.login_cadete, name='login_cadete'),
     path('cadete/panel/', views.panel_cadete, name='panel_cadete'),
     path('cadete/logout/', views.logout_cadete, name='logout_cadete'),
     path('save-subscription/', views.save_subscription, name='save_subscription'),
+    path('cadete/aceptar-pedido/<int:pedido_id>/', views.aceptar_pedido, name='aceptar_pedido'), # <-- NUEVA LÍNEA
 ]
