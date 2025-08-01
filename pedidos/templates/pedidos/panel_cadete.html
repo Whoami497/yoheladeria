@@ -75,6 +75,25 @@
     // ¡CAMBIO IMPORTANTE AQUÍ! La clave pública está escrita directamente.
     const VAPID_PUBLIC_KEY = 'BJHORO_YlWpEBAqFc271eQ0-KBlVW0rhGC4vnEmDxFs23h6UImslGYBaOxwlJPtHwOR1-Wf9nIYvc3z1dQZV8qo';
 
+    // --- INICIO: NUEVA FUNCIÓN PARA OBTENER EL TOKEN CSRF ---
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+    const csrftoken = getCookie('csrftoken');
+    // --- FIN: NUEVA FUNCIÓN PARA OBTENER EL TOKEN CSRF ---
+
+
     function urlBase64ToUint8Array(base64String) {
         const padding = '='.repeat((4 - base64String.length % 4) % 4);
         const base64 = (base64String + padding)
@@ -112,7 +131,7 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-CSRFToken': '{{ csrf_token }}'
+                    'X-CSRFToken': csrftoken // <-- ¡CAMBIO IMPORTANTE AQUÍ! Usamos el token de la cookie
                 },
                 body: JSON.stringify(subscription)
             });
