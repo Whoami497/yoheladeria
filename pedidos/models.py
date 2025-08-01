@@ -119,7 +119,7 @@ class Pedido(models.Model):
     ESTADO_CHOICES = [
         ('RECIBIDO', 'Recibido'),
         ('EN_PREPARACION', 'En Preparación'),
-        ('ASIGNADO', 'Asignado a Cadete'), # <-- NUEVO ESTADO
+        ('ASIGNADO', 'Asignado a Cadete'),
         ('EN_CAMINO', 'En Camino'),
         ('ENTREGADO', 'Entregado'),
         ('CANCELADO', 'Cancelado'),
@@ -139,7 +139,6 @@ class Pedido(models.Model):
     metodo_pago = models.CharField(max_length=20, choices=METODO_PAGO_CHOICES, default='EFECTIVO')
     zona_envio = models.ForeignKey(ZonaEnvio, on_delete=models.SET_NULL, null=True, blank=True, related_name='pedidos_en_zona')
 
-    # --- INICIO: NUEVO CAMPO PARA ASIGNAR CADETE ---
     cadete_asignado = models.ForeignKey(
         CadeteProfile, 
         on_delete=models.SET_NULL, 
@@ -148,7 +147,6 @@ class Pedido(models.Model):
         related_name='pedidos_asignados',
         help_text="El cadete que ha aceptado este pedido."
     )
-    # --- FIN: NUEVO CAMPO PARA ASIGNAR CADETE ---
 
     def __str__(self):
         if self.user:

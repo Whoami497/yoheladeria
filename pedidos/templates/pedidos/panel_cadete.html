@@ -5,6 +5,10 @@
 
 {% block content %}
 <div class="container mt-5 mb-5">
+
+    {# Este div oculto contiene el token CSRF para que JavaScript pueda usarlo #}
+    <div id="csrf-token-container" style="display: none;">{% csrf_token %}</div>
+
     <div class="row">
         <div class="col-12">
             
@@ -88,6 +92,7 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const pedidosContainer = document.getElementById('pedidos-container');
+    const csrfTokenHtml = document.getElementById('csrf-token-container').innerHTML;
     
     const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
     const websocketUrl = wsProtocol + window.location.host + '/ws/cadete/notifications/';
@@ -137,7 +142,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 ${detailsHtml}
             </div>
             <div class="card-footer text-center">
-                <a href="/cadete/aceptar-pedido/${orderData.id}/" class="btn btn-warning w-100 fw-bold">Aceptar Pedido</a>
+                <form action="/cadete/aceptar-pedido/${orderData.id}/" method="POST" class="d-grid">
+                    ${csrfTokenHtml}
+                    <button type="submit" class="btn btn-warning fw-bold">Aceptar Pedido</button>
+                </form>
             </div>
         `;
         

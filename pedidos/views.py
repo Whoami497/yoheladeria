@@ -20,6 +20,7 @@ from django.contrib import messages
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 import json
+# Se elimina la importación de webpush ya que no la usaremos por ahora
 
 
 def index(request):
@@ -470,12 +471,15 @@ def confirmar_pedido(request, pedido_id):
         messages.warning(request, f"El Pedido #{pedido.id} ya fue procesado.")
         return redirect('panel_alertas')
 
+    # 1. Cambiar el estado del pedido
     pedido.estado = 'EN_PREPARACION'
     pedido.save()
 
+    # 2. Enviar notificación por WebSocket al grupo de cadetes
     try:
         channel_layer = get_channel_layer()
         
+        # Construimos un diccionario con los datos del pedido que queremos enviar
         detalles_para_notificacion = []
         for detalle in pedido.detalles.all():
             detalles_para_notificacion.append({
@@ -509,6 +513,35 @@ def confirmar_pedido(request, pedido_id):
 
     return redirect('panel_alertas')
 
+# --- INICIO: NUEVA VISTA ACEPTAR_PEDIDO ---
+@login_required
+@require_POST
+def aceptar_pedido(request, pedido_id):
+    # Usamos get_object_or_404 para obtener el pedido de forma segura.
+    pedido = get_object_or_404(Pedido, id=pedido_id)
+
+    # Verificamos que el usuario logueado sea realmente un cadete.
+    if not hasattr(request.user, 'cadeteprofile'):
+        messages.error(request, "Acción no permitida. No tienes un perfil de cadete.")
+        return redirect('index')
+
+    # Verificamos que el pedido esté en el estado correcto para ser aceptado.
+    # Esto previene que dos cadetes tomen el mismo pedido (race condition).
+    if pedido.estado != 'EN_PREPARACION':
+        messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
+        return redirect('panel_cadete')
+
+    # Asignamos el cadete y cambiamos el estado del pedido.
+    pedido.cadete_asignado = request.user.cadeteprofile
+    pedido.estado = 'ASIGNADO'
+    pedido.save()
+
+    messages.success(request, f"¡Has aceptado el Pedido #{pedido.id}! Por favor, prepárate para retirarlo.")
+    
+    # Redirigimos al cadete a su panel, donde verá el pedido en su lista de "pedidos en curso".
+    return redirect('panel_cadete')
+# --- FIN: NUEVA VISTA ACEPTAR_PEDIDO ---
+
 
 def login_cadete(request):
     if request.user.is_authenticated:
@@ -541,6 +574,8 @@ def login_cadete(request):
 
 @login_required
 def panel_cadete(request):
+    vapid_public_key = settings.WEBPUSH_SETTINGS.get('VAPID_PUBLIC_KEY')
+    # Añadimos la lista de pedidos en curso del cadete al contexto
     pedidos_en_curso = []
     if hasattr(request.user, 'cadeteprofile'):
         pedidos_en_curso = Pedido.objects.filter(
@@ -549,6 +584,7 @@ def panel_cadete(request):
         ).order_by('fecha_pedido')
 
     contexto = {
+        'vapid_public_key': vapid_public_key,
         'pedidos_en_curso': pedidos_en_curso
     }
     return render(request, 'pedidos/panel_cadete.html', contexto)
@@ -563,17 +599,33 @@ def logout_cadete(request):
 @login_required
 @require_POST
 def save_subscription(request):
+    # --- INICIO: LOGGING AÑADIDO ---
+    print("--- VISTA SAVE_SUBSCRIPTION INICIADA ---")
+    
     if not hasattr(request.user, 'cadeteprofile'):
+        print(f"DEBUG: Usuario {request.user.username} intentó suscribirse pero NO es un cadete.")
         return JsonResponse({'status': 'error', 'message': 'User is not a cadete'}, status=403)
 
     try:
         data = json.loads(request.body)
+        print(f"DEBUG: Datos de suscripción recibidos para el cadete {request.user.username}.")
+        
+        # Usar el método update() para un guardado más directo
         updated_count = CadeteProfile.objects.filter(user=request.user).update(subscription_info=data)
         
+        print(f"DEBUG: El comando update() afectó a {updated_count} fila(s) para el usuario {request.user.username}.")
+
         if updated_count > 0:
+            print(f"ÉXITO: Suscripción guardada para {request.user.username}.")
             return JsonResponse({'status': 'ok', 'message': 'Subscription saved'})
         else:
+            print(f"ERROR: No se encontró el perfil del cadete {request.user.username} para actualizar.")
             return JsonResponse({'status': 'error', 'message': 'Cadete profile not found for update'}, status=404)
 
+    except json.JSONDecodeError:
+        print("ERROR: No se pudo decodificar el JSON del request body.")
+        return JsonResponse({'status': 'error', 'message': 'Invalid JSON'}, status=400)
     except Exception as e:
+        print(f"ERROR: Excepción inesperada en save_subscription: {e}")
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+    # --- FIN: LOGGING AÑADIDO ---

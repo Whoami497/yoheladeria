@@ -31,5 +31,7 @@ urlpatterns = [
     path('cadete/panel/', views.panel_cadete, name='panel_cadete'),
     path('cadete/logout/', views.logout_cadete, name='logout_cadete'),
     path('save-subscription/', views.save_subscription, name='save_subscription'),
-    path('cadete/aceptar-pedido/<int:pedido_id>/', views.aceptar_pedido, name='aceptar_pedido'), # <-- NUEVA LÍNEA
+    
+    # URL para que un cadete acepte un pedido.
+    path('cadete/aceptar-pedido/<int:pedido_id>/', views.aceptar_pedido, name='aceptar_pedido'),
 ]
