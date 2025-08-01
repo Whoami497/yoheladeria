@@ -44,13 +44,12 @@
                     </ul>
                     
                     <div class="mt-3 pt-3 border-top">
-                        <h5>Notificaciones Push</h5>
-                        <p class="text-muted small">Activa las notificaciones para recibir alertas de nuevos pedidos directamente en tu dispositivo, incluso si no tienes esta página abierta.</p>
+                        <h5>Notificaciones Push (Opcional)</h5>
+                        <p class="text-muted small">Activa las notificaciones para recibir alertas si cierras el navegador. Si mantienes esta página abierta, recibirás las alertas aquí mismo.</p>
                         <button id="subscribe-button" class="btn btn-primary">
-                            <i class="bi bi-bell-fill"></i> Activar Notificaciones
+                            <i class="bi bi-bell-fill"></i> Activar Notificaciones Push
                         </button>
                     </div>
-
                 </div>
             </div>
         </div>
@@ -60,11 +59,10 @@
         <div class="col-12">
             <div class="card">
                 <div class="card-header">
-                    <h4 class="mb-0"><i class="bi bi-box-seam"></i> Pedidos Asignados</h4>
+                    <h4 class="mb-0"><i class="bi bi-box-seam"></i> Pedidos Disponibles</h4>
                 </div>
-                <div class="card-body text-center">
-                    <p class="text-muted fs-5">De momento no hay pedidos para mostrar.</p>
-                    <p class="text-muted">Próximamente: ¡Aquí aparecerá la lista de nuevos pedidos para que puedas aceptarlos y entregarlos!</p>
+                <div id="pedidos-container" class="card-body">
+                    <p class="text-muted text-center fs-5">De momento no hay pedidos para mostrar.</p>
                 </div>
             </div>
         </div>
@@ -72,10 +70,7 @@
 </div>
 
 <script>
-    // ¡CAMBIO IMPORTANTE AQUÍ! La clave pública está escrita directamente.
     const VAPID_PUBLIC_KEY = 'BJHORO_YlWpEBAqFc271eQ0-KBlVW0rhGC4vnEmDxFs23h6UImslGYBaOxwlJPtHwOR1-Wf9nIYvc3z1dQZV8qo';
-
-    // --- INICIO: NUEVA FUNCIÓN PARA OBTENER EL TOKEN CSRF ---
     function getCookie(name) {
         let cookieValue = null;
         if (document.cookie && document.cookie !== '') {
@@ -91,72 +86,95 @@
         return cookieValue;
     }
     const csrftoken = getCookie('csrftoken');
-    // --- FIN: NUEVA FUNCIÓN PARA OBTENER EL TOKEN CSRF ---
-
-
     function urlBase64ToUint8Array(base64String) {
         const padding = '='.repeat((4 - base64String.length % 4) % 4);
-        const base64 = (base64String + padding)
-            .replace(/\-/g, '+')
-            .replace(/_/g, '/');
-
+        const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
         const rawData = window.atob(base64);
         const outputArray = new Uint8Array(rawData.length);
-
-        for (let i = 0; i < rawData.length; ++i) {
-            outputArray[i] = rawData.charCodeAt(i);
-        }
+        for (let i = 0; i < rawData.length; ++i) { outputArray[i] = rawData.charCodeAt(i); }
         return outputArray;
     }
-
     async function subscribeUser() {
         try {
             const registration = await navigator.serviceWorker.register("{% static 'js/service-worker.js' %}");
-            console.log('Service Worker registrado con éxito:', registration);
-
             const permission = await Notification.requestPermission();
-            if (permission !== 'granted') {
-                console.log('Permiso de notificación denegado.');
-                alert('Necesitas aceptar las notificaciones para recibir alertas.');
-                return;
-            }
-
-            const subscription = await registration.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-            });
-            console.log('Suscripción exitosa:', JSON.stringify(subscription));
-
-            const response = await fetch('/save-subscription/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrftoken // <-- ¡CAMBIO IMPORTANTE AQUÍ! Usamos el token de la cookie
-                },
-                body: JSON.stringify(subscription)
-            });
-
-            if (response.ok) {
-                console.log('Suscripción enviada al servidor con éxito.');
-                alert('¡Notificaciones activadas correctamente!');
-            } else {
-                console.error('Falló el envío de la suscripción al servidor. Código:', response.status);
-                alert('Hubo un error al activar las notificaciones. Inténtalo de nuevo.');
-            }
-
-        } catch (error) {
-            console.error('Error durante el proceso de suscripción:', error);
-            alert('Hubo un error al activar las notificaciones.');
-        }
+            if (permission !== 'granted') { alert('Necesitas aceptar las notificaciones para recibir alertas.'); return; }
+            const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) });
+            const response = await fetch('/save-subscription/', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify(subscription) });
+            if (response.ok) { alert('¡Notificaciones Push activadas correctamente!'); } else { alert('Hubo un error al activar las Notificaciones Push.'); }
+        } catch (error) { console.error('Error durante el proceso de suscripción a Push:', error); alert('Hubo un error al activar las Notificaciones Push.'); }
     }
-
     const subscribeButton = document.getElementById('subscribe-button');
-    if ('serviceWorker' in navigator && 'PushManager' in window) {
-        subscribeButton.addEventListener('click', subscribeUser);
-    } else {
-        console.warn('Las notificaciones push no son soportadas por este navegador.');
-        subscribeButton.textContent = 'Notificaciones no soportadas';
-        subscribeButton.disabled = true;
-    }
+    if ('serviceWorker' in navigator && 'PushManager' in window) { subscribeButton.addEventListener('click', subscribeUser); } else { subscribeButton.textContent = 'Push no soportado'; subscribeButton.disabled = true; }
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const pedidosContainer = document.getElementById('pedidos-container');
+    
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const websocketUrl = wsProtocol + window.location.host + '/ws/cadete/notifications/';
+    
+    console.log("Conectando al WebSocket de cadetes:", websocketUrl);
+    const cadeteSocket = new WebSocket(websocketUrl);
+
+    cadeteSocket.onopen = function(e) {
+        console.log('Conexión WebSocket de cadete establecida.');
+        pedidosContainer.innerHTML = '<p class="text-success text-center">Conectado. Esperando nuevos pedidos...</p>';
+    };
+
+    cadeteSocket.onmessage = function(e) {
+        console.log('¡Nuevo pedido recibido por WebSocket para cadete!');
+        const eventData = JSON.parse(e.data);
+        const orderData = eventData.order_data;
+
+        const initialMessage = pedidosContainer.querySelector('p');
+        if(initialMessage) {
+            initialMessage.remove();
+        }
+
+        const pedidoCard = document.createElement('div');
+        pedidoCard.className = 'card mb-3 border-primary';
+        pedidoCard.id = `pedido-${orderData.id}`;
+
+        let detailsHtml = '';
+        if (orderData.detalles && orderData.detalles.length > 0) {
+            detailsHtml += `<ul class="list-group list-group-flush">`;
+            orderData.detalles.forEach(detail => {
+                let productName = detail.producto_nombre;
+                if (detail.opcion_nombre) { productName += ` - ${detail.opcion_nombre}`; }
+                let flavors = detail.sabores_nombres.join(', ') || 'Sin sabores';
+                detailsHtml += `<li class="list-group-item">${productName} (x${detail.cantidad}) <br><small class="text-muted">${flavors}</small></li>`;
+            });
+            detailsHtml += `</ul>`;
+        }
+
+        pedidoCard.innerHTML = `
+            <div class="card-header bg-primary text-white">
+                <strong>Nuevo Pedido #${orderData.id}</strong>
+            </div>
+            <div class="card-body">
+                <p class="mb-1"><strong>Cliente:</strong> ${orderData.cliente_nombre}</p>
+                <p class="mb-1"><strong>Dirección:</strong> ${orderData.cliente_direccion}</p>
+                <p class="mb-1"><strong>Total:</strong> $${parseFloat(orderData.total_pedido).toFixed(2)}</p>
+                <hr>
+                ${detailsHtml}
+            </div>
+            <div class="card-footer text-center">
+                <a href="#" class="btn btn-warning w-100 fw-bold">Aceptar Pedido</a>
+            </div>
+        `;
+        
+        pedidosContainer.prepend(pedidoCard);
+
+        // Opcional: Sonido de alerta
+        // new Audio('{% static "sonido_alerta.mp3" %}').play(); 
+    };
+
+    cadeteSocket.onclose = function(e) {
+        console.error('WebSocket de cadete cerrado.');
+        pedidosContainer.innerHTML = '<p class="text-danger text-center">Conexión perdida. Recarga la página para ver nuevos pedidos.</p>';
+    };
+});
 </script>
 {% endblock %}

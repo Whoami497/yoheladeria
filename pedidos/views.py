@@ -20,7 +20,7 @@ from django.contrib import messages
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 import json
-from webpush import send_user_notification
+# Se elimina la importación de webpush ya que no la usaremos por ahora
 
 
 def index(request):
@@ -33,7 +33,7 @@ def index(request):
     }
     return render(request, 'pedidos/index.html', contexto)
 
-# ... (todas las demás vistas se mantienen igual)...
+# ... (el resto de las vistas como detalle_producto, ver_carrito, etc., se mantienen sin cambios)...
 def detalle_producto(request, producto_id):
     producto = get_object_or_404(Producto, id=producto_id)
     sabores_disponibles = Sabor.objects.filter(disponible=True).order_by('nombre')
@@ -471,26 +471,46 @@ def confirmar_pedido(request, pedido_id):
         messages.warning(request, f"El Pedido #{pedido.id} ya fue procesado.")
         return redirect('panel_alertas')
 
+    # 1. Cambiar el estado del pedido
     pedido.estado = 'EN_PREPARACION'
     pedido.save()
 
-    payload = {
-        "head": "¡Nuevo Pedido Disponible!",
-        "body": f"Pedido #{pedido.id} para entregar en {pedido.cliente_direccion}",
-        "icon": request.build_absolute_uri(settings.STATIC_URL + 'images/logo_yo_heladeria_blanco.png'),
-        "url": request.build_absolute_uri(reverse('panel_cadete'))
-    }
+    # 2. Enviar notificación por WebSocket al grupo de cadetes
+    try:
+        channel_layer = get_channel_layer()
+        
+        # Construimos un diccionario con los datos del pedido que queremos enviar
+        detalles_para_notificacion = []
+        for detalle in pedido.detalles.all():
+            detalles_para_notificacion.append({
+                'producto_nombre': detalle.producto.nombre,
+                'opcion_nombre': detalle.opcion_seleccionada.nombre_opcion if detalle.opcion_seleccionada else None,
+                'cantidad': detalle.cantidad,
+                'sabores_nombres': [s.nombre for s in detalle.sabores.all()],
+            })
 
-    cadetes_suscritos = CadeteProfile.objects.filter(disponible=True).exclude(subscription_info__isnull=True)
+        order_data = {
+            'id': pedido.id,
+            'cliente_nombre': pedido.cliente_nombre,
+            'cliente_direccion': pedido.cliente_direccion,
+            'total_pedido': str(pedido.total_pedido),
+            'detalles': detalles_para_notificacion
+        }
+
+        async_to_sync(channel_layer.group_send)(
+            'cadetes_disponibles',
+            {
+                'type': 'send_cadete_notification',
+                'order_data': order_data
+            }
+        )
+        print(f"WEBSOCKET: Alerta para Pedido #{pedido.id} enviada al grupo 'cadetes_disponibles'.")
+        messages.success(request, f"Pedido #{pedido.id} confirmado. ¡Alerta enviada a los repartidores conectados!")
     
-    for perfil in cadetes_suscritos:
-        try:
-            send_user_notification(user=perfil.user, payload=payload, ttl=1000)
-            print(f"Notificación enviada a {perfil.user.username}")
-        except Exception as e:
-            print(f"ERROR enviando a {perfil.user.username}: {e}")
+    except Exception as e:
+        print(f"ERROR al enviar notificación por WebSocket a cadetes: {e}")
+        messages.error(request, "El pedido fue confirmado, pero hubo un error al notificar a los repartidores.")
 
-    messages.success(request, f"Pedido #{pedido.id} confirmado. Notificando a {cadetes_suscritos.count()} cadete(s).")
     return redirect('panel_alertas')
 
 
@@ -541,33 +561,17 @@ def logout_cadete(request):
 @login_required
 @require_POST
 def save_subscription(request):
-    # --- INICIO: LOGGING AÑADIDO ---
-    print("--- VISTA SAVE_SUBSCRIPTION INICIADA ---")
-    
     if not hasattr(request.user, 'cadeteprofile'):
-        print(f"DEBUG: Usuario {request.user.username} intentó suscribirse pero NO es un cadete.")
         return JsonResponse({'status': 'error', 'message': 'User is not a cadete'}, status=403)
 
     try:
         data = json.loads(request.body)
-        print(f"DEBUG: Datos de suscripción recibidos para el cadete {request.user.username}.")
-        
-        # Usar el método update() para un guardado más directo
         updated_count = CadeteProfile.objects.filter(user=request.user).update(subscription_info=data)
         
-        print(f"DEBUG: El comando update() afectó a {updated_count} fila(s) para el usuario {request.user.username}.")
-
         if updated_count > 0:
-            print(f"ÉXITO: Suscripción guardada para {request.user.username}.")
             return JsonResponse({'status': 'ok', 'message': 'Subscription saved'})
         else:
-            print(f"ERROR: No se encontró el perfil del cadete {request.user.username} para actualizar.")
             return JsonResponse({'status': 'error', 'message': 'Cadete profile not found for update'}, status=404)
 
-    except json.JSONDecodeError:
-        print("ERROR: No se pudo decodificar el JSON del request body.")
-        return JsonResponse({'status': 'error', 'message': 'Invalid JSON'}, status=400)
     except Exception as e:
-        print(f"ERROR: Excepción inesperada en save_subscription: {e}")
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
-    # --- FIN: LOGGING AÑADIDO ---
