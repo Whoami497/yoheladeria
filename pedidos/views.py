@@ -1,7 +1,7 @@
 # pedidos/views.py
 
 from django.conf import settings
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse  # <-- HttpResponse ya agregado
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.decorators import login_required
@@ -20,6 +20,8 @@ from django.contrib import messages
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 import json
+from django.views.decorators.csrf import csrf_exempt  # <-- ya agregado
+import mercadopago  # <-- ya agregado
 # Se elimina la importación de webpush ya que no la usaremos por ahora
 
 
@@ -158,6 +160,42 @@ def detalle_producto(request, producto_id):
     return render(request, 'pedidos/detalle_producto.html', contexto)
 
 
+# =========================
+# === HELPER MERCADO PAGO ===
+# =========================
+def crear_preferencia_mp(request, pedido):
+    """
+    Crea la preferencia de Mercado Pago usando las líneas del pedido
+    y devuelve el init_point para redirigir al checkout.
+    """
+    sdk = mercadopago.SDK(settings.MERCADO_PAGO_ACCESS_TOKEN)
+
+    items = []
+    for det in pedido.detalles.all():
+        precio_unitario = det.producto.precio
+        if det.opcion_seleccionada:
+            precio_unitario += det.opcion_seleccionada.precio_adicional
+        items.append({
+            "title": f"{det.producto.nombre}" + (f" - {det.opcion_seleccionada.nombre_opcion}" if det.opcion_seleccionada else ""),
+            "quantity": int(det.cantidad),
+            "unit_price": float(precio_unitario),
+            "currency_id": "ARS",
+        })
+
+    preference = sdk.preference().create({
+        "items": items,
+        "external_reference": str(pedido.id),
+        "back_urls": {
+            "success": request.build_absolute_uri(reverse("mp_success")),
+            "failure": request.build_absolute_uri(reverse("mp_success")),
+            "pending": request.build_absolute_uri(reverse("mp_success")),
+        },
+        "auto_return": "approved",
+        "notification_url": request.build_absolute_uri(reverse("mp_webhook")),
+    })
+    return preference["response"]["init_point"]
+
+
 def ver_carrito(request):
     carrito = request.session.get('carrito', {})
     
@@ -254,6 +292,26 @@ def ver_carrito(request):
                 messages.error(request, f"Error al procesar el detalle del pedido para {item_data.get('producto_nombre', 'un producto')}: {e}")
                 continue
 
+        # === NUEVO: Si eligió Mercado Pago, redirigimos al checkout MP y NO notificamos aquí ===
+        if metodo_pago == 'MERCADOPAGO':
+            try:
+                nuevo_pedido.metodo_pago = 'MERCADOPAGO'
+                nuevo_pedido.save()
+
+                init_point = crear_preferencia_mp(request, nuevo_pedido)
+
+                # Vaciamos carrito para evitar duplicados
+                if 'carrito' in request.session:
+                    del request.session['carrito']
+                    request.session.modified = True
+
+                messages.info(request, f"Redirigiendo a Mercado Pago para completar el pago del pedido #{nuevo_pedido.id}.")
+                return redirect(init_point)
+            except Exception as e:
+                messages.error(request, f"No pudimos iniciar el pago con Mercado Pago. Probá de nuevo o elegí otro método. Detalle: {e}")
+                return redirect('ver_carrito')
+
+        # === Flujo original (Efectivo): puntos + notificación + limpiar carrito ===
         if request.user.is_authenticated and hasattr(request.user, 'clienteprofile'):
             puntos_ganados = int(total_del_pedido_para_puntos / Decimal('500')) * 100
             request.user.clienteprofile.puntos_fidelidad += puntos_ganados
@@ -629,3 +687,113 @@ def save_subscription(request):
         print(f"ERROR: Excepción inesperada en save_subscription: {e}")
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
     # --- FIN: LOGGING AÑADIDO ---
+
+
+# =========================
+# === MERCADO PAGO (webhook + success)
+# =========================
+
+@csrf_exempt
+def mp_webhook(request):
+    """
+    Mercado Pago nos avisa aquí. Si el pago queda 'approved', enviamos la
+    misma notificación a la tienda que hoy envías en ver_carrito y
+    otorgamos puntos al cliente (misma regla).
+    """
+    # Intentamos obtener el payment_id desde query o body JSON
+    try:
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+
+    payment_id = (
+        request.GET.get("id")
+        or request.GET.get("data.id")
+        or (payload.get("data") or {}).get("id")
+    )
+    if not payment_id:
+        return HttpResponse(status=200)
+
+    # Consultamos MP
+    try:
+        sdk = mercadopago.SDK(settings.MERCADO_PAGO_ACCESS_TOKEN)
+        payment = sdk.payment().get(payment_id)["response"]
+    except Exception as e:
+        print(f"WEBHOOK MP: error consultando pago: {e}")
+        return HttpResponse(status=200)
+
+    ref = payment.get("external_reference")
+    status = payment.get("status")  # approved | pending | rejected | in_process
+    if not ref:
+        return HttpResponse(status=200)
+
+    try:
+        pedido = Pedido.objects.get(id=ref)
+    except Pedido.DoesNotExist:
+        print("WEBHOOK MP: Pedido no encontrado por external_reference")
+        return HttpResponse(status=200)
+
+    # Guardamos método por claridad
+    try:
+        pedido.metodo_pago = 'MERCADOPAGO'
+        if status == 'approved':
+            # Marcamos recibido para que aparezca en panel (si tu flujo lo requiere)
+            pedido.estado = 'RECIBIDO'
+        elif status == 'rejected':
+            pedido.estado = 'CANCELADO'
+        pedido.save()
+    except Exception as e:
+        print(f"WEBHOOK MP: error guardando pedido: {e}")
+
+    if status == 'approved':
+        # 1) Otorgar puntos igual que en ver_carrito (usamos total_pedido del modelo)
+        try:
+            if pedido.user and hasattr(pedido.user, 'clienteprofile'):
+                total = Decimal(str(pedido.total_pedido)) if pedido.total_pedido is not None else Decimal('0')
+                puntos = int(total / Decimal('500')) * 100
+                pedido.user.clienteprofile.puntos_fidelidad += puntos
+                pedido.user.clienteprofile.save()
+        except Exception as e:
+            print(f"WEBHOOK MP: error otorgando puntos: {e}")
+
+        # 2) Enviar notificación por Channels igual que en ver_carrito
+        try:
+            channel_layer = get_channel_layer()
+            detalles_para_notificacion = []
+            for d in pedido.detalles.all():
+                detalles_para_notificacion.append({
+                    'producto_nombre': d.producto.nombre,
+                    'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
+                    'cantidad': d.cantidad,
+                    'sabores_nombres': [s.nombre for s in d.sabores.all()],
+                })
+
+            async_to_sync(channel_layer.group_send)(
+                'pedidos_new_orders',
+                {
+                    'type': 'send_order_notification',
+                    'message': f'¡Nuevo pedido #{pedido.id} recibido!',
+                    'order_id': pedido.id,
+                    'order_data': {
+                        'cliente_nombre': pedido.cliente_nombre,
+                        'cliente_direccion': pedido.cliente_direccion,
+                        'cliente_telefono': pedido.cliente_telefono,
+                        'metodo_pago': pedido.metodo_pago,
+                        'total_pedido': str(pedido.total_pedido),
+                        'detalles': detalles_para_notificacion,
+                    }
+                }
+            )
+            print(f"WEBHOOK MP: notificación enviada para pedido #{pedido.id}")
+        except Exception as e:
+            print(f"WEBHOOK MP: error enviando WS: {e}")
+
+    return HttpResponse(status=200)
+
+
+def mp_success(request):
+    """
+    Página de retorno desde MP: mostramos un mensaje mientras llega el webhook.
+    """
+    messages.info(request, "Gracias. Estamos confirmando tu pago. En breve verás tu pedido en cocina.")
+    return redirect('pedido_exitoso')

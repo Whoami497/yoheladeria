@@ -1,13 +1,13 @@
 # heladeria_backend/urls.py
 
 from django.contrib import admin
-from django.urls import path, include # Asegúrate de que 'include' esté importado
+from django.urls import path, include  # Asegúrate de que 'include' esté importado
 from django.conf import settings
 from django.conf.urls.static import static
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('webpush/', include('webpush.urls')), # <-- ¡NUEVA LÍNEA IMPORTANTE!
+    path('webpush/', include('webpush.urls')),  # <-- ¡NUEVA LÍNEA IMPORTANTE!
     path('', include('pedidos.urls')),
     
     # --- URLS DE AUTENTICACIÓN DE DJANGO ---
