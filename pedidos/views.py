@@ -65,7 +65,7 @@ def detalle_producto(request, producto_id):
             cantidad_sabores_seleccionada_en_form = int(request.POST.get('cantidad_sabores', 0))
 
             if len(sabores_seleccionados_ids) != cantidad_sabores_seleccionada_en_form:
-                messages.error(request, f'Por favor, selecciona {cantidad_sabores_seleccionada_en_form} sabor(es) o ajusta la cantidad de sabores a seleccionar.')
+                messages.error(request, f'Por favor, selecciona {cantidad_sabores_seleccionada_en_form} sabor(es) o ajusta la cantidad.')
                 contexto = {
                     'producto': producto,
                     'sabores': sabores_disponibles,
@@ -75,7 +75,7 @@ def detalle_producto(request, producto_id):
                 return render(request, 'pedidos/detalle_producto.html', contexto)
 
             if len(sabores_seleccionados_ids) > producto.sabores_maximos:
-                messages.error(request, f'No puedes seleccionar más de {producto.sabores_maximos} sabor(es) para este producto.')
+                messages.error(request, f'No puedes seleccionar más de {producto.sabores_maximos} sabor(es).')
                 contexto = {
                     'producto': producto,
                     'sabores': sabores_disponibles,
@@ -185,7 +185,7 @@ def crear_preferencia_mp(request, pedido):
     success_url = request.build_absolute_uri(reverse("mp_success"))
     failure_url = request.build_absolute_uri(reverse("mp_success"))
     pending_url = request.build_absolute_uri(reverse("mp_success"))
-    # 👇 importante: el nombre de la URL en urls.py es 'mp_webhook'
+    # CORREGIDO: el name en urls.py es "mp_webhook"
     notification_url = request.build_absolute_uri(reverse("mp_webhook"))
 
     payload = {
@@ -196,7 +196,7 @@ def crear_preferencia_mp(request, pedido):
             "failure": failure_url,
             "pending": pending_url,
         },
-        # "auto_return": "approved",  # evitamos el error en tu cuenta
+        # "auto_return": "approved",
         "notification_url": notification_url,
     }
 
@@ -364,7 +364,7 @@ def ver_carrito(request):
             print(f"Notificación de pedido #{nuevo_pedido.id} enviada a Channels.")
         except Exception as e:
             print(f"ERROR al enviar notificación de pedido a Channels: {e}")
-            messages.error(request, f"ERROR INTERNO: No se pudo enviar la alerta en tiempo real. Contacta a soporte. Error: {e}")
+            messages.error(request, f"ERROR INTERNO: No se pudo enviar la alerta en tiempo real. Error: {e}")
 
         del request.session['carrito']
         request.session.modified = True
@@ -467,11 +467,7 @@ def perfil_cliente(request):
 @login_required
 def historial_pedidos_cliente(request):
     pedidos = Pedido.objects.filter(user=request.user).order_by('-fecha_pedido')
-
-    cliente_profile = None
-    if hasattr(request.user, 'clienteprofile'):
-        cliente_profile = request.user.clienteprofile
-
+    cliente_profile = getattr(request.user, 'clienteprofile', None)
     contexto = {'pedidos': pedidos, 'cliente_profile': cliente_profile}
     return render(request, 'pedidos/historial_pedidos.html', contexto)
 
@@ -482,59 +478,51 @@ def logout_cliente(request):
     return redirect('index')
 
 
-# ============ PANEL DE ALERTAS ============
+# ========= PANEL DE ALERTAS =========
 
 def panel_alertas(request):
-    """
-    Renderiza el panel con pedidos iniciales para que no se pierdan
-    al recargar/abrir la página.
-    """
-    pedidos_iniciales = (
-        Pedido.objects
-        .filter(estado__in=['RECIBIDO', 'EN_PREPARACION', 'ASIGNADO', 'EN_CAMINO'])
-        .order_by('-fecha_pedido')[:50]
-    )
-    contexto = {'pedidos_iniciales': pedidos_iniciales}
-    return render(request, 'pedidos/panel_alertas.html', contexto)
-
-
-def _serialize_pedido(pedido):
-    detalles = []
-    for d in pedido.detalles.all():
-        detalles.append({
-            'producto_nombre': d.producto.nombre,
-            'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
-            'cantidad': d.cantidad,
-            'sabores_nombres': [s.nombre for s in d.sabores.all()],
-        })
-    return {
-        'id': pedido.id,
-        'cliente_nombre': pedido.cliente_nombre,
-        'cliente_direccion': pedido.cliente_direccion,
-        'cliente_telefono': pedido.cliente_telefono,
-        'metodo_pago': pedido.metodo_pago,
-        'total_pedido': str(pedido.total_pedido),
-        'estado': pedido.estado,
-        'detalles': detalles,
-    }
+    # Pedidos abiertos recientes para pintar algo al cargar:
+    pedidos_iniciales = Pedido.objects.filter(
+        estado__in=['RECIBIDO', 'EN_PREPARACION', 'ASIGNADO', 'EN_CAMINO']
+    ).order_by('-fecha_pedido')[:30]
+    return render(request, 'pedidos/panel_alertas.html', {'pedidos_iniciales': pedidos_iniciales})
 
 
 def panel_alertas_data(request):
     """
-    Endpoint JSON opcional para rehidratar el tablero (por si el front
-    quiere fetch al entrar o tras un microcorte).
+    Devuelve en JSON los pedidos abiertos recientes.
+    Usado para reconstruir vista tras recargar o microcorte.
     """
-    qs = (
-        Pedido.objects
-        .filter(estado__in=['RECIBIDO', 'EN_PREPARACION', 'ASIGNADO', 'EN_CAMINO'])
-        .order_by('-fecha_pedido')[:50]
-        .prefetch_related(
-            'detalles__sabores',
-        )
-        .select_related()
-    )
-    data = [_serialize_pedido(p) for p in qs]
-    return JsonResponse({'ok': True, 'pedidos': data})
+    qs = Pedido.objects.filter(
+        estado__in=['RECIBIDO', 'EN_PREPARACION', 'ASIGNADO', 'EN_CAMINO']
+    ).order_by('-fecha_pedido')[:50]
+
+    data = []
+    for p in qs:
+        detalles = []
+        for d in p.detalles.all():
+            detalles.append({
+                "producto_nombre": d.producto.nombre,
+                "opcion_nombre": d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
+                "cantidad": d.cantidad,
+                "sabores_nombres": [s.nombre for s in d.sabores.all()],
+            })
+        data.append({
+            "id": p.id,
+            "estado": p.estado,
+            "total_pedido": str(p.total_pedido),
+            "cliente_nombre": p.cliente_nombre,
+            "cliente_direccion": p.cliente_direccion,
+            "cliente_telefono": p.cliente_telefono,
+            "metodo_pago": p.metodo_pago,
+            "detalles": detalles,
+        })
+    return JsonResponse({"pedidos": data})
+
+
+def panel_alertas_board(request):
+    # Placeholder simple para no romper URLs si se visita:
+    return HttpResponse("Tablero en construcción.")
 
 
 # --- Tienda y Cadetes ---
@@ -544,8 +532,6 @@ def confirmar_pedido(request, pedido_id):
     pedido = get_object_or_404(Pedido, id=pedido_id)
 
     if pedido.estado != 'RECIBIDO':
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return JsonResponse({'ok': False, 'msg': 'Pedido ya procesado'}, status=400)
         messages.warning(request, f"El Pedido #{pedido.id} ya fue procesado.")
         return redirect('panel_alertas')
 
@@ -554,6 +540,7 @@ def confirmar_pedido(request, pedido_id):
 
     try:
         channel_layer = get_channel_layer()
+
         detalles_para_notificacion = []
         for detalle in pedido.detalles.all():
             detalles_para_notificacion.append({
@@ -579,14 +566,14 @@ def confirmar_pedido(request, pedido_id):
             }
         )
         print(f"WEBSOCKET: Alerta para Pedido #{pedido.id} enviada al grupo 'cadetes_disponibles'.")
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return JsonResponse({'ok': True})
+        # Si la petición fue AJAX, devolvemos 200 simple
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({"ok": True, "pedido": pedido.id})
         messages.success(request, f"Pedido #{pedido.id} confirmado. ¡Alerta enviada a los repartidores conectados!")
-
     except Exception as e:
         print(f"ERROR al enviar notificación por WebSocket a cadetes: {e}")
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return JsonResponse({'ok': False, 'msg': 'Error notificando a cadetes'}, status=500)
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({"ok": False, "error": str(e)}, status=500)
         messages.error(request, "El pedido fue confirmado, pero hubo un error al notificar a los repartidores.")
 
     return redirect('panel_alertas')
@@ -797,3 +784,66 @@ def mp_success(request):
 
 # ---- Alias de compatibilidad para URLs antiguas ----
 mp_webhook = mp_webhook_view
+
+
+# ========= CANJES =========
+
+@login_required
+def canjear_puntos(request):
+    cliente_profile = request.user.clienteprofile
+    productos_canje = ProductoCanje.objects.filter(disponible=True).order_by('puntos_requeridos')
+
+    if request.method == 'POST':
+        producto_canje_id = request.POST.get('producto_canje_id')
+        try:
+            producto_canje = ProductoCanje.objects.get(id=producto_canje_id, disponible=True)
+        except ObjectDoesNotExist:
+            messages.error(request, "El producto de canje seleccionado no es válido.")
+            return redirect('canjear_puntos')
+
+        if cliente_profile.puntos_fidelidad >= producto_canje.puntos_requeridos:
+            with transaction.atomic():
+                cliente_profile.puntos_fidelidad -= producto_canje.puntos_requeridos
+                cliente_profile.save()
+
+                messages.success(
+                    request,
+                    f"¡Has canjeado '{producto_canje.nombre}' por {producto_canje.puntos_requeridos} puntos! "
+                    f"Tus puntos actuales son {cliente_profile.puntos_fidelidad}."
+                )
+
+                try:
+                    producto_ficticio_canje_obj = Producto.objects.get(nombre="Canje de Puntos - No Comprar")
+
+                    nuevo_pedido_canje = Pedido.objects.create(
+                        user=request.user,
+                        cliente_nombre=request.user.get_full_name() or request.user.username,
+                        cliente_direccion=f"Canje de Puntos: {producto_canje.nombre}",
+                        cliente_telefono=cliente_profile.telefono or "",
+                        estado='RECIBIDO',
+                    )
+
+                    DetallePedido.objects.create(
+                        pedido=nuevo_pedido_canje,
+                        producto=producto_ficticio_canje_obj,
+                        opcion_seleccionada=None,
+                        cantidad=1,
+                    )
+                    messages.info(request, f"Se ha generado un pedido de canje (ID #{nuevo_pedido_canje.id}). Puedes consultarlo en tu historial.")
+
+                except Producto.DoesNotExist:
+                    messages.error(request, "Error: No se encontró el producto ficticio 'Canje de Puntos - No Comprar'.")
+                except Exception as e:
+                    messages.error(request, f"Hubo un problema al registrar el canje como pedido: {e}")
+
+        else:
+            messages.error(
+                request,
+                f"No tienes suficientes puntos para canjear '{producto_canje.nombre}'. "
+                f"Necesitas {producto_canje.puntos_requeridos} puntos y solo tienes {cliente_profile.puntos_fidelidad}."
+            )
+
+        return redirect('canjear_puntos')
+
+    contexto = {'cliente_profile': cliente_profile, 'productos_canje': productos_canje}
+    return render(request, 'pedidos/canjear_puntos.html', contexto)
