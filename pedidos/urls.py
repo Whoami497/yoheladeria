@@ -36,6 +36,6 @@ urlpatterns = [
     path('cadete/aceptar-pedido/<int:pedido_id>/', views.aceptar_pedido, name='aceptar_pedido'),
 
     # --- URLs de MERCADO PAGO ---
-    path('pagos/mp/webhook/', views.mp_webhook, name='mp_webhook'),
+    path('pagos/mp/webhook/', views.mp_webhook_view, name='mp_webhook'),
     path('pagos/mp/success/', views.mp_success, name='mp_success'),
 ]
