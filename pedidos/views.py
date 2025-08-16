@@ -1,7 +1,7 @@
 # pedidos/views.py
 
 from django.conf import settings
-from django.http import JsonResponse, HttpResponse  # <-- HttpResponse ya agregado
+from django.http import JsonResponse, HttpResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.decorators import login_required
@@ -13,46 +13,58 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.urls import reverse
 
 from .forms import ClienteRegisterForm, ClienteProfileForm
-from .models import Producto, Sabor, Pedido, DetallePedido, Categoria, OpcionProducto, ClienteProfile, ProductoCanje, CadeteProfile
+from .models import (
+    Producto, Sabor, Pedido, DetallePedido, Categoria, OpcionProducto,
+    ClienteProfile, ProductoCanje, CadeteProfile
+)
 from decimal import Decimal
 from django.contrib import messages
 
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 import json
-from django.views.decorators.csrf import csrf_exempt  # <-- ya agregado
-import mercadopago  # <-- ya agregado
-# Se elimina la importación de webpush ya que no la usaremos por ahora
+from django.views.decorators.csrf import csrf_exempt
+import mercadopago
 
+
+# ---------------------------
+# Utils
+# ---------------------------
+
+def _is_ajax(request):
+    return request.headers.get('x-requested-with') == 'XMLHttpRequest'
+
+
+# ---------------------------
+# Tienda (catálogo / producto)
+# ---------------------------
 
 def index(request):
     productos = Producto.objects.filter(disponible=True).order_by('nombre')
     categorias = Categoria.objects.filter(disponible=True).order_by('orden')
-    
-    contexto = {
-        'productos': productos,
-        'categorias': categorias,
-    }
+    contexto = {'productos': productos, 'categorias': categorias}
     return render(request, 'pedidos/index.html', contexto)
 
-# ... (el resto de las vistas se mantienen sin cambios)...
+
 def detalle_producto(request, producto_id):
     producto = get_object_or_404(Producto, id=producto_id)
     sabores_disponibles = Sabor.objects.filter(disponible=True).order_by('nombre')
-    
+
     opciones_disponibles = None
     if producto.opciones.exists():
-        opciones_disponibles = OpcionProducto.objects.filter(producto_base=producto, disponible=True)
+        opciones_disponibles = OpcionProducto.objects.filter(
+            producto_base=producto, disponible=True
+        )
 
     if request.method == 'POST':
         sabores_seleccionados_ids_raw = request.POST.getlist('sabores')
         sabores_seleccionados_ids = [s_id for s_id in sabores_seleccionados_ids_raw if s_id]
-        
+
         opcion_id = request.POST.get('opcion_id')
         opcion_seleccionada_obj = None
         if producto.opciones.exists() and opcion_id:
             opcion_seleccionada_obj = get_object_or_404(OpcionProducto, id=opcion_id, producto_base=producto)
-            
+
         if producto.opciones.exists() and not opcion_seleccionada_obj:
             messages.error(request, 'Por favor, selecciona una opción para este producto.')
             contexto = {
@@ -67,7 +79,7 @@ def detalle_producto(request, producto_id):
             cantidad_sabores_seleccionada_en_form = int(request.POST.get('cantidad_sabores', 0))
 
             if len(sabores_seleccionados_ids) != cantidad_sabores_seleccionada_en_form:
-                messages.error(request, f'Por favor, selecciona {cantidad_sabores_seleccionada_en_form} sabor(es) o ajusta la cantidad de sabores a seleccionar.')
+                messages.error(request, f'Por favor, selecciona {cantidad_sabores_seleccionada_en_form} sabor(es) o ajusta la cantidad.')
                 contexto = {
                     'producto': producto,
                     'sabores': sabores_disponibles,
@@ -75,9 +87,9 @@ def detalle_producto(request, producto_id):
                     'range_sabores': range(1, producto.sabores_maximos + 1) if producto.sabores_maximos > 0 else []
                 }
                 return render(request, 'pedidos/detalle_producto.html', contexto)
-            
+
             if len(sabores_seleccionados_ids) > producto.sabores_maximos:
-                messages.error(request, f'No puedes seleccionar más de {producto.sabores_maximos} sabor(es) para este producto.')
+                messages.error(request, f'No puedes seleccionar más de {producto.sabores_maximos} sabor(es).')
                 contexto = {
                     'producto': producto,
                     'sabores': sabores_disponibles,
@@ -85,7 +97,7 @@ def detalle_producto(request, producto_id):
                     'range_sabores': range(1, producto.sabores_maximos + 1) if producto.sabores_maximos > 0 else []
                 }
                 return render(request, 'pedidos/detalle_producto.html', contexto)
-            
+
         if producto.sabores_maximos == 0 and sabores_seleccionados_ids:
             sabores_seleccionados_ids = []
 
@@ -135,7 +147,7 @@ def detalle_producto(request, producto_id):
             'opcion_nombre': opcion_nombre_para_carrito,
             'imagen_mostrada': opcion_imagen_para_carrito if opcion_imagen_para_carrito else producto.imagen,
         }
-        
+
         if item_key in request.session['carrito']:
             request.session['carrito'][item_key]['cantidad'] += cantidad_a_agregar
             messages.info(request, f'Se han añadido {cantidad_a_agregar} unidades más de "{nombre_item_carrito}" al carrito.')
@@ -144,13 +156,12 @@ def detalle_producto(request, producto_id):
             messages.success(request, f'"{nombre_item_carrito}" ha sido añadido al carrito ({cantidad_a_agregar} unidad{"es" if cantidad_a_agregar > 1 else ""}).')
 
         request.session.modified = True
-        
         return redirect('detalle_producto', producto_id=producto.id)
 
     range_sabores = []
     if producto.sabores_maximos > 0:
         range_sabores = range(1, producto.sabores_maximos + 1)
-        
+
     contexto = {
         'producto': producto,
         'sabores': sabores_disponibles,
@@ -160,9 +171,10 @@ def detalle_producto(request, producto_id):
     return render(request, 'pedidos/detalle_producto.html', contexto)
 
 
-# =========================
-# === HELPER MERCADO PAGO ===
-# =========================
+# ---------------------------
+# Mercado Pago (helper)
+# ---------------------------
+
 def crear_preferencia_mp(request, pedido):
     """
     Crea la preferencia de Mercado Pago y devuelve el link de checkout.
@@ -198,8 +210,7 @@ def crear_preferencia_mp(request, pedido):
             "failure": failure_url,
             "pending": pending_url,
         },
-        # Quitamos auto_return (causaba error en tu cuenta)
-        # "auto_return": "approved",
+        # "auto_return": "approved",  # quitado a propósito
         "notification_url": notification_url,
     }
 
@@ -227,9 +238,12 @@ def crear_preferencia_mp(request, pedido):
     return init_point
 
 
+# ---------------------------
+# Carrito / Pedido
+# ---------------------------
+
 def ver_carrito(request):
     carrito = request.session.get('carrito', {})
-    
     total = Decimal('0.00')
     items_carrito_procesados = []
 
@@ -239,7 +253,7 @@ def ver_carrito(request):
             item_cantidad = item.get('cantidad', 1)
             item_subtotal = item_precio * item_cantidad
             total += item_subtotal
-            
+
             items_carrito_procesados.append({
                 'key': key,
                 'producto_id': item['producto_id'],
@@ -282,10 +296,9 @@ def ver_carrito(request):
                     pedido_kwargs['cliente_telefono'] = profile.telefono
 
         nuevo_pedido = Pedido.objects.create(**pedido_kwargs)
-        
+
         puntos_ganados = 0
         total_del_pedido_para_puntos = Decimal('0.00')
-
         detalles_para_notificacion = []
 
         for key, item_data in carrito.items():
@@ -293,7 +306,7 @@ def ver_carrito(request):
                 producto = Producto.objects.get(id=item_data['producto_id'])
                 sabores_seleccionados_ids = item_data.get('sabores_ids', [])
                 sabores_seleccionados = Sabor.objects.filter(id__in=sabores_seleccionados_ids)
-                
+
                 opcion_obj_pedido = None
                 if item_data.get('opcion_id'):
                     opcion_obj_pedido = OpcionProducto.objects.get(id=item_data['opcion_id'])
@@ -308,7 +321,7 @@ def ver_carrito(request):
 
                 precio_unitario_item = Decimal(item_data['precio'])
                 total_del_pedido_para_puntos += precio_unitario_item * item_data['cantidad']
-                
+
                 detalles_para_notificacion.append({
                     'producto_nombre': producto.nombre,
                     'opcion_nombre': opcion_obj_pedido.nombre_opcion if opcion_obj_pedido else None,
@@ -323,7 +336,6 @@ def ver_carrito(request):
                 messages.error(request, f"Error al procesar el detalle del pedido para {item_data.get('producto_nombre', 'un producto')}: {e}")
                 continue
 
-        # === NUEVO: Si eligió Mercado Pago, redirigimos al checkout MP y NO notificamos aquí ===
         if metodo_pago == 'MERCADOPAGO':
             try:
                 nuevo_pedido.metodo_pago = 'MERCADOPAGO'
@@ -331,7 +343,6 @@ def ver_carrito(request):
 
                 init_point = crear_preferencia_mp(request, nuevo_pedido)
 
-                # Vaciamos carrito para evitar duplicados
                 if 'carrito' in request.session:
                     del request.session['carrito']
                     request.session.modified = True
@@ -342,7 +353,6 @@ def ver_carrito(request):
                 messages.error(request, f"No pudimos iniciar el pago con Mercado Pago. Probá de nuevo o elegí otro método. Detalle: {e}")
                 return redirect('ver_carrito')
 
-        # === Flujo original (Efectivo): puntos + notificación + limpiar carrito ===
         if request.user.is_authenticated and hasattr(request.user, 'clienteprofile'):
             puntos_ganados = int(total_del_pedido_para_puntos / Decimal('500')) * 100
             request.user.clienteprofile.puntos_fidelidad += puntos_ganados
@@ -374,16 +384,13 @@ def ver_carrito(request):
 
         del request.session['carrito']
         request.session.modified = True
-        
-        messages.success(request, f'¡Tu pedido #{nuevo_pedido.id} ha sido realizado con éxito! Pronto nos contactaremos.')
 
+        messages.success(request, f'¡Tu pedido #{nuevo_pedido.id} ha sido realizado con éxito! Pronto nos contactaremos.')
         return redirect('pedido_exitoso')
 
-    contexto = {
-        'carrito_items': items_carrito_procesados,
-        'total': total,
-    }
+    contexto = {'carrito_items': items_carrito_procesados, 'total': total}
     return render(request, 'pedidos/carrito.html', contexto)
+
 
 def eliminar_del_carrito(request, item_key):
     if 'carrito' in request.session:
@@ -397,10 +404,11 @@ def eliminar_del_carrito(request, item_key):
             messages.warning(request, 'El producto que intentaste eliminar ya no está en tu carrito.')
     return redirect('ver_carrito')
 
+
 def productos_por_categoria(request, categoria_id):
     categoria = get_object_or_404(Categoria, pk=categoria_id)
     productos = Producto.objects.filter(categoria=categoria, disponible=True).order_by('nombre')
-    
+
     contexto = {
         'categoria_seleccionada': categoria,
         'productos': productos,
@@ -408,10 +416,14 @@ def productos_por_categoria(request, categoria_id):
     }
     return render(request, 'pedidos/productos_por_categoria.html', contexto)
 
+
 def pedido_exitoso(request):
     return render(request, 'pedidos/pedido_exitoso.html')
 
-# --- Vistas para Autenticación y Perfil de Cliente ---
+
+# ---------------------------
+# Autenticación cliente
+# ---------------------------
 
 def register_cliente(request):
     if request.user.is_authenticated:
@@ -475,15 +487,12 @@ def perfil_cliente(request):
 @login_required
 def historial_pedidos_cliente(request):
     pedidos = Pedido.objects.filter(user=request.user).order_by('-fecha_pedido')
-    
+
     cliente_profile = None
     if hasattr(request.user, 'clienteprofile'):
         cliente_profile = request.user.clienteprofile
 
-    contexto = {
-        'pedidos': pedidos,
-        'cliente_profile': cliente_profile,
-    }
+    contexto = {'pedidos': pedidos, 'cliente_profile': cliente_profile}
     return render(request, 'pedidos/historial_pedidos.html', contexto)
 
 
@@ -492,83 +501,39 @@ def logout_cliente(request):
     messages.info(request, "Has cerrado sesión exitosamente.")
     return redirect('index')
 
-def panel_alertas(request):
-    return render(request, 'pedidos/panel_alertas.html')
 
-@login_required
-def canjear_puntos(request):
-    cliente_profile = request.user.clienteprofile
-    productos_canje = ProductoCanje.objects.filter(disponible=True).order_by('puntos_requeridos')
-
-    if request.method == 'POST':
-        producto_canje_id = request.POST.get('producto_canje_id')
-        try:
-            producto_canje = ProductoCanje.objects.get(id=producto_canje_id, disponible=True)
-        except ObjectDoesNotExist:
-            messages.error(request, "El producto de canje seleccionado no es válido.")
-            return redirect('canjear_puntos')
-
-        if cliente_profile.puntos_fidelidad >= producto_canje.puntos_requeridos:
-            with transaction.atomic():
-                cliente_profile.puntos_fidelidad -= producto_canje.puntos_requeridos
-                cliente_profile.save()
-                
-                messages.success(request, f"¡Has canjeado '{producto_canje.nombre}' por {producto_canje.puntos_requeridos} puntos! Tus puntos actuales son {cliente_profile.puntos_fidelidad}.")
-                
-                try:
-                    producto_ficticio_canje_obj = Producto.objects.get(nombre="Canje de Puntos - No Comprar")
-                    
-                    nuevo_pedido_canje = Pedido.objects.create(
-                        user=request.user,
-                        cliente_nombre=request.user.get_full_name() or request.user.username,
-                        cliente_direccion=f"Canje de Puntos: {producto_canje.nombre}",
-                        cliente_telefono=cliente_profile.telefono or "",
-                        estado='RECIBIDO',
-                    )
-
-                    DetallePedido.objects.create(
-                        pedido=nuevo_pedido_canje,
-                        producto=producto_ficticio_canje_obj,
-                        opcion_seleccionada=None,
-                        cantidad=1,
-                    )
-                    messages.info(request, f"Se ha generado un pedido de canje (ID #{nuevo_pedido_canje.id}). Puedes consultarlo en tu historial.")
-
-                except Producto.DoesNotExist:
-                    messages.error(request, "Error: El producto ficticio 'Canje de Puntos - No Comprar' no se encontró. No se pudo registrar el detalle del canje. Asegúrate de crearlo en el admin como un Producto.")
-                except Exception as e:
-                    messages.error(request, f"Hubo un problema al registrar el canje como pedido: {e}")
-
-        else:
-            messages.error(request, f"No tienes suficientes puntos para canjear '{producto_canje.nombre}'. Necesitas {producto_canje.puntos_requeridos} puntos y solo tienes {cliente_profile.puntos_fidelidad}.")
-        
-        return redirect('canjear_puntos')
-
-    contexto = {
-        'cliente_profile': cliente_profile,
-        'productos_canje': productos_canje,
-    }
-    return render(request, 'pedidos/canjear_puntos.html', contexto)
-
-# --- Vistas para Tienda y Cadetes ---
+# ---------------------------
+# Panel de alertas (tienda)
+# ---------------------------
 
 @staff_member_required
+def panel_alertas(request):
+    # Cargar pedidos RECIBIDO al abrir (para que no “desaparezcan” al recargar)
+    pedidos_iniciales = Pedido.objects.filter(estado='RECIBIDO').order_by('fecha_pedido')
+    return render(request, 'pedidos/panel_alertas.html', {
+        'pedidos_iniciales': pedidos_iniciales
+    })
+
+
+@staff_member_required
+@require_POST
 def confirmar_pedido(request, pedido_id):
     pedido = get_object_or_404(Pedido, id=pedido_id)
-    
+
     if pedido.estado != 'RECIBIDO':
-        messages.warning(request, f"El Pedido #{pedido.id} ya fue procesado.")
+        msg = f"El Pedido #{pedido.id} ya fue procesado."
+        if _is_ajax(request):
+            return JsonResponse({'ok': False, 'message': msg}, status=400)
+        messages.warning(request, msg)
         return redirect('panel_alertas')
 
-    # 1. Cambiar el estado del pedido
+    # 1) Cambiar el estado
     pedido.estado = 'EN_PREPARACION'
     pedido.save()
 
-    # 2. Enviar notificación por WebSocket al grupo de cadetes
+    # 2) Notificar por WebSocket a cadetes
     try:
         channel_layer = get_channel_layer()
-        
-        # Construimos un diccionario con los datos del pedido que queremos enviar
         detalles_para_notificacion = []
         for detalle in pedido.detalles.all():
             detalles_para_notificacion.append({
@@ -594,15 +559,22 @@ def confirmar_pedido(request, pedido_id):
             }
         )
         print(f"WEBSOCKET: Alerta para Pedido #{pedido.id} enviada al grupo 'cadetes_disponibles'.")
-        messages.success(request, f"Pedido #{pedido.id} confirmado. ¡Alerta enviada a los repartidores conectados!")
-    
     except Exception as e:
         print(f"ERROR al enviar notificación por WebSocket a cadetes: {e}")
-        messages.error(request, "El pedido fue confirmado, pero hubo un error al notificar a los repartidores.")
 
+    ok_msg = f"Pedido #{pedido.id} confirmado. ¡Alerta enviada a los repartidores conectados!"
+
+    if _is_ajax(request):
+        return JsonResponse({'ok': True, 'message': ok_msg})
+
+    messages.success(request, ok_msg)
     return redirect('panel_alertas')
 
-# --- INICIO: NUEVA VISTA ACEPTAR_PEDIDO ---
+
+# ---------------------------
+# Cadetes
+# ---------------------------
+
 @login_required
 @require_POST
 def aceptar_pedido(request, pedido_id):
@@ -622,7 +594,6 @@ def aceptar_pedido(request, pedido_id):
 
     messages.success(request, f"¡Has aceptado el Pedido #{pedido.id}! Por favor, prepárate para retirarlo.")
     return redirect('panel_cadete')
-# --- FIN: NUEVA VISTA ACEPTAR_PEDIDO ---
 
 
 def login_cadete(request):
@@ -651,8 +622,9 @@ def login_cadete(request):
             messages.error(request, 'Usuario o contraseña incorrectos.')
     else:
         form = AuthenticationForm()
-    
+
     return render(request, 'pedidos/login_cadete.html', {'form': form})
+
 
 @login_required
 def panel_cadete(request):
@@ -660,7 +632,7 @@ def panel_cadete(request):
     pedidos_en_curso = []
     if hasattr(request.user, 'cadeteprofile'):
         pedidos_en_curso = Pedido.objects.filter(
-            cadete_asignado=request.user.cadeteprofile, 
+            cadete_asignado=request.user.cadeteprofile,
             estado__in=['ASIGNADO', 'EN_CAMINO']
         ).order_by('fecha_pedido')
 
@@ -677,11 +649,12 @@ def logout_cadete(request):
     messages.info(request, "Has cerrado sesión como cadete.")
     return redirect('login_cadete')
 
+
 @login_required
 @require_POST
 def save_subscription(request):
     print("--- VISTA SAVE_SUBSCRIPTION INICIADA ---")
-    
+
     if not hasattr(request.user, 'cadeteprofile'):
         print(f"DEBUG: Usuario {request.user.username} intentó suscribirse pero NO es un cadete.")
         return JsonResponse({'status': 'error', 'message': 'User is not a cadete'}, status=403)
@@ -705,16 +678,15 @@ def save_subscription(request):
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
 
-# =========================
-# === MERCADO PAGO (webhook + success)
-# =========================
+# ---------------------------
+# Webhook & retorno MP
+# ---------------------------
 
 @csrf_exempt
-def mp_webhook_view(request):
+def mp_webhook(request):
     """
     Mercado Pago nos avisa aquí. Si el pago queda 'approved', enviamos la
-    misma notificación a la tienda que hoy envías en ver_carrito y
-    otorgamos puntos al cliente (misma regla).
+    misma notificación a la tienda y otorgamos puntos al cliente.
     """
     try:
         payload = json.loads(request.body.decode('utf-8') or '{}')
@@ -802,8 +774,10 @@ def mp_webhook_view(request):
 
 
 def mp_success(request):
-    """
-    Página de retorno desde MP: mostramos un mensaje mientras llega el webhook.
-    """
+    """Página de retorno desde MP: mostramos un mensaje mientras llega el webhook."""
     messages.info(request, "Gracias. Estamos confirmando tu pago. En breve verás tu pedido en cocina.")
     return redirect('pedido_exitoso')
+
+
+# Alias por compatibilidad si en urls quedó mp_webhook_view
+mp_webhook_view = mp_webhook
