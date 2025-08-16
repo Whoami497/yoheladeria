@@ -706,104 +706,71 @@ def save_subscription(request):
 
 
 # =========================
-# === MERCADO PAGO (webhook + success)
+# === HELPER MERCADO PAGO ===
 # =========================
-
-@csrf_exempt
-def mp_webhook(request):
+def crear_preferencia_mp(request, pedido):
     """
-    Mercado Pago nos avisa aquí. Si el pago queda 'approved', enviamos la
-    misma notificación a la tienda que hoy envías en ver_carrito y
-    otorgamos puntos al cliente (misma regla).
+    Crea la preferencia de Mercado Pago y devuelve el link de checkout.
+    - Si estamos en DEBUG o el token es de PRUEBA (TEST-), fuerza sandbox_init_point.
+    - SIN auto_return (para evitar 'auto_return invalid').
+    - Loguea info útil si MP devuelve error.
     """
-    try:
-        payload = json.loads(request.body.decode('utf-8') or '{}')
-    except Exception:
-        payload = {}
+    mp_token = getattr(settings, "MERCADO_PAGO_ACCESS_TOKEN", None)
+    if not mp_token:
+        raise RuntimeError("MERCADO_PAGO_ACCESS_TOKEN no está configurado en el servidor")
 
-    payment_id = (
-        request.GET.get("id")
-        or request.GET.get("data.id")
-        or (payload.get("data") or {}).get("id")
-    )
-    if not payment_id:
-        return HttpResponse(status=200)
+    sdk = mercadopago.SDK(mp_token)
+
+    items = []
+    for det in pedido.detalles.all():
+        precio_unitario = det.producto.precio
+        if det.opcion_seleccionada:
+            precio_unitario += det.opcion_seleccionada.precio_adicional
+        items.append({
+            "title": f"{det.producto.nombre}" + (f" - {det.opcion_seleccionada.nombre_opcion}" if det.opcion_seleccionada else ""),
+            "quantity": int(det.cantidad),
+            "unit_price": float(precio_unitario),
+            "currency_id": "ARS",
+        })
+
+    success_url = request.build_absolute_uri(reverse("mp_success"))
+    failure_url = request.build_absolute_uri(reverse("mp_success"))
+    pending_url = request.build_absolute_uri(reverse("mp_success"))
+    notification_url = request.build_absolute_uri(reverse("mp_webhook"))
+
+    payload = {
+        "items": items,
+        "external_reference": str(pedido.id),
+        "back_urls": {
+            "success": success_url,
+            "failure": failure_url,
+            "pending": pending_url,
+        },
+        # "auto_return": "approved",  # ← lo dejamos apagado para evitar errores
+        "notification_url": notification_url,
+    }
 
     try:
-        sdk = mercadopago.SDK(settings.MERCADO_PAGO_ACCESS_TOKEN)
-        payment = sdk.payment().get(payment_id)["response"]
+        pref = sdk.preference().create(payload)
     except Exception as e:
-        print(f"WEBHOOK MP: error consultando pago: {e}")
-        return HttpResponse(status=200)
+        print(f"MP DEBUG: excepción creando preferencia: {e}")
+        raise
 
-    ref = payment.get("external_reference")
-    status = payment.get("status")  # approved | pending | rejected | in_process
-    if not ref:
-        return HttpResponse(status=200)
+    status = pref.get("status")
+    resp = pref.get("response", {}) or {}
+    print(f"MP DEBUG: status={status} resp_keys={list(resp.keys())}")
 
-    try:
-        pedido = Pedido.objects.get(id=ref)
-    except Pedido.DoesNotExist:
-        print("WEBHOOK MP: Pedido no encontrado por external_reference")
-        return HttpResponse(status=200)
+    if status not in (200, 201):
+        msg = resp.get("message") or resp.get("error") or "Error desconocido de MP"
+        print(f"MP DEBUG: preferencia fallida -> {msg} resp={resp}")
+        raise RuntimeError(f"Mercado Pago rechazó la preferencia: {msg}")
 
-    try:
-        pedido.metodo_pago = 'MERCADOPAGO'
-        if status == 'approved':
-            pedido.estado = 'RECIBIDO'
-        elif status == 'rejected':
-            pedido.estado = 'CANCELADO'
-        pedido.save()
-    except Exception as e:
-        print(f"WEBHOOK MP: error guardando pedido: {e}")
+    # Forzar sandbox si estás en DEBUG o el token es de prueba
+    use_sandbox = bool(getattr(settings, "DEBUG", False)) or (isinstance(mp_token, str) and mp_token.startswith("TEST-"))
 
-    if status == 'approved':
-        try:
-            if pedido.user and hasattr(pedido.user, 'clienteprofile'):
-                total = Decimal(str(pedido.total_pedido)) if pedido.total_pedido is not None else Decimal('0')
-                puntos = int(total / Decimal('500')) * 100
-                pedido.user.clienteprofile.puntos_fidelidad += puntos
-                pedido.user.clienteprofile.save()
-        except Exception as e:
-            print(f"WEBHOOK MP: error otorgando puntos: {e}")
+    init_point = resp.get("sandbox_init_point") if use_sandbox else (resp.get("init_point") or resp.get("sandbox_init_point"))
+    if not init_point:
+        print(f"MP DEBUG: preferencia sin init_point. resp={resp}")
+        raise RuntimeError("La preferencia no trajo init_point")
 
-        try:
-            channel_layer = get_channel_layer()
-            detalles_para_notificacion = []
-            for d in pedido.detalles.all():
-                detalles_para_notificacion.append({
-                    'producto_nombre': d.producto.nombre,
-                    'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
-                    'cantidad': d.cantidad,
-                    'sabores_nombres': [s.nombre for s in d.sabores.all()],
-                })
-
-            async_to_sync(channel_layer.group_send)(
-                'pedidos_new_orders',
-                {
-                    'type': 'send_order_notification',
-                    'message': f'¡Nuevo pedido #{pedido.id} recibido!',
-                    'order_id': pedido.id,
-                    'order_data': {
-                        'cliente_nombre': pedido.cliente_nombre,
-                        'cliente_direccion': pedido.cliente_direccion,
-                        'cliente_telefono': pedido.cliente_telefono,
-                        'metodo_pago': pedido.metodo_pago,
-                        'total_pedido': str(pedido.total_pedido),
-                        'detalles': detalles_para_notificacion,
-                    }
-                }
-            )
-            print(f"WEBHOOK MP: notificación enviada para pedido #{pedido.id}")
-        except Exception as e:
-            print(f"WEBHOOK MP: error enviando WS: {e}")
-
-    return HttpResponse(status=200)
-
-
-def mp_success(request):
-    """
-    Página de retorno desde MP: mostramos un mensaje mientras llega el webhook.
-    """
-    messages.info(request, "Gracias. Estamos confirmando tu pago. En breve verás tu pedido en cocina.")
-    return redirect('pedido_exitoso')
+    return init_point
