@@ -10,7 +10,11 @@
   <div id="alerts-container" class="mt-4">
     {% if pedidos_iniciales %}
       {% for p in pedidos_iniciales %}
-        <div class="order-card alert alert-primary alert-dismissible fade show mb-3 p-3" id="order-{{ p.id }}" data-order-id="{{ p.id }}">
+        <div
+          class="order-card alert alert-primary alert-dismissible fade show mb-3 p-3"
+          id="order-{{ p.id }}"
+          data-order-id="{{ p.id }}"
+          data-estado="{{ p.estado }}">
           <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
             <div class="flex-grow-1">
               <div class="d-flex align-items-center gap-2 mb-2">
@@ -30,7 +34,8 @@
                   {% for d in p.detalles.all %}
                     <li>
                       {{ d.producto.nombre }}{% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %} (x{{ d.cantidad }})
-                      <br><span class="text-muted">Sabores: 
+                      <br><span class="text-muted">
+                        Sabores:
                         {% with sab=d.sabores.all %}{% if sab %}{{ sab|join:", " }}{% else %}Sin especificar{% endif %}{% endwith %}
                       </span>
                     </li>
@@ -57,7 +62,7 @@
         </div>
       {% endfor %}
     {% else %}
-      <div class="alert alert-info text-center" role="alert">
+      <div class="alert alert-info text-center placeholder" role="alert">
         Esperando nuevos pedidos...
       </div>
     {% endif %}
@@ -71,16 +76,16 @@
 </div>
 
 <script>
-  // ===== CSRF =====
+  // ====== CSRF ======
   function getCookie(name){const value=`; ${document.cookie}`;const parts=value.split(`; ${name}=`);if(parts.length===2) return parts.pop().split(';').shift();}
   const csrftoken=getCookie('csrftoken');
 
-  // ===== Sonido (Web Audio) =====
+  // ====== Sonido ======
   let audioCtx=null;
   let soundEnabled=(localStorage.getItem('panel_sound') ?? 'on')!=='off';
-  function ensureAudio(){try{if(!audioCtx){const AC=window.AudioContext||window.webkitAudioContext;if(!AC) return;audioCtx=new AC();}if(audioCtx.state==='suspended'){audioCtx.resume();}}catch(e){console.warn('AudioContext no disponible',e);}}
+  function ensureAudio(){try{if(!audioCtx){const AC=window.AudioContext||window.webkitAudioContext;if(!AC) return;audioCtx=new AC();}if(audioCtx.state==='suspended'){audioCtx.resume();}}catch(e){}}
   function playDing(){ if(!soundEnabled) return; ensureAudio(); if(!audioCtx) return;
-    const o=audioCtx.createOscillator(); const g=audioCtx.createGain();
+    const o=audioCtx.createOscillator(), g=audioCtx.createGain();
     o.type='sine'; o.frequency.setValueAtTime(880,audioCtx.currentTime);
     g.gain.setValueAtTime(0.0001,audioCtx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.05,audioCtx.currentTime+0.02);
@@ -90,7 +95,7 @@
   }
   function unlockOnFirstInteraction(){const once=()=>{ensureAudio();document.removeEventListener('click',once);document.removeEventListener('keydown',once);document.removeEventListener('touchstart',once);};document.addEventListener('click',once,{once:true});document.addEventListener('keydown',once,{once:true});document.addEventListener('touchstart',once,{once:true});}
 
-  // ===== Helpers UI =====
+  // ====== UI helpers ======
   const alertsContainer=document.getElementById('alerts-container');
   const wsStatus=document.getElementById('ws-status');
   const toggleSoundBtn=document.getElementById('toggle-sound');
@@ -104,54 +109,80 @@
   toggleSoundBtn.addEventListener('click',()=>{soundEnabled=!soundEnabled;localStorage.setItem('panel_sound',soundEnabled?'on':'off');updateSoundBtn();ensureAudio(); if(soundEnabled) playDing();});
   updateSoundBtn(); unlockOnFirstInteraction();
 
+  function ensurePlaceholder(){
+    const hasItems = alertsContainer.querySelector('.order-card, .order-chip');
+    const ph = alertsContainer.querySelector('.placeholder');
+    if(!hasItems && !ph){
+      alertsContainer.insertAdjacentHTML('beforeend','<div class="alert alert-info text-center placeholder" role="alert">Esperando nuevos pedidos...</div>');
+    }
+    if(hasItems && ph){ ph.remove(); }
+  }
+
   function orderExists(id){return document.getElementById(`order-${id}`) || document.getElementById(`chip-${id}`);}
 
+  // ====== CHIP ======
+  function chipBadgeClass(est){
+    const e=(est||'RECIBIDO').toLowerCase();
+    return `badge bg-status-${e}`;
+  }
   function renderChip(order){
     const chip=document.createElement('div');
     chip.className='order-chip d-flex align-items-center justify-content-between';
     chip.id=`chip-${order.id}`;
     chip.dataset.orderId=order.id;
+    chip.dataset.estado=order.estado || 'RECIBIDO';
     chip.innerHTML=`
       <div class="d-flex align-items-center gap-2 flex-wrap">
         <span class="chip-id">#${order.id}</span>
-        <span class="badge bg-status-${(order.estado||'RECIBIDO').toLowerCase()}">${order.estado||'RECIBIDO'}</span>
+        <span class="${chipBadgeClass(order.estado)}">${order.estado || 'RECIBIDO'}</span>
         <span class="text-muted small">$${parseFloat(order.total_pedido||0).toFixed(2)}</span>
-        <span class="small text-truncate chip-client">${order.cliente_nombre||'N/A'}</span>
+        <span class="small text-truncate chip-client" title="${order.cliente_nombre||''}">${order.cliente_nombre||'N/A'}</span>
       </div>
-      <button class="btn btn-sm btn-outline-secondary" disabled>En curso</button>
+      <div class="chip-actions d-flex gap-1">
+        <button class="btn btn-sm btn-outline-primary btn-estado" data-estado="EN_CAMINO">En camino</button>
+        <button class="btn btn-sm btn-outline-success btn-estado" data-estado="ENTREGADO">Entregado</button>
+        <button class="btn btn-sm btn-outline-danger btn-estado" data-estado="CANCELADO">Cancelar</button>
+      </div>
     `;
     return chip;
   }
 
-  function collapseToChip(cardEl, estadoNuevo='EN_PREPARACION'){
-    const id=cardEl.dataset.orderId;
-    // sacar la card
+  function collapseToChip(cardEl, estadoNuevo){
+    const id = cardEl.dataset.orderId;
+    const totalTxt = cardEl.querySelector('.text-muted')?.textContent || 'Total: $0';
+    const total = (totalTxt.match(/(\d+(?:[\.,]\d+)?)/)||[])[1]?.replace(',','.') || '0';
+    const name = cardEl.querySelector('.compact-line .fw-semibold')?.textContent || '';
+    const estado = estadoNuevo || cardEl.dataset.estado || 'RECIBIDO';
+    const chip = renderChip({id, estado, total_pedido: total, cliente_nombre: name});
     cardEl.remove();
-    // poner chip
-    const orderData = {
-      id: id,
-      estado: estadoNuevo,
-      total_pedido: cardEl.querySelector('.text-muted')?.textContent?.replace('Total: $','') || '0',
-      cliente_nombre: cardEl.querySelector('.compact-line .fw-semibold')?.textContent || ''
-    };
-    alertsContainer.prepend(renderChip(orderData));
-    if(!alertsContainer.querySelector('.order-card') && !alertsContainer.querySelector('.order-chip')){
-      alertsContainer.innerHTML='<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
-    }
+    alertsContainer.prepend(chip);
+    ensurePlaceholder();
   }
 
+  // ====== Tarjeta (para nuevos pedidos) ======
   function buildOrderCardFromWS(orderId, orderData){
-    // Evitar duplicados
     if(orderExists(orderId)) return;
+
+    const estado = orderData.estado || 'RECIBIDO';
+    if(estado !== 'RECIBIDO'){
+      // si llega con otro estado, lo mostramos directo como chip
+      alertsContainer.prepend(renderChip({
+        id: orderId,
+        estado,
+        total_pedido: orderData.total_pedido,
+        cliente_nombre: orderData.cliente_nombre
+      }));
+      ensurePlaceholder();
+      return;
+    }
 
     const wrapper=document.createElement('div');
     wrapper.className='order-card alert alert-primary alert-dismissible fade show mb-3 p-3';
     wrapper.id=`order-${orderId}`;
     wrapper.dataset.orderId=orderId;
+    wrapper.dataset.estado=estado;
 
-    const estado = orderData.estado || 'RECIBIDO';
     const total  = parseFloat(orderData.total_pedido||0).toFixed(2);
-
     let detailsHtml='';
     if(orderData.detalles && orderData.detalles.length){
       detailsHtml = `<ul class="mb-0 small mt-2">` + orderData.detalles.map(d=>{
@@ -159,22 +190,23 @@
         const sabores = (d.sabores_nombres && d.sabores_nombres.length) ? d.sabores_nombres.join(', ') : 'Sin especificar';
         return `<li>${name} (x${d.cantidad})<br><span class="text-muted">Sabores: ${sabores}</span></li>`;
       }).join('') + `</ul>`;
-    }else{
+    } else {
       detailsHtml = `<div class="small text-muted">Sin productos</div>`;
     }
 
-    const confirmBtn = estado==='RECIBIDO'
-      ? `<button class="btn btn-success fw-bold btn-confirm" data-confirm-url="/confirmar-pedido/${orderId}/" data-order-id="${orderId}">
-           <i class="bi bi-check-circle-fill"></i> Confirmar
-         </button>`
-      : `<button class="btn btn-outline-secondary" disabled>Confirmado</button>`;
+    const confirmBtn = `
+      <button class="btn btn-success fw-bold btn-confirm"
+              data-confirm-url="/confirmar-pedido/${orderId}/"
+              data-order-id="${orderId}">
+        <i class="bi bi-check-circle-fill"></i> Confirmar
+      </button>`;
 
     wrapper.innerHTML=`
       <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
         <div class="flex-grow-1">
           <div class="d-flex align-items-center gap-2 mb-2">
             <h5 class="mb-0">#${orderId}</h5>
-            <span class="badge bg-status-${estado.toLowerCase()}">${estado}</span>
+            <span class="${chipBadgeClass(estado)}">${estado}</span>
             <small class="text-muted">Total: $${total}</small>
           </div>
           <div class="compact-line">
@@ -191,9 +223,11 @@
       <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     `;
     alertsContainer.prepend(wrapper);
+    ensurePlaceholder();
   }
 
-  // Delegación: confirmar pedido (AJAX)  **AJUSTE: credentials:'same-origin'**
+  // ====== Delegaciones ======
+  // Confirmar -> colapsar a chip
   alertsContainer.addEventListener('click', async (ev)=>{
     const btn=ev.target.closest('.btn-confirm'); if(!btn) return;
     ev.preventDefault();
@@ -201,77 +235,91 @@
     const card=btn.closest('.order-card');
     btn.disabled=true; btn.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Confirmando...';
     try{
-      const res=await fetch(url,{
-        method:'POST',
-        headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'},
-        credentials:'same-origin'
-      });
+      const res=await fetch(url,{method:'POST',headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'}});
       if(res.ok){
         collapseToChip(card,'EN_PREPARACION');
       }else{
-        // Fallback si el view devolviera redirect
         window.location.href=url;
       }
     }catch(e){
       console.error('Error confirmando:',e);
       window.location.href=url;
-    }finally{
-      if(document.body.contains(btn)){
-        btn.disabled=false;
-        btn.innerHTML='<i class="bi bi-check-circle-fill"></i> Confirmar';
+    }
+  });
+
+  // Cambiar estado desde un chip
+  alertsContainer.addEventListener('click', async (ev)=>{
+    const btn=ev.target.closest('.btn-estado'); if(!btn) return;
+    const chip = btn.closest('.order-chip');
+    const orderId = chip.dataset.orderId;
+    const nuevo = btn.dataset.estado;
+
+    btn.disabled = true;
+
+    try{
+      const res = await fetch(`/panel-alertas/estado/${orderId}/`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'},
+        body: JSON.stringify({estado: nuevo})
+      });
+      const data = await res.json();
+      if(!res.ok || !data.ok) throw new Error(data.error||'Error cambiando estado');
+
+      // actualizar badge y dataset
+      chip.dataset.estado = data.estado;
+      const badge = chip.querySelector('.badge');
+      badge.className = chipBadgeClass(data.estado);
+      badge.textContent = data.estado;
+
+      // si se marcó ENTREGADO o CANCELADO, lo sacamos del panel
+      if(data.estado === 'ENTREGADO' || data.estado === 'CANCELADO'){
+        chip.remove();
+        ensurePlaceholder();
       }
+    }catch(e){
+      console.error(e);
+      alert('No se pudo cambiar el estado.');
+    }finally{
+      btn.disabled = false;
     }
   });
 
-  // **AJUSTE**: Restaurar “Esperando…” si se cierra la última tarjeta/chip manualmente
-  alertsContainer.addEventListener('click',(e)=>{
-    if(e.target.closest('.btn-close')){
-      setTimeout(()=>{
-        if(!alertsContainer.querySelector('.order-card') && !alertsContainer.querySelector('.order-chip')){
-          alertsContainer.innerHTML='<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
-        }
-      },100);
-    }
-  });
-
-  // Botón limpiar
+  // Limpiar mostrados
   document.getElementById('clear-alerts').addEventListener('click',()=>{
-    alertsContainer.innerHTML='<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
+    alertsContainer.innerHTML='<div class="alert alert-info text-center placeholder" role="alert">Esperando nuevos pedidos...</div>';
   });
 
-  // ===== WebSocket =====
+  // ====== WebSocket ======
   const wsProtocol=window.location.protocol==='https:'?'wss://':'ws://';
   const websocketUrl=wsProtocol + window.location.host + '/ws/pedidos/notifications/';
   const chatSocket=new WebSocket(websocketUrl);
 
-  chatSocket.onopen=function(){
-    wsStatus.classList.remove('bg-secondary','bg-danger');
-    wsStatus.classList.add('bg-success');
-    wsStatus.textContent='Conectado';
-  };
-  chatSocket.onclose=function(){
-    wsStatus.classList.remove('bg-success','bg-secondary');
-    wsStatus.classList.add('bg-danger');
-    wsStatus.textContent='Desconectado';
-  };
-  chatSocket.onerror=function(){
-    wsStatus.classList.remove('bg-success','bg-secondary');
-    wsStatus.classList.add('bg-danger');
-    wsStatus.textContent='Error';
-  };
+  chatSocket.onopen=function(){wsStatus.classList.remove('bg-secondary','bg-danger');wsStatus.classList.add('bg-success');wsStatus.textContent='Conectado';};
+  chatSocket.onclose=function(){wsStatus.classList.remove('bg-success','bg-secondary');wsStatus.classList.add('bg-danger');wsStatus.textContent='Desconectado';};
+  chatSocket.onerror=function(){wsStatus.classList.remove('bg-success','bg-secondary');wsStatus.classList.add('bg-danger');wsStatus.textContent='Error';};
 
   chatSocket.onmessage=function(e){
     const data=JSON.parse(e.data);
     const orderId=data.order_id;
     const orderData=data.order_data||{};
-    // Mensajes de "nuevo pedido" (tu consumer actual)
     buildOrderCardFromWS(orderId, orderData);
     playDing();
   };
+
+  // ====== Al cargar: colapsar automáticamente todo lo que NO esté recibido ======
+  document.addEventListener('DOMContentLoaded', ()=>{
+    document.querySelectorAll('.order-card').forEach(card=>{
+      const est = (card.dataset.estado || '').toUpperCase();
+      if(est && est !== 'RECIBIDO'){
+        collapseToChip(card, est);
+      }
+    });
+    ensurePlaceholder();
+  });
 </script>
 
 <style>
-  /* chips compactos (cuando ya está confirmado) */
+  /* chips compactos */
   .order-chip{
     border:1px solid var(--bs-primary);
     background:rgba(13,110,253,.08);
@@ -281,6 +329,7 @@
   }
   .chip-id{font-weight:700}
   .chip-client{max-width:240px}
+  .chip-actions .btn{padding:.15rem .5rem}
 
   /* tarjetas más compactas */
   .order-card h5{font-size:1.05rem}
