@@ -165,9 +165,12 @@ def detalle_producto(request, producto_id):
 # =========================
 def crear_preferencia_mp(request, pedido):
     """
-    Crea la preferencia de Mercado Pago usando las líneas del pedido
-    y devuelve el init_point para redirigir al checkout.
+    Crea la preferencia de Mercado Pago y devuelve el link de checkout.
+    Acepta 'init_point' y 'sandbox_init_point'. Loguea errores útiles.
     """
+    if not getattr(settings, "MERCADO_PAGO_ACCESS_TOKEN", None):
+        raise RuntimeError("MERCADO_PAGO_ACCESS_TOKEN no está configurado en el servidor")
+
     sdk = mercadopago.SDK(settings.MERCADO_PAGO_ACCESS_TOKEN)
 
     items = []
@@ -182,7 +185,7 @@ def crear_preferencia_mp(request, pedido):
             "currency_id": "ARS",
         })
 
-    preference = sdk.preference().create({
+    payload = {
         "items": items,
         "external_reference": str(pedido.id),
         "back_urls": {
@@ -192,8 +195,33 @@ def crear_preferencia_mp(request, pedido):
         },
         "auto_return": "approved",
         "notification_url": request.build_absolute_uri(reverse("mp_webhook")),
-    })
-    return preference["response"]["init_point"]
+    }
+
+    try:
+        pref = sdk.preference().create(payload)
+    except Exception as e:
+        # Error de red/SDK
+        print(f"MP DEBUG: excepción creando preferencia: {e}")
+        raise
+
+    status = pref.get("status")
+    resp = pref.get("response", {}) or {}
+
+    # Logs de diagnóstico (NO imprimen el token)
+    print(f"MP DEBUG: status={status} resp_keys={list(resp.keys())}")
+
+    if status not in (200, 201):
+        # MP devolvió error (credenciales inválidas, etc.)
+        msg = resp.get("message") or resp.get("error") or "Error desconocido de MP"
+        print(f"MP DEBUG: preferencia fallida -> {msg} resp={resp}")
+        raise RuntimeError(f"Mercado Pago rechazó la preferencia: {msg}")
+
+    init_point = resp.get("init_point") or resp.get("sandbox_init_point")
+    if not init_point:
+        print(f"MP DEBUG: preferencia sin init_point. resp={resp}")
+        raise RuntimeError("La preferencia no trajo init_point")
+
+    return init_point
 
 
 def ver_carrito(request):
