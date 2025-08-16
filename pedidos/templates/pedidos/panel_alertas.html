@@ -3,125 +3,321 @@
 
 {% block content %}
 <div class="container my-5">
-    <h2 class="section-title text-center mb-4">Panel de Alertas de Pedidos</h2>
-    <p class="text-center text-muted">Esta pantalla recibirá notificaciones de nuevos pedidos en tiempo real.</p>
-    <hr>
+  <h2 class="section-title text-center mb-4">Panel de Alertas de Pedidos</h2>
+  <p class="text-center text-muted">Esta pantalla recibirá notificaciones de nuevos pedidos en tiempo real.</p>
+  <hr>
 
-    <div id="alerts-container" class="mt-4">
-        {# Aquí se mostrarán las alertas de pedidos en tiempo real #}
-        <div class="alert alert-info text-center" role="alert">
-            Esperando nuevos pedidos...
+  <div id="alerts-container" class="mt-4">
+    {% if pedidos_iniciales %}
+      {% for p in pedidos_iniciales %}
+        <div class="alert alert-primary alert-dismissible fade show new-order-alert order-card" role="alert" id="order-{{ p.id }}" data-order-id="{{ p.id }}">
+          <h4 class="alert-heading">¡Nuevo Pedido #{{ p.id }}!</h4>
+          <p class="mb-1"><strong>Cliente:</strong> {{ p.cliente_nombre|default:"N/A" }}</p>
+          <p class="mb-1"><strong>Dirección:</strong> {{ p.cliente_direccion|default:"N/A" }}</p>
+          <p class="mb-1"><strong>Teléfono:</strong> {{ p.cliente_telefono|default:"N/A" }}</p>
+          <p class="mb-1"><strong>Total:</strong> ${{ p.total_pedido|default_if_none:"0.00" }}</p>
+          <p class="mb-1"><strong>Método de Pago:</strong> {{ p.metodo_pago|default:"N/A" }}</p>
+          <hr>
+          {% with detalles=p.detalles.all %}
+            {% if detalles %}
+              <strong>Productos:</strong>
+              <ul class="mb-0">
+                {% for d in detalles %}
+                  <li>
+                    {{ d.producto.nombre }}{% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %} (x{{ d.cantidad }})
+                    <br>
+                    <small class="text-muted">
+                      Sabores:
+                      {% with sab=d.sabores.all %}
+                        {% if sab %}{{ sab|join:", " }}{% else %}Sin sabores especificados{% endif %}
+                      {% endwith %}
+                    </small>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              No hay detalles de productos para este pedido.<br>
+            {% endif %}
+          {% endwith %}
+          <div class="mt-3 pt-3 border-top">
+            <button
+              class="btn btn-success w-100 fw-bold btn-confirm"
+              data-confirm-url="{% url 'confirmar_pedido' p.id %}"
+              data-order-id="{{ p.id }}">
+              <i class="bi bi-check-circle-fill"></i> Confirmar y Buscar Cadete
+            </button>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
-    </div>
+      {% endfor %}
+    {% else %}
+      <div class="alert alert-info text-center" role="alert">
+        Esperando nuevos pedidos...
+      </div>
+    {% endif %}
+  </div>
 
-    <div class="text-center mt-5">
-        <button id="clear-alerts" class="btn btn-secondary">Limpiar Alertas Mostradas</button>
-    </div>
+  <div class="text-center mt-5 d-flex gap-2 justify-content-center flex-wrap">
+    <span id="ws-status" class="badge bg-secondary align-self-center">Conectando…</span>
+    <button id="toggle-sound" class="btn btn-outline-primary">🔔 Sonido: ON</button>
+    <button id="clear-alerts" class="btn btn-secondary">Limpiar Pedidos Mostrados</button>
+  </div>
 </div>
 
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const alertsContainer = document.getElementById('alerts-container');
-        const clearAlertsButton = document.getElementById('clear-alerts');
+  // ====== CSRF util (Django) ======
+  function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+  }
+  const csrftoken = getCookie('csrftoken');
 
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-        const websocketUrl = wsProtocol + window.location.host + '/ws/pedidos/notifications/';
-        
-        console.log("Intentando conectar a WebSocket:", websocketUrl);
-        const chatSocket = new WebSocket(websocketUrl);
+  // ====== Sonido de alerta (Web Audio) ======
+  let audioCtx = null;
+  let soundEnabled = (localStorage.getItem('panel_sound') ?? 'on') !== 'off';
 
-        chatSocket.onopen = function(e) {
-            console.log('Conexión WebSocket establecida.', e);
-            // Limpiamos el contenedor antes de mostrar el mensaje de conectado
-            alertsContainer.innerHTML = ''; 
-            const connectedDiv = document.createElement('div');
-            connectedDiv.className = 'alert alert-success text-center';
-            connectedDiv.textContent = 'Conectado. Esperando pedidos...';
-            alertsContainer.appendChild(connectedDiv);
-        };
+  function ensureAudio() {
+    try {
+      if (!audioCtx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return; // navegador muy viejo
+        audioCtx = new AC();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    } catch (e) {
+      console.warn('AudioContext no disponible:', e);
+    }
+  }
 
-        chatSocket.onmessage = function(e) {
-            const data = JSON.parse(e.data);
-            const message = data.message;
-            const orderId = data.order_id;
-            const orderData = data.order_data;
+  function playDing() {
+    if (!soundEnabled) return;
+    ensureAudio();
+    if (!audioCtx) return;
 
-            console.log('Mensaje recibido:', message, 'ID:', orderId, 'Datos:', orderData);
-            
-            // Si es el primer pedido, quitamos el mensaje de "Esperando..."
-            const waitingMessage = alertsContainer.querySelector('.alert-info, .alert-success');
-            if (waitingMessage) {
-                waitingMessage.remove();
-            }
+    // Sencillo "ding" de ~300ms
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(880, audioCtx.currentTime);          // A5
+    g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.05, audioCtx.currentTime + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.35);
 
-            const alertDiv = document.createElement('div');
-            alertDiv.className = 'alert alert-primary alert-dismissible fade show new-order-alert';
-            alertDiv.setAttribute('role', 'alert');
-            
-            let detailsHtml = '';
-            if (orderData.detalles && orderData.detalles.length > 0) {
-                detailsHtml += `<strong>Productos:</strong><ul class="mb-0">`;
-                orderData.detalles.forEach(detail => {
-                    let productName = detail.producto_nombre;
-                    if (detail.opcion_nombre) {
-                        productName += ` - ${detail.opcion_nombre}`;
-                    }
-                    let flavors = detail.sabores_nombres.join(', ') || 'Sin sabores especificados';
-                    detailsHtml += `<li>${productName} (x${detail.cantidad}) <br><small class="text-muted">Sabores: ${flavors}</small></li>`;
-                });
-                detailsHtml += `</ul>`;
-            } else {
-                detailsHtml = `No hay detalles de productos para este pedido.<br>`;
-            }
+    o.connect(g).connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + 0.36);
 
-            alertDiv.innerHTML = `
-                <h4 class="alert-heading">¡Nuevo Pedido #${orderId}!</h4>
-                <p class="mb-1"><strong>Cliente:</strong> ${orderData.cliente_nombre || 'N/A'}</p>
-                <p class="mb-1"><strong>Dirección:</strong> ${orderData.cliente_direccion || 'N/A'}</p>
-                <p class="mb-1"><strong>Teléfono:</strong> ${orderData.cliente_telefono || 'N/A'}</p>
-                <p class="mb-1"><strong>Total:</strong> $${parseFloat(orderData.total_pedido || 0).toFixed(2)}</p>
-                <p class="mb-1"><strong>Método de Pago:</strong> ${orderData.metodo_pago || 'N/A'}</p>
-                <hr>
-                ${detailsHtml}
-                <div class="mt-3 pt-3 border-top">
-                    <a href="/confirmar-pedido/${orderId}/" class="btn btn-success w-100 fw-bold">
-                        <i class="bi bi-check-circle-fill"></i> Confirmar y Buscar Cadete
-                    </a>
-                </div>
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-            `;
-            
-            alertsContainer.prepend(alertDiv);
+    // Vibración sutil en móviles
+    if (navigator.vibrate) {
+      navigator.vibrate([120, 40, 120]);
+    }
+  }
 
-        };
+  // Desbloquear audio con la primera interacción del usuario (políticas de autoplay)
+  function unlockOnFirstInteraction() {
+    const once = () => {
+      ensureAudio();
+      document.removeEventListener('click', once);
+      document.removeEventListener('keydown', once);
+      document.removeEventListener('touchstart', once);
+    };
+    document.addEventListener('click', once, { once: true });
+    document.addEventListener('keydown', once, { once: true });
+    document.addEventListener('touchstart', once, { once: true });
+  }
 
-        chatSocket.onclose = function(e) {
-            console.error('Conexión WebSocket cerrada inesperadamente.', e);
-            alertsContainer.innerHTML = '<div class="alert alert-danger text-center" role="alert">Conexión perdida. Recarga la página.</div>';
-        };
+  // ====== Crear tarjeta desde datos WS ======
+  function buildOrderCard(orderId, orderData) {
+    const div = document.createElement('div');
+    div.className = 'alert alert-primary alert-dismissible fade show new-order-alert order-card';
+    div.setAttribute('role', 'alert');
+    div.id = `order-${orderId}`;
+    div.dataset.orderId = orderId;
 
-        chatSocket.onerror = function(e) {
-            console.error('Error WebSocket:', e);
-            alertsContainer.innerHTML = '<div class="alert alert-danger text-center" role="alert">Error de conexión.</div>';
-        };
+    let detailsHtml = '';
+    if (orderData.detalles && orderData.detalles.length > 0) {
+      detailsHtml += `<strong>Productos:</strong><ul class="mb-0">`;
+      orderData.detalles.forEach(d => {
+        const name = d.opcion_nombre ? `${d.producto_nombre} - ${d.opcion_nombre}` : d.producto_nombre;
+        const flavors = (d.sabores_nombres && d.sabores_nombres.length) ? d.sabores_nombres.join(', ') : 'Sin sabores especificados';
+        detailsHtml += `<li>${name} (x${d.cantidad})<br><small class="text-muted">Sabores: ${flavors}</small></li>`;
+      });
+      detailsHtml += `</ul>`;
+    } else {
+      detailsHtml = `No hay detalles de productos para este pedido.<br>`;
+    }
 
-        clearAlertsButton.addEventListener('click', function() {
-            alertsContainer.innerHTML = '<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
-        });
+    const confirmUrl = `/confirmar-pedido/${orderId}/`;
+
+    div.innerHTML = `
+      <h4 class="alert-heading">¡Nuevo Pedido #${orderId}!</h4>
+      <p class="mb-1"><strong>Cliente:</strong> ${orderData.cliente_nombre || 'N/A'}</p>
+      <p class="mb-1"><strong>Dirección:</strong> ${orderData.cliente_direccion || 'N/A'}</p>
+      <p class="mb-1"><strong>Teléfono:</strong> ${orderData.cliente_telefono || 'N/A'}</p>
+      <p class="mb-1"><strong>Total:</strong> $${parseFloat(orderData.total_pedido || 0).toFixed(2)}</p>
+      <p class="mb-1"><strong>Método de Pago:</strong> ${orderData.metodo_pago || 'N/A'}</p>
+      <hr>
+      ${detailsHtml}
+      <div class="mt-3 pt-3 border-top">
+        <button class="btn btn-success w-100 fw-bold btn-confirm"
+                data-confirm-url="${confirmUrl}"
+                data-order-id="${orderId}">
+          <i class="bi bi-check-circle-fill"></i> Confirmar y Buscar Cadete
+        </button>
+      </div>
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+    return div;
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    const alertsContainer = document.getElementById('alerts-container');
+    const clearAlertsButton = document.getElementById('clear-alerts');
+    const wsStatus = document.getElementById('ws-status');
+    const toggleSoundBtn = document.getElementById('toggle-sound');
+
+    // Estado inicial del botón de sonido
+    const updateSoundBtn = () => {
+      toggleSoundBtn.textContent = soundEnabled ? '🔔 Sonido: ON' : '🔕 Sonido: OFF';
+      toggleSoundBtn.classList.toggle('btn-outline-primary', soundEnabled);
+      toggleSoundBtn.classList.toggle('btn-outline-secondary', !soundEnabled);
+    };
+    updateSoundBtn();
+
+    toggleSoundBtn.addEventListener('click', () => {
+      soundEnabled = !soundEnabled;
+      localStorage.setItem('panel_sound', soundEnabled ? 'on' : 'off');
+      updateSoundBtn();
+      ensureAudio(); // crea/reanuda el contexto al tocar el toggle
+      if (soundEnabled) playDing(); // feedback corto
     });
+
+    unlockOnFirstInteraction();
+
+    // ---- Confirmar pedido por AJAX (delegación) ----
+    alertsContainer.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.btn-confirm');
+      if (!btn) return;
+
+      ev.preventDefault();
+      const url = btn.dataset.confirmUrl;
+      const card = btn.closest('.order-card');
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Confirmando...';
+
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'X-CSRFToken': csrftoken,
+            'X-Requested-With': 'XMLHttpRequest'
+          }
+        });
+
+        if (res.ok) {
+          // Si el view no devuelve JSON (redirect), esto no rompe:
+          await res.clone().json().catch(() => ({}));
+          if (card) card.remove();
+        } else {
+          // Fallback a navegación tradicional
+          window.location.href = url;
+          return;
+        }
+      } catch (err) {
+        console.error('Error confirmando pedido:', err);
+        window.location.href = url; // fallback
+        return;
+      } finally {
+        if (document.body.contains(btn)) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="bi bi-check-circle-fill"></i> Confirmar y Buscar Cadete';
+        }
+      }
+
+      if (!alertsContainer.querySelector('.order-card')) {
+        alertsContainer.innerHTML = '<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
+      }
+    });
+
+    // ---- WebSocket ----
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const websocketUrl = wsProtocol + window.location.host + '/ws/pedidos/notifications/';
+    console.log("Intentando conectar a WebSocket:", websocketUrl);
+    const chatSocket = new WebSocket(websocketUrl);
+
+    chatSocket.onopen = function(e) {
+      console.log('Conexión WebSocket establecida.', e);
+      wsStatus.classList.remove('bg-secondary', 'bg-danger');
+      wsStatus.classList.add('bg-success');
+      wsStatus.textContent = 'Conectado';
+
+      if (!alertsContainer.querySelector('.order-card')) {
+        const waiting = alertsContainer.querySelector('.alert-info');
+        if (!waiting) {
+          alertsContainer.innerHTML = '<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
+        }
+      }
+    };
+
+    chatSocket.onmessage = function(e) {
+      const data = JSON.parse(e.data);
+      const message = data.message;
+      const orderId = data.order_id;
+      const orderData = data.order_data;
+
+      console.log('Mensaje recibido:', message, 'ID:', orderId, 'Datos:', orderData);
+
+      const waiting = alertsContainer.querySelector('.alert-info');
+      if (waiting) waiting.remove();
+
+      // Evitar duplicados
+      if (document.getElementById(`order-${orderId}`)) return;
+
+      const card = buildOrderCard(orderId, orderData);
+      alertsContainer.prepend(card);
+
+      // 🔊 Sonido y vibración en pedido nuevo
+      playDing();
+    };
+
+    chatSocket.onclose = function(e) {
+      console.error('Conexión WebSocket cerrada inesperadamente.', e);
+      wsStatus.classList.remove('bg-success', 'bg-secondary');
+      wsStatus.classList.add('bg-danger');
+      wsStatus.textContent = 'Desconectado';
+      if (!alertsContainer.querySelector('.order-card')) {
+        alertsContainer.innerHTML = '<div class="alert alert-danger text-center" role="alert">Conexión perdida. Recarga la página.</div>';
+      }
+    };
+
+    chatSocket.onerror = function(e) {
+      console.error('Error WebSocket:', e);
+      wsStatus.classList.remove('bg-success', 'bg-secondary');
+      wsStatus.classList.add('bg-danger');
+      wsStatus.textContent = 'Error';
+    };
+
+    // ---- Botón limpiar (sólo tarjetas) ----
+    clearAlertsButton.addEventListener('click', function() {
+      alertsContainer.querySelectorAll('.order-card').forEach(el => el.remove());
+      alertsContainer.innerHTML = '<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
+    });
+  });
 </script>
 
 <style>
-    .new-order-alert {
-        border: 2px solid #0d6efd;
-        box-shadow: 0 4px 12px rgba(13, 110, 253, 0.4);
-        animation: pulse 1.5s infinite alternate;
-    }
-
-    @keyframes pulse {
-        from { transform: scale(1); box-shadow: 0 4px 12px rgba(13, 110, 253, 0.2); }
-        to { transform: scale(1.01); box-shadow: 0 6px 16px rgba(13, 110, 253, 0.5); }
-    }
+  .new-order-alert {
+    border: 2px solid #0d6efd;
+    box-shadow: 0 4px 12px rgba(13, 110, 253, 0.4);
+    animation: pulse 1.5s infinite alternate;
+  }
+  @keyframes pulse {
+    from { transform: scale(1); box-shadow: 0 4px 12px rgba(13, 110, 253, 0.2); }
+    to   { transform: scale(1.01); box-shadow: 0 6px 16px rgba(13, 110, 253, 0.5); }
+  }
 </style>
-
 {% endblock %}
