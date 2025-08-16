@@ -14,8 +14,8 @@ from django.urls import reverse
 
 from .forms import ClienteRegisterForm, ClienteProfileForm
 from .models import (
-    Producto, Sabor, Pedido, DetallePedido, Categoria, OpcionProducto,
-    ClienteProfile, ProductoCanje, CadeteProfile
+    Producto, Sabor, Pedido, DetallePedido, Categoria,
+    OpcionProducto, ClienteProfile, ProductoCanje, CadeteProfile
 )
 from decimal import Decimal
 from django.contrib import messages
@@ -26,18 +26,6 @@ import json
 from django.views.decorators.csrf import csrf_exempt
 import mercadopago
 
-
-# ---------------------------
-# Utils
-# ---------------------------
-
-def _is_ajax(request):
-    return request.headers.get('x-requested-with') == 'XMLHttpRequest'
-
-
-# ---------------------------
-# Tienda (catálogo / producto)
-# ---------------------------
 
 def index(request):
     productos = Producto.objects.filter(disponible=True).order_by('nombre')
@@ -52,9 +40,7 @@ def detalle_producto(request, producto_id):
 
     opciones_disponibles = None
     if producto.opciones.exists():
-        opciones_disponibles = OpcionProducto.objects.filter(
-            producto_base=producto, disponible=True
-        )
+        opciones_disponibles = OpcionProducto.objects.filter(producto_base=producto, disponible=True)
 
     if request.method == 'POST':
         sabores_seleccionados_ids_raw = request.POST.getlist('sabores')
@@ -79,7 +65,7 @@ def detalle_producto(request, producto_id):
             cantidad_sabores_seleccionada_en_form = int(request.POST.get('cantidad_sabores', 0))
 
             if len(sabores_seleccionados_ids) != cantidad_sabores_seleccionada_en_form:
-                messages.error(request, f'Por favor, selecciona {cantidad_sabores_seleccionada_en_form} sabor(es) o ajusta la cantidad.')
+                messages.error(request, f'Por favor, selecciona {cantidad_sabores_seleccionada_en_form} sabor(es) o ajusta la cantidad de sabores a seleccionar.')
                 contexto = {
                     'producto': producto,
                     'sabores': sabores_disponibles,
@@ -89,7 +75,7 @@ def detalle_producto(request, producto_id):
                 return render(request, 'pedidos/detalle_producto.html', contexto)
 
             if len(sabores_seleccionados_ids) > producto.sabores_maximos:
-                messages.error(request, f'No puedes seleccionar más de {producto.sabores_maximos} sabor(es).')
+                messages.error(request, f'No puedes seleccionar más de {producto.sabores_maximos} sabor(es) para este producto.')
                 contexto = {
                     'producto': producto,
                     'sabores': sabores_disponibles,
@@ -171,10 +157,9 @@ def detalle_producto(request, producto_id):
     return render(request, 'pedidos/detalle_producto.html', contexto)
 
 
-# ---------------------------
-# Mercado Pago (helper)
-# ---------------------------
-
+# =========================
+# === HELPER MERCADO PAGO ===
+# =========================
 def crear_preferencia_mp(request, pedido):
     """
     Crea la preferencia de Mercado Pago y devuelve el link de checkout.
@@ -200,7 +185,7 @@ def crear_preferencia_mp(request, pedido):
     success_url = request.build_absolute_uri(reverse("mp_success"))
     failure_url = request.build_absolute_uri(reverse("mp_success"))
     pending_url = request.build_absolute_uri(reverse("mp_success"))
-    notification_url = request.build_absolute_uri(reverse("mp_webhook"))
+    notification_url = request.build_absolute_uri(reverse("mp_webhook_view"))  # usamos la vista _view
 
     payload = {
         "items": items,
@@ -210,7 +195,7 @@ def crear_preferencia_mp(request, pedido):
             "failure": failure_url,
             "pending": pending_url,
         },
-        # "auto_return": "approved",  # quitado a propósito
+        # "auto_return": "approved",  # NO: evitamos el error en tu cuenta
         "notification_url": notification_url,
     }
 
@@ -237,10 +222,6 @@ def crear_preferencia_mp(request, pedido):
 
     return init_point
 
-
-# ---------------------------
-# Carrito / Pedido
-# ---------------------------
 
 def ver_carrito(request):
     carrito = request.session.get('carrito', {})
@@ -336,6 +317,7 @@ def ver_carrito(request):
                 messages.error(request, f"Error al procesar el detalle del pedido para {item_data.get('producto_nombre', 'un producto')}: {e}")
                 continue
 
+        # Pago con Mercado Pago
         if metodo_pago == 'MERCADOPAGO':
             try:
                 nuevo_pedido.metodo_pago = 'MERCADOPAGO'
@@ -353,6 +335,7 @@ def ver_carrito(request):
                 messages.error(request, f"No pudimos iniciar el pago con Mercado Pago. Probá de nuevo o elegí otro método. Detalle: {e}")
                 return redirect('ver_carrito')
 
+        # Flujo efectivo
         if request.user.is_authenticated and hasattr(request.user, 'clienteprofile'):
             puntos_ganados = int(total_del_pedido_para_puntos / Decimal('500')) * 100
             request.user.clienteprofile.puntos_fidelidad += puntos_ganados
@@ -408,7 +391,6 @@ def eliminar_del_carrito(request, item_key):
 def productos_por_categoria(request, categoria_id):
     categoria = get_object_or_404(Categoria, pk=categoria_id)
     productos = Producto.objects.filter(categoria=categoria, disponible=True).order_by('nombre')
-
     contexto = {
         'categoria_seleccionada': categoria,
         'productos': productos,
@@ -421,9 +403,7 @@ def pedido_exitoso(request):
     return render(request, 'pedidos/pedido_exitoso.html')
 
 
-# ---------------------------
-# Autenticación cliente
-# ---------------------------
+# --- Autenticación y Perfil de Cliente ---
 
 def register_cliente(request):
     if request.user.is_authenticated:
@@ -464,7 +444,6 @@ def perfil_cliente(request):
             user.save()
 
             form.save()
-
             messages.success(request, "¡Tu perfil ha sido actualizado con éxito!")
             return redirect('perfil_cliente')
         else:
@@ -502,38 +481,87 @@ def logout_cliente(request):
     return redirect('index')
 
 
-# ---------------------------
-# Panel de alertas (tienda)
-# ---------------------------
-
-@staff_member_required
 def panel_alertas(request):
-    # Cargar pedidos RECIBIDO al abrir (para que no “desaparezcan” al recargar)
-    pedidos_iniciales = Pedido.objects.filter(estado='RECIBIDO').order_by('fecha_pedido')
-    return render(request, 'pedidos/panel_alertas.html', {
-        'pedidos_iniciales': pedidos_iniciales
-    })
+    return render(request, 'pedidos/panel_alertas.html')
 
+
+@login_required
+def canjear_puntos(request):
+    cliente_profile = request.user.clienteprofile
+    productos_canje = ProductoCanje.objects.filter(disponible=True).order_by('puntos_requeridos')
+
+    if request.method == 'POST':
+        producto_canje_id = request.POST.get('producto_canje_id')
+        try:
+            producto_canje = ProductoCanje.objects.get(id=producto_canje_id, disponible=True)
+        except ObjectDoesNotExist:
+            messages.error(request, "El producto de canje seleccionado no es válido.")
+            return redirect('canjear_puntos')
+
+        if cliente_profile.puntos_fidelidad >= producto_canje.puntos_requeridos:
+            with transaction.atomic():
+                cliente_profile.puntos_fidelidad -= producto_canje.puntos_requeridos
+                cliente_profile.save()
+
+                messages.success(
+                    request,
+                    f"¡Has canjeado '{producto_canje.nombre}' por {producto_canje.puntos_requeridos} puntos! "
+                    f"Tus puntos actuales son {cliente_profile.puntos_fidelidad}."
+                )
+
+                try:
+                    producto_ficticio_canje_obj = Producto.objects.get(nombre="Canje de Puntos - No Comprar")
+
+                    nuevo_pedido_canje = Pedido.objects.create(
+                        user=request.user,
+                        cliente_nombre=request.user.get_full_name() or request.user.username,
+                        cliente_direccion=f"Canje de Puntos: {producto_canje.nombre}",
+                        cliente_telefono=cliente_profile.telefono or "",
+                        estado='RECIBIDO',
+                    )
+
+                    DetallePedido.objects.create(
+                        pedido=nuevo_pedido_canje,
+                        producto=producto_ficticio_canje_obj,
+                        opcion_seleccionada=None,
+                        cantidad=1,
+                    )
+                    messages.info(request, f"Se ha generado un pedido de canje (ID #{nuevo_pedido_canje.id}). Puedes consultarlo en tu historial.")
+
+                except Producto.DoesNotExist:
+                    messages.error(request, "Error: No se encontró el producto ficticio 'Canje de Puntos - No Comprar'.")
+                except Exception as e:
+                    messages.error(request, f"Hubo un problema al registrar el canje como pedido: {e}")
+
+        else:
+            messages.error(
+                request,
+                f"No tienes suficientes puntos para canjear '{producto_canje.nombre}'. "
+                f"Necesitas {producto_canje.puntos_requeridos} puntos y solo tienes {cliente_profile.puntos_fidelidad}."
+            )
+
+        return redirect('canjear_puntos')
+
+    contexto = {'cliente_profile': cliente_profile, 'productos_canje': productos_canje}
+    return render(request, 'pedidos/canjear_puntos.html', contexto)
+
+
+# --- Tienda y Cadetes ---
 
 @staff_member_required
-@require_POST
 def confirmar_pedido(request, pedido_id):
     pedido = get_object_or_404(Pedido, id=pedido_id)
 
     if pedido.estado != 'RECIBIDO':
-        msg = f"El Pedido #{pedido.id} ya fue procesado."
-        if _is_ajax(request):
-            return JsonResponse({'ok': False, 'message': msg}, status=400)
-        messages.warning(request, msg)
+        messages.warning(request, f"El Pedido #{pedido.id} ya fue procesado.")
         return redirect('panel_alertas')
 
-    # 1) Cambiar el estado
     pedido.estado = 'EN_PREPARACION'
     pedido.save()
 
-    # 2) Notificar por WebSocket a cadetes
     try:
         channel_layer = get_channel_layer()
+
         detalles_para_notificacion = []
         for detalle in pedido.detalles.all():
             detalles_para_notificacion.append({
@@ -559,21 +587,14 @@ def confirmar_pedido(request, pedido_id):
             }
         )
         print(f"WEBSOCKET: Alerta para Pedido #{pedido.id} enviada al grupo 'cadetes_disponibles'.")
+        messages.success(request, f"Pedido #{pedido.id} confirmado. ¡Alerta enviada a los repartidores conectados!")
+
     except Exception as e:
         print(f"ERROR al enviar notificación por WebSocket a cadetes: {e}")
+        messages.error(request, "El pedido fue confirmado, pero hubo un error al notificar a los repartidores.")
 
-    ok_msg = f"Pedido #{pedido.id} confirmado. ¡Alerta enviada a los repartidores conectados!"
-
-    if _is_ajax(request):
-        return JsonResponse({'ok': True, 'message': ok_msg})
-
-    messages.success(request, ok_msg)
     return redirect('panel_alertas')
 
-
-# ---------------------------
-# Cadetes
-# ---------------------------
 
 @login_required
 @require_POST
@@ -628,7 +649,9 @@ def login_cadete(request):
 
 @login_required
 def panel_cadete(request):
-    vapid_public_key = settings.WEBPUSH_SETTINGS.get('VAPID_PUBLIC_KEY')
+    webpush_settings = getattr(settings, 'WEBPUSH_SETTINGS', {}) or {}
+    vapid_public_key = webpush_settings.get('VAPID_PUBLIC_KEY')
+
     pedidos_en_curso = []
     if hasattr(request.user, 'cadeteprofile'):
         pedidos_en_curso = Pedido.objects.filter(
@@ -636,10 +659,7 @@ def panel_cadete(request):
             estado__in=['ASIGNADO', 'EN_CAMINO']
         ).order_by('fecha_pedido')
 
-    contexto = {
-        'vapid_public_key': vapid_public_key,
-        'pedidos_en_curso': pedidos_en_curso
-    }
+    contexto = {'vapid_public_key': vapid_public_key, 'pedidos_en_curso': pedidos_en_curso}
     return render(request, 'pedidos/panel_cadete.html', contexto)
 
 
@@ -678,15 +698,16 @@ def save_subscription(request):
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
 
-# ---------------------------
-# Webhook & retorno MP
-# ---------------------------
+# =========================
+# === MERCADO PAGO (webhook + success)
+# =========================
 
 @csrf_exempt
-def mp_webhook(request):
+def mp_webhook_view(request):
     """
     Mercado Pago nos avisa aquí. Si el pago queda 'approved', enviamos la
-    misma notificación a la tienda y otorgamos puntos al cliente.
+    misma notificación a la tienda que hoy envías en ver_carrito y
+    otorgamos puntos al cliente (misma regla).
     """
     try:
         payload = json.loads(request.body.decode('utf-8') or '{}')
@@ -774,10 +795,10 @@ def mp_webhook(request):
 
 
 def mp_success(request):
-    """Página de retorno desde MP: mostramos un mensaje mientras llega el webhook."""
     messages.info(request, "Gracias. Estamos confirmando tu pago. En breve verás tu pedido en cocina.")
     return redirect('pedido_exitoso')
 
 
-# Alias por compatibilidad si en urls quedó mp_webhook_view
-mp_webhook_view = mp_webhook
+# ---- Alias de compatibilidad para URLs antiguas ----
+# Si en pedidos/urls.py aún tenés 'mp_webhook', esto evita errores.
+mp_webhook = mp_webhook_view
