@@ -64,6 +64,9 @@
   </div>
 </div>
 
+<!-- Sonido MP3 -->
+<audio id="new-order-sound" src="{% static 'pedidos/sounds/new-order.mp3' %}" preload="auto"></audio>
+
 <script>
   // ====== CSRF util (Django) ======
   function getCookie(name) {
@@ -73,53 +76,36 @@
   }
   const csrftoken = getCookie('csrftoken');
 
-  // ====== Sonido de alerta (Web Audio) ======
-  let audioCtx = null;
+  // ====== Sonido de alerta (HTMLAudio) ======
+  const audioEl = document.getElementById('new-order-sound');
   let soundEnabled = (localStorage.getItem('panel_sound') ?? 'on') !== 'off';
 
-  function ensureAudio() {
-    try {
-      if (!audioCtx) {
-        const AC = window.AudioContext || window.webkitAudioContext;
-        if (!AC) return; // navegador muy viejo
-        audioCtx = new AC();
-      }
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
-    } catch (e) {
-      console.warn('AudioContext no disponible:', e);
-    }
-  }
-
   function playDing() {
-    if (!soundEnabled) return;
-    ensureAudio();
-    if (!audioCtx) return;
-
-    // Sencillo "ding" de ~300ms
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(880, audioCtx.currentTime);          // A5
-    g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.05, audioCtx.currentTime + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.35);
-
-    o.connect(g).connect(audioCtx.destination);
-    o.start();
-    o.stop(audioCtx.currentTime + 0.36);
-
-    // Vibración sutil en móviles
+    if (!soundEnabled || !audioEl) return;
+    try {
+      audioEl.currentTime = 0;
+      audioEl.play().catch(() => {});
+    } catch (_) {}
     if (navigator.vibrate) {
       navigator.vibrate([120, 40, 120]);
     }
   }
 
-  // Desbloquear audio con la primera interacción del usuario (políticas de autoplay)
+  // Desbloquear audio con primera interacción (políticas autoplay)
   function unlockOnFirstInteraction() {
     const once = () => {
-      ensureAudio();
+      if (audioEl) {
+        // Intento de “warm-up”: reproducir muteado y pausar para habilitar futuras reproducciones
+        const wasMuted = audioEl.muted;
+        audioEl.muted = true;
+        audioEl.play().then(() => {
+          audioEl.pause();
+          audioEl.currentTime = 0;
+          audioEl.muted = wasMuted;
+        }).catch(() => {
+          audioEl.muted = wasMuted;
+        });
+      }
       document.removeEventListener('click', once);
       document.removeEventListener('keydown', once);
       document.removeEventListener('touchstart', once);
@@ -191,7 +177,6 @@
       soundEnabled = !soundEnabled;
       localStorage.setItem('panel_sound', soundEnabled ? 'on' : 'off');
       updateSoundBtn();
-      ensureAudio(); // crea/reanuda el contexto al tocar el toggle
       if (soundEnabled) playDing(); // feedback corto
     });
 
@@ -219,12 +204,10 @@
         });
 
         if (res.ok) {
-          // Si el view no devuelve JSON (redirect), esto no rompe:
-          await res.clone().json().catch(() => ({}));
+          await res.clone().json().catch(() => ({})); // por si el view redirige
           if (card) card.remove();
         } else {
-          // Fallback a navegación tradicional
-          window.location.href = url;
+          window.location.href = url; // fallback
           return;
         }
       } catch (err) {
