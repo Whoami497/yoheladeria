@@ -166,7 +166,7 @@ def detalle_producto(request, producto_id):
 def crear_preferencia_mp(request, pedido):
     """
     Crea la preferencia de Mercado Pago y devuelve el link de checkout.
-    Acepta 'init_point' y 'sandbox_init_point'. Loguea errores útiles.
+    SIN auto_return para evitar 'auto_return invalid'.
     """
     if not getattr(settings, "MERCADO_PAGO_ACCESS_TOKEN", None):
         raise RuntimeError("MERCADO_PAGO_ACCESS_TOKEN no está configurado en el servidor")
@@ -185,33 +185,36 @@ def crear_preferencia_mp(request, pedido):
             "currency_id": "ARS",
         })
 
+    success_url = request.build_absolute_uri(reverse("mp_success"))
+    failure_url = request.build_absolute_uri(reverse("mp_success"))
+    pending_url = request.build_absolute_uri(reverse("mp_success"))
+    notification_url = request.build_absolute_uri(reverse("mp_webhook"))
+
     payload = {
         "items": items,
         "external_reference": str(pedido.id),
         "back_urls": {
-            "success": request.build_absolute_uri(reverse("mp_success")),
-            "failure": request.build_absolute_uri(reverse("mp_success")),
-            "pending": request.build_absolute_uri(reverse("mp_success")),
+            "success": success_url,
+            "failure": failure_url,
+            "pending": pending_url,
         },
-        "auto_return": "approved",
-        "notification_url": request.build_absolute_uri(reverse("mp_webhook")),
+        # Quitamos auto_return (causaba error en tu cuenta)
+        # "auto_return": "approved",
+        "notification_url": notification_url,
     }
 
     try:
         pref = sdk.preference().create(payload)
     except Exception as e:
-        # Error de red/SDK
         print(f"MP DEBUG: excepción creando preferencia: {e}")
         raise
 
     status = pref.get("status")
     resp = pref.get("response", {}) or {}
 
-    # Logs de diagnóstico (NO imprimen el token)
-    print(f"MP DEBUG: status={status} resp_keys={list(resp.keys())}")
+    print(f"MP DEBUG: status={status} resp_keys={list(resp.keys())} back_urls={payload.get('back_urls')}")
 
     if status not in (200, 201):
-        # MP devolvió error (credenciales inválidas, etc.)
         msg = resp.get("message") or resp.get("error") or "Error desconocido de MP"
         print(f"MP DEBUG: preferencia fallida -> {msg} resp={resp}")
         raise RuntimeError(f"Mercado Pago rechazó la preferencia: {msg}")
@@ -603,28 +606,21 @@ def confirmar_pedido(request, pedido_id):
 @login_required
 @require_POST
 def aceptar_pedido(request, pedido_id):
-    # Usamos get_object_or_404 para obtener el pedido de forma segura.
     pedido = get_object_or_404(Pedido, id=pedido_id)
 
-    # Verificamos que el usuario logueado sea realmente un cadete.
     if not hasattr(request.user, 'cadeteprofile'):
         messages.error(request, "Acción no permitida. No tienes un perfil de cadete.")
         return redirect('index')
 
-    # Verificamos que el pedido esté en el estado correcto para ser aceptado.
-    # Esto previene que dos cadetes tomen el mismo pedido (race condition).
     if pedido.estado != 'EN_PREPARACION':
         messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
         return redirect('panel_cadete')
 
-    # Asignamos el cadete y cambiamos el estado del pedido.
     pedido.cadete_asignado = request.user.cadeteprofile
     pedido.estado = 'ASIGNADO'
     pedido.save()
 
     messages.success(request, f"¡Has aceptado el Pedido #{pedido.id}! Por favor, prepárate para retirarlo.")
-    
-    # Redirigimos al cadete a su panel, donde verá el pedido en su lista de "pedidos en curso".
     return redirect('panel_cadete')
 # --- FIN: NUEVA VISTA ACEPTAR_PEDIDO ---
 
@@ -661,7 +657,6 @@ def login_cadete(request):
 @login_required
 def panel_cadete(request):
     vapid_public_key = settings.WEBPUSH_SETTINGS.get('VAPID_PUBLIC_KEY')
-    # Añadimos la lista de pedidos en curso del cadete al contexto
     pedidos_en_curso = []
     if hasattr(request.user, 'cadeteprofile'):
         pedidos_en_curso = Pedido.objects.filter(
@@ -685,7 +680,6 @@ def logout_cadete(request):
 @login_required
 @require_POST
 def save_subscription(request):
-    # --- INICIO: LOGGING AÑADIDO ---
     print("--- VISTA SAVE_SUBSCRIPTION INICIADA ---")
     
     if not hasattr(request.user, 'cadeteprofile'):
@@ -695,26 +689,20 @@ def save_subscription(request):
     try:
         data = json.loads(request.body)
         print(f"DEBUG: Datos de suscripción recibidos para el cadete {request.user.username}.")
-        
-        # Usar el método update() para un guardado más directo
         updated_count = CadeteProfile.objects.filter(user=request.user).update(subscription_info=data)
-        
         print(f"DEBUG: El comando update() afectó a {updated_count} fila(s) para el usuario {request.user.username}.")
-
         if updated_count > 0:
             print(f"ÉXITO: Suscripción guardada para {request.user.username}.")
             return JsonResponse({'status': 'ok', 'message': 'Subscription saved'})
         else:
             print(f"ERROR: No se encontró el perfil del cadete {request.user.username} para actualizar.")
             return JsonResponse({'status': 'error', 'message': 'Cadete profile not found for update'}, status=404)
-
     except json.JSONDecodeError:
         print("ERROR: No se pudo decodificar el JSON del request body.")
         return JsonResponse({'status': 'error', 'message': 'Invalid JSON'}, status=400)
     except Exception as e:
         print(f"ERROR: Excepción inesperada en save_subscription: {e}")
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
-    # --- FIN: LOGGING AÑADIDO ---
 
 
 # =========================
@@ -728,7 +716,6 @@ def mp_webhook(request):
     misma notificación a la tienda que hoy envías en ver_carrito y
     otorgamos puntos al cliente (misma regla).
     """
-    # Intentamos obtener el payment_id desde query o body JSON
     try:
         payload = json.loads(request.body.decode('utf-8') or '{}')
     except Exception:
@@ -742,7 +729,6 @@ def mp_webhook(request):
     if not payment_id:
         return HttpResponse(status=200)
 
-    # Consultamos MP
     try:
         sdk = mercadopago.SDK(settings.MERCADO_PAGO_ACCESS_TOKEN)
         payment = sdk.payment().get(payment_id)["response"]
@@ -761,11 +747,9 @@ def mp_webhook(request):
         print("WEBHOOK MP: Pedido no encontrado por external_reference")
         return HttpResponse(status=200)
 
-    # Guardamos método por claridad
     try:
         pedido.metodo_pago = 'MERCADOPAGO'
         if status == 'approved':
-            # Marcamos recibido para que aparezca en panel (si tu flujo lo requiere)
             pedido.estado = 'RECIBIDO'
         elif status == 'rejected':
             pedido.estado = 'CANCELADO'
@@ -774,7 +758,6 @@ def mp_webhook(request):
         print(f"WEBHOOK MP: error guardando pedido: {e}")
 
     if status == 'approved':
-        # 1) Otorgar puntos igual que en ver_carrito (usamos total_pedido del modelo)
         try:
             if pedido.user and hasattr(pedido.user, 'clienteprofile'):
                 total = Decimal(str(pedido.total_pedido)) if pedido.total_pedido is not None else Decimal('0')
@@ -784,7 +767,6 @@ def mp_webhook(request):
         except Exception as e:
             print(f"WEBHOOK MP: error otorgando puntos: {e}")
 
-        # 2) Enviar notificación por Channels igual que en ver_carrito
         try:
             channel_layer = get_channel_layer()
             detalles_para_notificacion = []
