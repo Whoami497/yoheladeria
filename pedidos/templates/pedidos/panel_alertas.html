@@ -4,49 +4,55 @@
 {% block content %}
 <div class="container my-5">
   <h2 class="section-title text-center mb-4">Panel de Alertas de Pedidos</h2>
-  <p class="text-center text-muted">Esta pantalla recibirá notificaciones de nuevos pedidos en tiempo real.</p>
+  <p class="text-center text-muted">Llegan en tiempo real y quedan visibles aun si recargás la página.</p>
   <hr>
 
   <div id="alerts-container" class="mt-4">
     {% if pedidos_iniciales %}
       {% for p in pedidos_iniciales %}
-        <div class="alert alert-primary alert-dismissible fade show new-order-alert order-card" role="alert" id="order-{{ p.id }}" data-order-id="{{ p.id }}">
-          <h4 class="alert-heading">¡Nuevo Pedido #{{ p.id }}!</h4>
-          <p class="mb-1"><strong>Cliente:</strong> {{ p.cliente_nombre|default:"N/A" }}</p>
-          <p class="mb-1"><strong>Dirección:</strong> {{ p.cliente_direccion|default:"N/A" }}</p>
-          <p class="mb-1"><strong>Teléfono:</strong> {{ p.cliente_telefono|default:"N/A" }}</p>
-          <p class="mb-1"><strong>Total:</strong> ${{ p.total_pedido|default_if_none:"0.00" }}</p>
-          <p class="mb-1"><strong>Método de Pago:</strong> {{ p.metodo_pago|default:"N/A" }}</p>
-          <hr>
-          {% with detalles=p.detalles.all %}
-            {% if detalles %}
-              <strong>Productos:</strong>
-              <ul class="mb-0">
-                {% for d in detalles %}
-                  <li>
-                    {{ d.producto.nombre }}{% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %} (x{{ d.cantidad }})
-                    <br>
-                    <small class="text-muted">
-                      Sabores:
-                      {% with sab=d.sabores.all %}
-                        {% if sab %}{{ sab|join:", " }}{% else %}Sin sabores especificados{% endif %}
-                      {% endwith %}
-                    </small>
-                  </li>
-                {% endfor %}
-              </ul>
-            {% else %}
-              No hay detalles de productos para este pedido.<br>
-            {% endif %}
-          {% endwith %}
-          <div class="mt-3 pt-3 border-top">
-            <button
-              class="btn btn-success w-100 fw-bold btn-confirm"
-              data-confirm-url="{% url 'confirmar_pedido' p.id %}"
-              data-order-id="{{ p.id }}">
-              <i class="bi bi-check-circle-fill"></i> Confirmar y Buscar Cadete
-            </button>
+        <div class="order-card alert alert-primary alert-dismissible fade show mb-3 p-3" id="order-{{ p.id }}" data-order-id="{{ p.id }}">
+          <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
+            <div class="flex-grow-1">
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <h5 class="mb-0">#{{ p.id }}</h5>
+                <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
+                <small class="text-muted">Total: ${{ p.total_pedido|default_if_none:"0.00" }}</small>
+              </div>
+              <div class="compact-line">
+                <span class="fw-semibold">{{ p.cliente_nombre|default:"N/A" }}</span>
+                <span class="text-muted">· {{ p.cliente_telefono|default:"—" }}</span>
+                <span class="text-muted">· {{ p.cliente_direccion|default:"—" }}</span>
+              </div>
+
+              <details class="mt-2">
+                <summary class="cursor-pointer">Ver productos</summary>
+                <ul class="mb-0 small mt-2">
+                  {% for d in p.detalles.all %}
+                    <li>
+                      {{ d.producto.nombre }}{% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %} (x{{ d.cantidad }})
+                      <br><span class="text-muted">Sabores: 
+                        {% with sab=d.sabores.all %}{% if sab %}{{ sab|join:", " }}{% else %}Sin especificar{% endif %}{% endwith %}
+                      </span>
+                    </li>
+                  {% endfor %}
+                </ul>
+              </details>
+            </div>
+
+            <div class="text-end min-btn-col">
+              {% if p.estado == 'RECIBIDO' %}
+              <button
+                class="btn btn-success fw-bold btn-confirm"
+                data-confirm-url="{% url 'confirmar_pedido' p.id %}"
+                data-order-id="{{ p.id }}">
+                <i class="bi bi-check-circle-fill"></i> Confirmar
+              </button>
+              {% else %}
+              <button class="btn btn-outline-secondary" disabled>Confirmado</button>
+              {% endif %}
+            </div>
           </div>
+
           <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
       {% endfor %}
@@ -57,250 +63,236 @@
     {% endif %}
   </div>
 
-  <div class="text-center mt-5 d-flex gap-2 justify-content-center flex-wrap">
+  <div class="text-center mt-4 d-flex gap-2 justify-content-center flex-wrap">
     <span id="ws-status" class="badge bg-secondary align-self-center">Conectando…</span>
     <button id="toggle-sound" class="btn btn-outline-primary">🔔 Sonido: ON</button>
     <button id="clear-alerts" class="btn btn-secondary">Limpiar Pedidos Mostrados</button>
   </div>
 </div>
 
-<!-- Sonido MP3 -->
-<audio id="new-order-sound" src="{% static 'pedidos/sounds/new-order.mp3' %}" preload="auto"></audio>
-
 <script>
-  // ====== CSRF util (Django) ======
-  function getCookie(name) {
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-    if (parts.length === 2) return parts.pop().split(';').shift();
+  // ===== CSRF =====
+  function getCookie(name){const value=`; ${document.cookie}`;const parts=value.split(`; ${name}=`);if(parts.length===2) return parts.pop().split(';').shift();}
+  const csrftoken=getCookie('csrftoken');
+
+  // ===== Sonido (Web Audio) =====
+  let audioCtx=null;
+  let soundEnabled=(localStorage.getItem('panel_sound') ?? 'on')!=='off';
+  function ensureAudio(){try{if(!audioCtx){const AC=window.AudioContext||window.webkitAudioContext;if(!AC) return;audioCtx=new AC();}if(audioCtx.state==='suspended'){audioCtx.resume();}}catch(e){console.warn('AudioContext no disponible',e);}}
+  function playDing(){ if(!soundEnabled) return; ensureAudio(); if(!audioCtx) return;
+    const o=audioCtx.createOscillator(); const g=audioCtx.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(880,audioCtx.currentTime);
+    g.gain.setValueAtTime(0.0001,audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.05,audioCtx.currentTime+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+0.35);
+    o.connect(g).connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+0.36);
+    if(navigator.vibrate){navigator.vibrate([120,40,120]);}
   }
-  const csrftoken = getCookie('csrftoken');
+  function unlockOnFirstInteraction(){const once=()=>{ensureAudio();document.removeEventListener('click',once);document.removeEventListener('keydown',once);document.removeEventListener('touchstart',once);};document.addEventListener('click',once,{once:true});document.addEventListener('keydown',once,{once:true});document.addEventListener('touchstart',once,{once:true});}
 
-  // ====== Sonido de alerta (HTMLAudio) ======
-  const audioEl = document.getElementById('new-order-sound');
-  let soundEnabled = (localStorage.getItem('panel_sound') ?? 'on') !== 'off';
+  // ===== Helpers UI =====
+  const alertsContainer=document.getElementById('alerts-container');
+  const wsStatus=document.getElementById('ws-status');
+  const toggleSoundBtn=document.getElementById('toggle-sound');
+  const clearAlertsButton=document.getElementById('clear-alerts');
 
-  function playDing() {
-    if (!soundEnabled || !audioEl) return;
-    try {
-      audioEl.currentTime = 0;
-      audioEl.play().catch(() => {});
-    } catch (_) {}
-    if (navigator.vibrate) {
-      navigator.vibrate([120, 40, 120]);
-    }
+  function updateSoundBtn(){
+    toggleSoundBtn.textContent = soundEnabled ? '🔔 Sonido: ON' : '🔕 Sonido: OFF';
+    toggleSoundBtn.classList.toggle('btn-outline-primary', soundEnabled);
+    toggleSoundBtn.classList.toggle('btn-outline-secondary', !soundEnabled);
+  }
+  toggleSoundBtn.addEventListener('click',()=>{soundEnabled=!soundEnabled;localStorage.setItem('panel_sound',soundEnabled?'on':'off');updateSoundBtn();ensureAudio(); if(soundEnabled) playDing();});
+  updateSoundBtn(); unlockOnFirstInteraction();
+
+  function orderExists(id){return document.getElementById(`order-${id}`) || document.getElementById(`chip-${id}`);}
+
+  function renderChip(order){
+    const chip=document.createElement('div');
+    chip.className='order-chip d-flex align-items-center justify-content-between';
+    chip.id=`chip-${order.id}`;
+    chip.dataset.orderId=order.id;
+    chip.innerHTML=`
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span class="chip-id">#${order.id}</span>
+        <span class="badge bg-status-${(order.estado||'RECIBIDO').toLowerCase()}">${order.estado||'RECIBIDO'}</span>
+        <span class="text-muted small">$${parseFloat(order.total_pedido||0).toFixed(2)}</span>
+        <span class="small text-truncate chip-client">${order.cliente_nombre||'N/A'}</span>
+      </div>
+      <button class="btn btn-sm btn-outline-secondary" disabled>En curso</button>
+    `;
+    return chip;
   }
 
-  // Desbloquear audio con primera interacción (políticas autoplay)
-  function unlockOnFirstInteraction() {
-    const once = () => {
-      if (audioEl) {
-        // Intento de “warm-up”: reproducir muteado y pausar para habilitar futuras reproducciones
-        const wasMuted = audioEl.muted;
-        audioEl.muted = true;
-        audioEl.play().then(() => {
-          audioEl.pause();
-          audioEl.currentTime = 0;
-          audioEl.muted = wasMuted;
-        }).catch(() => {
-          audioEl.muted = wasMuted;
-        });
-      }
-      document.removeEventListener('click', once);
-      document.removeEventListener('keydown', once);
-      document.removeEventListener('touchstart', once);
+  function collapseToChip(cardEl, estadoNuevo='EN_PREPARACION'){
+    const id=cardEl.dataset.orderId;
+    // sacar la card
+    cardEl.remove();
+    // poner chip
+    const orderData = {
+      id: id,
+      estado: estadoNuevo,
+      total_pedido: cardEl.querySelector('.text-muted')?.textContent?.replace('Total: $','') || '0',
+      cliente_nombre: cardEl.querySelector('.compact-line .fw-semibold')?.textContent || ''
     };
-    document.addEventListener('click', once, { once: true });
-    document.addEventListener('keydown', once, { once: true });
-    document.addEventListener('touchstart', once, { once: true });
+    alertsContainer.prepend(renderChip(orderData));
+    if(!alertsContainer.querySelector('.order-card') && !alertsContainer.querySelector('.order-chip')){
+      alertsContainer.innerHTML='<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
+    }
   }
 
-  // ====== Crear tarjeta desde datos WS ======
-  function buildOrderCard(orderId, orderData) {
-    const div = document.createElement('div');
-    div.className = 'alert alert-primary alert-dismissible fade show new-order-alert order-card';
-    div.setAttribute('role', 'alert');
-    div.id = `order-${orderId}`;
-    div.dataset.orderId = orderId;
+  function buildOrderCardFromWS(orderId, orderData){
+    // Evitar duplicados
+    if(orderExists(orderId)) return;
 
-    let detailsHtml = '';
-    if (orderData.detalles && orderData.detalles.length > 0) {
-      detailsHtml += `<strong>Productos:</strong><ul class="mb-0">`;
-      orderData.detalles.forEach(d => {
+    const wrapper=document.createElement('div');
+    wrapper.className='order-card alert alert-primary alert-dismissible fade show mb-3 p-3';
+    wrapper.id=`order-${orderId}`;
+    wrapper.dataset.orderId=orderId;
+
+    const estado = orderData.estado || 'RECIBIDO';
+    const total  = parseFloat(orderData.total_pedido||0).toFixed(2);
+
+    let detailsHtml='';
+    if(orderData.detalles && orderData.detalles.length){
+      detailsHtml = `<ul class="mb-0 small mt-2">` + orderData.detalles.map(d=>{
         const name = d.opcion_nombre ? `${d.producto_nombre} - ${d.opcion_nombre}` : d.producto_nombre;
-        const flavors = (d.sabores_nombres && d.sabores_nombres.length) ? d.sabores_nombres.join(', ') : 'Sin sabores especificados';
-        detailsHtml += `<li>${name} (x${d.cantidad})<br><small class="text-muted">Sabores: ${flavors}</small></li>`;
-      });
-      detailsHtml += `</ul>`;
-    } else {
-      detailsHtml = `No hay detalles de productos para este pedido.<br>`;
+        const sabores = (d.sabores_nombres && d.sabores_nombres.length) ? d.sabores_nombres.join(', ') : 'Sin especificar';
+        return `<li>${name} (x${d.cantidad})<br><span class="text-muted">Sabores: ${sabores}</span></li>`;
+      }).join('') + `</ul>`;
+    }else{
+      detailsHtml = `<div class="small text-muted">Sin productos</div>`;
     }
 
-    const confirmUrl = `/confirmar-pedido/${orderId}/`;
+    const confirmBtn = estado==='RECIBIDO'
+      ? `<button class="btn btn-success fw-bold btn-confirm" data-confirm-url="/confirmar-pedido/${orderId}/" data-order-id="${orderId}">
+           <i class="bi bi-check-circle-fill"></i> Confirmar
+         </button>`
+      : `<button class="btn btn-outline-secondary" disabled>Confirmado</button>`;
 
-    div.innerHTML = `
-      <h4 class="alert-heading">¡Nuevo Pedido #${orderId}!</h4>
-      <p class="mb-1"><strong>Cliente:</strong> ${orderData.cliente_nombre || 'N/A'}</p>
-      <p class="mb-1"><strong>Dirección:</strong> ${orderData.cliente_direccion || 'N/A'}</p>
-      <p class="mb-1"><strong>Teléfono:</strong> ${orderData.cliente_telefono || 'N/A'}</p>
-      <p class="mb-1"><strong>Total:</strong> $${parseFloat(orderData.total_pedido || 0).toFixed(2)}</p>
-      <p class="mb-1"><strong>Método de Pago:</strong> ${orderData.metodo_pago || 'N/A'}</p>
-      <hr>
-      ${detailsHtml}
-      <div class="mt-3 pt-3 border-top">
-        <button class="btn btn-success w-100 fw-bold btn-confirm"
-                data-confirm-url="${confirmUrl}"
-                data-order-id="${orderId}">
-          <i class="bi bi-check-circle-fill"></i> Confirmar y Buscar Cadete
-        </button>
+    wrapper.innerHTML=`
+      <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
+        <div class="flex-grow-1">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <h5 class="mb-0">#${orderId}</h5>
+            <span class="badge bg-status-${estado.toLowerCase()}">${estado}</span>
+            <small class="text-muted">Total: $${total}</small>
+          </div>
+          <div class="compact-line">
+            <span class="fw-semibold">${orderData.cliente_nombre || 'N/A'}</span>
+            <span class="text-muted">· ${orderData.cliente_telefono || '—'}</span>
+            <span class="text-muted">· ${orderData.cliente_direccion || '—'}</span>
+          </div>
+          <details class="mt-2"><summary>Ver productos</summary>${detailsHtml}</details>
+        </div>
+        <div class="text-end min-btn-col">
+          ${confirmBtn}
+        </div>
       </div>
       <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     `;
-    return div;
+    alertsContainer.prepend(wrapper);
   }
 
-  document.addEventListener('DOMContentLoaded', function() {
-    const alertsContainer = document.getElementById('alerts-container');
-    const clearAlertsButton = document.getElementById('clear-alerts');
-    const wsStatus = document.getElementById('ws-status');
-    const toggleSoundBtn = document.getElementById('toggle-sound');
-
-    // Estado inicial del botón de sonido
-    const updateSoundBtn = () => {
-      toggleSoundBtn.textContent = soundEnabled ? '🔔 Sonido: ON' : '🔕 Sonido: OFF';
-      toggleSoundBtn.classList.toggle('btn-outline-primary', soundEnabled);
-      toggleSoundBtn.classList.toggle('btn-outline-secondary', !soundEnabled);
-    };
-    updateSoundBtn();
-
-    toggleSoundBtn.addEventListener('click', () => {
-      soundEnabled = !soundEnabled;
-      localStorage.setItem('panel_sound', soundEnabled ? 'on' : 'off');
-      updateSoundBtn();
-      if (soundEnabled) playDing(); // feedback corto
-    });
-
-    unlockOnFirstInteraction();
-
-    // ---- Confirmar pedido por AJAX (delegación) ----
-    alertsContainer.addEventListener('click', async (ev) => {
-      const btn = ev.target.closest('.btn-confirm');
-      if (!btn) return;
-
-      ev.preventDefault();
-      const url = btn.dataset.confirmUrl;
-      const card = btn.closest('.order-card');
-
-      btn.disabled = true;
-      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Confirmando...';
-
-      try {
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'X-CSRFToken': csrftoken,
-            'X-Requested-With': 'XMLHttpRequest'
-          }
-        });
-
-        if (res.ok) {
-          await res.clone().json().catch(() => ({})); // por si el view redirige
-          if (card) card.remove();
-        } else {
-          window.location.href = url; // fallback
-          return;
-        }
-      } catch (err) {
-        console.error('Error confirmando pedido:', err);
-        window.location.href = url; // fallback
-        return;
-      } finally {
-        if (document.body.contains(btn)) {
-          btn.disabled = false;
-          btn.innerHTML = '<i class="bi bi-check-circle-fill"></i> Confirmar y Buscar Cadete';
-        }
+  // Delegación: confirmar pedido (AJAX)  **AJUSTE: credentials:'same-origin'**
+  alertsContainer.addEventListener('click', async (ev)=>{
+    const btn=ev.target.closest('.btn-confirm'); if(!btn) return;
+    ev.preventDefault();
+    const url=btn.dataset.confirmUrl;
+    const card=btn.closest('.order-card');
+    btn.disabled=true; btn.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Confirmando...';
+    try{
+      const res=await fetch(url,{
+        method:'POST',
+        headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'},
+        credentials:'same-origin'
+      });
+      if(res.ok){
+        collapseToChip(card,'EN_PREPARACION');
+      }else{
+        // Fallback si el view devolviera redirect
+        window.location.href=url;
       }
-
-      if (!alertsContainer.querySelector('.order-card')) {
-        alertsContainer.innerHTML = '<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
+    }catch(e){
+      console.error('Error confirmando:',e);
+      window.location.href=url;
+    }finally{
+      if(document.body.contains(btn)){
+        btn.disabled=false;
+        btn.innerHTML='<i class="bi bi-check-circle-fill"></i> Confirmar';
       }
-    });
-
-    // ---- WebSocket ----
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-    const websocketUrl = wsProtocol + window.location.host + '/ws/pedidos/notifications/';
-    console.log("Intentando conectar a WebSocket:", websocketUrl);
-    const chatSocket = new WebSocket(websocketUrl);
-
-    chatSocket.onopen = function(e) {
-      console.log('Conexión WebSocket establecida.', e);
-      wsStatus.classList.remove('bg-secondary', 'bg-danger');
-      wsStatus.classList.add('bg-success');
-      wsStatus.textContent = 'Conectado';
-
-      if (!alertsContainer.querySelector('.order-card')) {
-        const waiting = alertsContainer.querySelector('.alert-info');
-        if (!waiting) {
-          alertsContainer.innerHTML = '<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
-        }
-      }
-    };
-
-    chatSocket.onmessage = function(e) {
-      const data = JSON.parse(e.data);
-      const message = data.message;
-      const orderId = data.order_id;
-      const orderData = data.order_data;
-
-      console.log('Mensaje recibido:', message, 'ID:', orderId, 'Datos:', orderData);
-
-      const waiting = alertsContainer.querySelector('.alert-info');
-      if (waiting) waiting.remove();
-
-      // Evitar duplicados
-      if (document.getElementById(`order-${orderId}`)) return;
-
-      const card = buildOrderCard(orderId, orderData);
-      alertsContainer.prepend(card);
-
-      // 🔊 Sonido y vibración en pedido nuevo
-      playDing();
-    };
-
-    chatSocket.onclose = function(e) {
-      console.error('Conexión WebSocket cerrada inesperadamente.', e);
-      wsStatus.classList.remove('bg-success', 'bg-secondary');
-      wsStatus.classList.add('bg-danger');
-      wsStatus.textContent = 'Desconectado';
-      if (!alertsContainer.querySelector('.order-card')) {
-        alertsContainer.innerHTML = '<div class="alert alert-danger text-center" role="alert">Conexión perdida. Recarga la página.</div>';
-      }
-    };
-
-    chatSocket.onerror = function(e) {
-      console.error('Error WebSocket:', e);
-      wsStatus.classList.remove('bg-success', 'bg-secondary');
-      wsStatus.classList.add('bg-danger');
-      wsStatus.textContent = 'Error';
-    };
-
-    // ---- Botón limpiar (sólo tarjetas) ----
-    clearAlertsButton.addEventListener('click', function() {
-      alertsContainer.querySelectorAll('.order-card').forEach(el => el.remove());
-      alertsContainer.innerHTML = '<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
-    });
+    }
   });
+
+  // **AJUSTE**: Restaurar “Esperando…” si se cierra la última tarjeta/chip manualmente
+  alertsContainer.addEventListener('click',(e)=>{
+    if(e.target.closest('.btn-close')){
+      setTimeout(()=>{
+        if(!alertsContainer.querySelector('.order-card') && !alertsContainer.querySelector('.order-chip')){
+          alertsContainer.innerHTML='<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
+        }
+      },100);
+    }
+  });
+
+  // Botón limpiar
+  document.getElementById('clear-alerts').addEventListener('click',()=>{
+    alertsContainer.innerHTML='<div class="alert alert-info text-center" role="alert">Esperando nuevos pedidos...</div>';
+  });
+
+  // ===== WebSocket =====
+  const wsProtocol=window.location.protocol==='https:'?'wss://':'ws://';
+  const websocketUrl=wsProtocol + window.location.host + '/ws/pedidos/notifications/';
+  const chatSocket=new WebSocket(websocketUrl);
+
+  chatSocket.onopen=function(){
+    wsStatus.classList.remove('bg-secondary','bg-danger');
+    wsStatus.classList.add('bg-success');
+    wsStatus.textContent='Conectado';
+  };
+  chatSocket.onclose=function(){
+    wsStatus.classList.remove('bg-success','bg-secondary');
+    wsStatus.classList.add('bg-danger');
+    wsStatus.textContent='Desconectado';
+  };
+  chatSocket.onerror=function(){
+    wsStatus.classList.remove('bg-success','bg-secondary');
+    wsStatus.classList.add('bg-danger');
+    wsStatus.textContent='Error';
+  };
+
+  chatSocket.onmessage=function(e){
+    const data=JSON.parse(e.data);
+    const orderId=data.order_id;
+    const orderData=data.order_data||{};
+    // Mensajes de "nuevo pedido" (tu consumer actual)
+    buildOrderCardFromWS(orderId, orderData);
+    playDing();
+  };
 </script>
 
 <style>
-  .new-order-alert {
-    border: 2px solid #0d6efd;
-    box-shadow: 0 4px 12px rgba(13, 110, 253, 0.4);
-    animation: pulse 1.5s infinite alternate;
+  /* chips compactos (cuando ya está confirmado) */
+  .order-chip{
+    border:1px solid var(--bs-primary);
+    background:rgba(13,110,253,.08);
+    border-radius:.75rem;
+    padding:.5rem .75rem;
+    margin-bottom:.6rem;
   }
-  @keyframes pulse {
-    from { transform: scale(1); box-shadow: 0 4px 12px rgba(13, 110, 253, 0.2); }
-    to   { transform: scale(1.01); box-shadow: 0 6px 16px rgba(13, 110, 253, 0.5); }
-  }
+  .chip-id{font-weight:700}
+  .chip-client{max-width:240px}
+
+  /* tarjetas más compactas */
+  .order-card h5{font-size:1.05rem}
+  .compact-line{font-size:.95rem}
+  .min-btn-col{min-width:180px}
+
+  /* colores por estado */
+  .bg-status-recibido{background:#0d6efd !important}
+  .bg-status-en_preparacion{background:#0dcaf0 !important}
+  .bg-status-asignado{background:#6f42c1 !important}
+  .bg-status-en_camino{background:#ffc107 !important; color:#212529 !important}
+  .bg-status-entregado{background:#198754 !important}
+  .bg-status-cancelado{background:#dc3545 !important}
 </style>
 {% endblock %}
