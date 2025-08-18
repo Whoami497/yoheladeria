@@ -11,6 +11,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.views.decorators.http import require_POST
 from django.contrib.admin.views.decorators import staff_member_required
 from django.urls import reverse
+from django.utils import timezone
+from datetime import timedelta
 
 from .forms import ClienteRegisterForm, ClienteProfileForm
 from .models import (
@@ -507,11 +509,32 @@ def logout_cliente(request):
 
 
 # =========================
-# === PANEL DE ALERTAS TIENDA
+# === PANEL DE ALERTAS TIENDA (HOY/AYER/ANTERIORES)
 # =========================
 def panel_alertas(request):
-    pedidos_iniciales = Pedido.objects.exclude(estado__in=['ENTREGADO', 'CANCELADO']).order_by('-fecha_pedido')[:100]
-    return render(request, 'pedidos/panel_alertas.html', {'pedidos_iniciales': pedidos_iniciales})
+    """
+    Muestra HOY (activos) y AYER (plegable).
+    """
+    hoy = timezone.localdate()
+    ayer = hoy - timedelta(days=1)
+
+    pedidos_hoy = (
+        Pedido.objects
+        .filter(fecha_pedido__date=hoy)
+        .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
+        .order_by('-fecha_pedido')
+    )
+    pedidos_ayer = (
+        Pedido.objects
+        .filter(fecha_pedido__date=ayer)
+        .order_by('-fecha_pedido')[:120]
+    )
+
+    ctx = {
+        'pedidos_hoy': pedidos_hoy,
+        'pedidos_ayer': pedidos_ayer,
+    }
+    return render(request, 'pedidos/panel_alertas.html', ctx)
 
 
 def panel_alertas_board(request):
@@ -519,33 +542,89 @@ def panel_alertas_board(request):
 
 
 def panel_alertas_data(request):
-    pedidos = Pedido.objects.exclude(estado__in=['ENTREGADO', 'CANCELADO']).order_by('-fecha_pedido')[:100]
-    data = []
-    for p in pedidos:
-        detalles = []
-        for d in p.detalles.all():
-            detalles.append({
-                'producto_nombre': d.producto.nombre,
-                'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
-                'cantidad': d.cantidad,
-                'sabores_nombres': [s.nombre for s in d.sabores.all()],
-            })
-        data.append({
+    """
+    JSON para rehidratar/pollear el panel.
+    Soporta ?day=hoy|ayer|YYYY-MM-DD
+    """
+    day = (request.GET.get('day') or 'hoy').lower()
+    hoy = timezone.localdate()
+    if day == 'hoy':
+        qs = (Pedido.objects
+              .filter(fecha_pedido__date=hoy)
+              .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
+              .order_by('-fecha_pedido'))
+    elif day == 'ayer':
+        qs = (Pedido.objects
+              .filter(fecha_pedido__date=hoy - timedelta(days=1))
+              .order_by('-fecha_pedido'))
+    else:
+        try:
+            y, m, d = map(int, day.split('-'))
+            fecha = timezone.datetime(y, m, d).date()
+        except Exception:
+            fecha = hoy
+        qs = Pedido.objects.filter(fecha_pedido__date=fecha).order_by('-fecha_pedido')
+
+    def serialize(p):
+        return {
             'id': p.id,
             'estado': p.estado,
             'cliente_nombre': p.cliente_nombre,
             'cliente_direccion': p.cliente_direccion,
             'cliente_telefono': p.cliente_telefono,
             'metodo_pago': p.metodo_pago,
-            'total_pedido': str(p.total_pedido),
-            'detalles': detalles,
-        })
-    return JsonResponse({'pedidos': data})
+            'total_pedido': str(p.total_pedido or 0),
+            'cadete': (p.cadete_asignado.user.get_full_name() or p.cadete_asignado.user.username)
+                      if getattr(p, 'cadete_asignado', None) else None,
+            'detalles': [{
+                'producto_nombre': d.producto.nombre,
+                'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
+                'cantidad': d.cantidad,
+                'sabores_nombres': [s.nombre for s in d.sabores.all()],
+            } for d in p.detalles.all()],
+        }
+
+    return JsonResponse({'pedidos': [serialize(p) for p in qs]})
+
+
+def panel_alertas_anteriores(request):
+    """
+    Listado simple (HTML directo) de pedidos anteriores a AYER.
+    Lo dejo sin plantilla para que no falle si no existe el template.
+    """
+    hoy = timezone.localdate()
+    limite = hoy - timedelta(days=1)
+    pedidos = (Pedido.objects
+               .filter(fecha_pedido__date__lt=limite)
+               .order_by('-fecha_pedido')[:300])
+
+    filas = []
+    for p in pedidos:
+        cad = p.cadete_asignado.user.get_full_name() if getattr(p, 'cadete_asignado', None) else '—'
+        filas.append(
+            f"<tr><td>#{p.id}</td><td>{p.fecha_pedido:%Y-%m-%d %H:%M}</td>"
+            f"<td>{p.estado}</td><td>{p.cliente_nombre or 'N/A'}</td>"
+            f"<td>{cad}</td><td>${p.total_pedido or 0}</td></tr>"
+        )
+    html = f"""
+    <div style="padding:20px;font-family:system-ui;-webkit-font-smoothing:antialiased">
+      <h3>Pedidos anteriores</h3>
+      <p><a href="/panel-alertas/">Volver al panel</a></p>
+      <table border="1" cellpadding="6" cellspacing="0">
+        <thead><tr><th>ID</th><th>Fecha</th><th>Estado</th><th>Cliente</th><th>Cadete</th><th>Total</th></tr></thead>
+        <tbody>{''.join(filas) or '<tr><td colspan="6">Sin datos</td></tr>'}</tbody>
+      </table>
+    </div>
+    """
+    return HttpResponse(html)
 
 
 @staff_member_required
 @require_POST
 def panel_alertas_set_estado(request, pedido_id):
+    """
+    Cambiar estado vía AJAX desde el panel.
+    """
     pedido = get_object_or_404(Pedido, id=pedido_id)
     estado = (request.POST.get('estado') or '').upper()
     validos = {'RECIBIDO', 'EN_PREPARACION', 'ASIGNADO', 'EN_CAMINO', 'ENTREGADO', 'CANCELADO'}
@@ -553,7 +632,12 @@ def panel_alertas_set_estado(request, pedido_id):
         return JsonResponse({'ok': False, 'error': 'Estado inválido'}, status=400)
     pedido.estado = estado
     pedido.save(update_fields=['estado'])
-    return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': pedido.estado})
+
+    cadete_nombre = None
+    if getattr(pedido, 'cadete_asignado', None):
+        cadete_nombre = pedido.cadete_asignado.user.get_full_name() or pedido.cadete_asignado.user.username
+
+    return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': pedido.estado, 'cadete': cadete_nombre})
 
 
 # =========================
