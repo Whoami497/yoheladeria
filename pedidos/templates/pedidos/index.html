@@ -2,48 +2,166 @@
 {% load static %}
 
 {% block content %}
-{# --- INICIO: SECCIÓN HERO - PEDIDOS A DOMICILIO (Principal al cargar la página) --- #}
-<section id="hero-domicilio" class="hero-section-new mt-4"> 
-    <div class="hero-content">
-        <h1>El Mejor Helado Artesanal<br> de Catamarca</h1>
-        <p>Disfruta el sabor inconfundible de Yo Heladerías en la comodidad de tu hogar.</p>
-        <a href="#nuestro-catalogo" class="btn btn-secondary btn-lg">Explorar Sabores</a> 
-    </div>
-    <div class="hero-image-container-new">
-        <img src="{% static 'images/helado_a_domicilio.jpg' %}" alt="Helado a Domicilio">
-    </div>
+<!-- ===== HERO (compacto en mobile) ===== -->
+<section id="hero-domicilio" class="hero-section-new mt-3">
+  <div class="hero-content">
+    <h1>El Mejor Helado Artesanal<br> de Catamarca</h1>
+    <p>Disfrutá Yo Heladerías en casa.</p>
+    <a href="#nuestro-catalogo" class="btn btn-secondary btn-sm">Explorar sabores</a>
+  </div>
+  <div class="hero-image-container-new">
+    <img src="{% static 'images/helado_a_domicilio.jpg' %}" alt="Helado a Domicilio">
+  </div>
 </section>
-{# --- FIN: SECCIÓN HERO --- #}
 
+<div class="container pt-2 pb-5" id="nuestro-catalogo">
 
-{# --- INICIO: NUESTRO CATÁLOGO DE PRODUCTOS --- #}
-<section id="nuestro-catalogo" class="container my-5">
-    <h2 class="section-title">Nuestro Catálogo de Helados</h2>
-    <div class="row">
-        {% for producto in productos %}
-        <div class="col-md-4 mb-4">
-            <div class="card h-100 shadow-sm">
-                {% if producto.imagen %}
-                    <img src="{% static producto.imagen %}" class="card-img-top" alt="{{ producto.nombre }}" style="height: 200px; object-fit: cover; border-radius: 15px 15px 0 0;">
-                {% else %}
-                    {# Usamos la clase placeholder-image para el div #}
-                    <div class="card-img-top placeholder-image" style="height: 200px;"> 
-                        <span>Sin imagen</span>
-                    </div>
-                {% endif %}
-                <div class="card-body d-flex flex-column">
-                    <h5 class="card-title">{{ producto.nombre }}</h5>
-                    <p class="card-text text-muted">Precio: <span class="fw-bold">${{ producto.precio|floatformat:2 }}</span></p>
-                    <p class="card-text">{{ producto.descripcion|truncatechars:100|default:"No hay descripción disponible." }}</p>
-                    <a href="{% url 'detalle_producto' producto.id %}" class="btn btn-primary mt-auto">Ver Detalles y Pedir</a>
-                </div>
-            </div>
+  <!-- ===== Título ===== -->
+  <h2 class="py-title">Nuestro Catálogo</h2>
+
+  <!-- ===== Búsqueda ===== -->
+  <form method="get" class="py-search">
+    <i class="bi bi-search"></i>
+    <input name="q" value="{{ q }}" autocomplete="off" placeholder="Buscar productos..." />
+    {% if cat %}<input type="hidden" name="cat" value="{{ cat }}">{% endif %}
+    {% if sort %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
+    {% if q %}
+      <a class="clear" href="?{% if cat %}cat={{ cat }}&{% endif %}{% if sort %}sort={{ sort }}{% endif %}">
+        <i class="bi bi-x-circle"></i>
+      </a>
+    {% endif %}
+  </form>
+
+  <!-- ===== Chips de categorías (scroll horizontal) ===== -->
+  <div class="py-chips">
+    <a href="?{% if q %}q={{ q }}&{% endif %}{% if sort %}sort={{ sort }}{% endif %}"
+       class="chip {% if not cat %}active{% endif %}">Menú</a>
+    {% for c in categorias %}
+      <a href="?cat={{ c.id }}{% if q %}&q={{ q }}{% endif %}{% if sort %}&sort={{ sort }}{% endif %}"
+         class="chip {% if cat == c.id %}active{% endif %}">{{ c.nombre }}</a>
+    {% endfor %}
+  </div>
+
+  <!-- ===== Ordenamientos ===== -->
+  <div class="py-filters">
+    <a class="pill {% if sort == 'recientes' %}active{% endif %}"
+       href="?{% if cat %}cat={{ cat }}&{% endif %}{% if q %}q={{ q }}&{% endif %}sort=recientes">Más nuevos</a>
+    <a class="pill {% if sort == 'precio_asc' %}active{% endif %}"
+       href="?{% if cat %}cat={{ cat }}&{% endif %}{% if q %}q={{ q }}&{% endif %}sort=precio_asc">Precio más bajo</a>
+    <a class="pill {% if sort == 'precio_desc' %}active{% endif %}"
+       href="?{% if cat %}cat={{ cat }}&{% endif %}{% if q %}q={{ q }}&{% endif %}sort=precio_desc">Precio más alto</a>
+    <a class="pill {% if sort == 'nombre' %}active{% endif %}"
+       href="?{% if cat %}cat={{ cat }}&{% endif %}{% if q %}q={{ q }}&{% endif %}sort=nombre">A–Z</a>
+  </div>
+
+  <!-- ===== Lista tipo PedidosYa ===== -->
+  <div class="product-list">
+    {% for p in productos %}
+      <a class="tile" href="{% url 'detalle_producto' p.id %}">
+        <div class="tile-info">
+          <h3 class="tile-title">{{ p.nombre }}</h3>
+          {% if p.sabores_maximos and p.sabores_maximos > 0 %}
+            <div class="tile-sub">Hasta {{ p.sabores_maximos }} sabores.</div>
+          {% endif %}
+          <div class="tile-price">$ {{ p.precio|floatformat:0 }}</div>
+          <div class="tile-cta">Ver detalles</div>
         </div>
-        {% empty %}
-            <p class="col-12 text-center alert alert-info">No hay productos disponibles en este momento.</p>
-        {% endfor %}
-    </div>
-</section>
-{# --- FIN: NUESTRO CATÁLOGO DE PRODUCTOS --- #}
+        <div class="tile-media">
+          {% if p.imagen %}
+            {% if p.imagen.url %}
+              <img loading="lazy" src="{{ p.imagen.url }}" alt="{{ p.nombre }}">
+            {% else %}
+              <img loading="lazy" src="{% static p.imagen %}" alt="{{ p.nombre }}">
+            {% endif %}
+          {% else %}
+            <img loading="lazy" src="{% static 'pedidos/img/no-image.png' %}" alt="{{ p.nombre }}">
+          {% endif %}
+        </div>
+      </a>
+    {% empty %}
+      <div class="alert alert-light border mt-3">No encontramos productos para tu búsqueda.</div>
+    {% endfor %}
+  </div>
 
+</div>
+
+<style>
+/* ===== HERO compacto ===== */
+.hero-section-new{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:12px; background:#0b4462; color:#fff;
+  padding:14px 16px; border-radius:16px; margin:0 12px 8px;
+  overflow:hidden; min-height:120px;
+}
+.hero-section-new .hero-content h1{
+  font-size:1.15rem; line-height:1.15; margin:0 0 4px; font-weight:800;
+}
+.hero-section-new .hero-content p{
+  margin:0 0 8px; font-size:.9rem; opacity:.9
+}
+.hero-image-container-new{ display:none }
+@media (min-width: 768px){
+  .hero-section-new{ min-height:180px; padding:22px 24px }
+  .hero-section-new .hero-content h1{ font-size:1.6rem }
+  .hero-image-container-new{ display:block }
+  .hero-image-container-new img{ height:170px; width:auto; border-radius:12px }
+}
+
+/* ===== Catálogo tipo PedidosYa ===== */
+.py-title{ font-weight:800; font-size:1.4rem; margin:8px 0 10px 2px; }
+
+.py-search{
+  position:relative; display:flex; align-items:center;
+  background:#fff; border:1px solid #e5e7eb; border-radius:12px;
+  padding:8px 12px; gap:8px; margin:0 2px 8px;
+}
+.py-search i{font-size:1.1rem; color:#6b7280}
+.py-search input{
+  border:0; outline:none; width:100%; font-size:1rem; background:transparent;
+}
+.py-search .clear{color:#9ca3af; font-size:1.1rem}
+
+.py-chips{
+  display:flex; gap:8px; overflow-x:auto; padding:4px 2px 8px;
+  scrollbar-width:none; -ms-overflow-style:none; margin:0 2px 6px;
+}
+.py-chips::-webkit-scrollbar{display:none}
+.chip{
+  white-space:nowrap; padding:6px 12px; border-radius:999px;
+  border:1px solid #e5e7eb; background:#fff; color:#111827; text-decoration:none;
+  font-weight:600; font-size:.9rem;
+}
+.chip.active{ background:#0d6efd; border-color:#0d6efd; color:#fff }
+
+.py-filters{ display:flex; gap:8px; overflow-x:auto; margin:0 2px 12px }
+.pill{
+  padding:6px 12px; border-radius:999px; background:#f3f4f6; color:#111827;
+  text-decoration:none; font-weight:600; font-size:.9rem; white-space:nowrap;
+}
+.pill.active{ background:#111827; color:#fff }
+
+.product-list{ display:grid; grid-template-columns:1fr; gap:12px }
+
+/* Tarjeta con imagen a la derecha */
+.tile{
+  display:grid; grid-template-columns:1fr 110px; gap:12px; align-items:center;
+  background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:12px;
+  text-decoration:none; color:inherit; box-shadow:0 1px 0 rgba(0,0,0,.02);
+}
+.tile:hover{ border-color:#d1d5db }
+.tile-media img{
+  width:110px; height:110px; object-fit:cover; border-radius:12px;
+}
+.tile-title{ font-size:1.05rem; line-height:1.2; margin:0 0 4px; font-weight:800 }
+.tile-sub{ color:#6b7280; font-size:.9rem; margin-bottom:6px }
+.tile-price{ font-weight:800; font-size:1.05rem; margin-bottom:4px }
+.tile-cta{ font-size:.9rem; color:#0d6efd; font-weight:700 }
+
+/* En pantallas medianas, dos columnas */
+@media (min-width: 768px){
+  .product-list{ grid-template-columns:1fr 1fr; }
+  .tile{ grid-template-columns:1fr 140px; }
+  .tile-media img{ width:140px; height:140px; }
+}
+</style>
 {% endblock %}

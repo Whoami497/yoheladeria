@@ -48,11 +48,46 @@ def _abs_https(request, url_or_path: str) -> str:
 # =========================
 # === CATÁLOGO / HOME
 # =========================
+# =========================
+# === CATÁLOGO / HOME
+# =========================
+from django.db.models import Q
+
 def index(request):
-    productos = Producto.objects.filter(disponible=True).order_by('nombre')
+    q = (request.GET.get('q') or '').strip()
+    cat = request.GET.get('cat')  # id de categoría
+    sort = request.GET.get('sort') or 'recientes'  # precio_asc | precio_desc | recientes | nombre
+
+    productos = Producto.objects.filter(disponible=True)
+
+    if cat:
+        productos = productos.filter(categoria_id=cat)
+    if q:
+        productos = productos.filter(
+            Q(nombre__icontains=q) |
+            Q(descripcion__icontains=q)  # si no tenés este campo, podés quitar esta línea
+        )
+
+    if sort == 'precio_asc':
+        productos = productos.order_by('precio', 'nombre')
+    elif sort == 'precio_desc':
+        productos = productos.order_by('-precio', 'nombre')
+    elif sort == 'nombre':
+        productos = productos.order_by('nombre')
+    else:  # recientes
+        productos = productos.order_by('-id')
+
     categorias = Categoria.objects.filter(disponible=True).order_by('orden')
-    contexto = {'productos': productos, 'categorias': categorias}
+
+    contexto = {
+        'productos': productos,
+        'categorias': categorias,
+        'q': q,
+        'cat': int(cat) if cat else None,
+        'sort': sort,
+    }
     return render(request, 'pedidos/index.html', contexto)
+
 
 
 def detalle_producto(request, producto_id):
