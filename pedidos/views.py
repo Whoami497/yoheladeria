@@ -516,37 +516,32 @@ from datetime import timedelta
 
 def panel_alertas(request):
     """
-    Muestra HOY (activos), HOY (finalizados) y AYER (plegable).
+    Muestra HOY (activos), AYER (plegable) y ENTREGADOS de hoy (plegable al final).
     """
     hoy = timezone.localdate()
     ayer = hoy - timedelta(days=1)
 
-    # Activos de HOY
     pedidos_hoy = (
         Pedido.objects
         .filter(fecha_pedido__date=hoy)
         .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
         .order_by('-fecha_pedido')
     )
-
-    # Finalizados de HOY
-    pedidos_hoy_finalizados = (
-        Pedido.objects
-        .filter(fecha_pedido__date=hoy, estado__in=['ENTREGADO', 'CANCELADO'])
-        .order_by('-fecha_pedido')
-    )
-
-    # AYER (todos)
     pedidos_ayer = (
         Pedido.objects
         .filter(fecha_pedido__date=ayer)
         .order_by('-fecha_pedido')[:120]
     )
+    entregados_hoy = (
+        Pedido.objects
+        .filter(fecha_pedido__date=hoy, estado='ENTREGADO')
+        .order_by('-fecha_pedido')[:200]
+    )
 
     ctx = {
         'pedidos_hoy': pedidos_hoy,
-        'pedidos_hoy_finalizados': pedidos_hoy_finalizados,
         'pedidos_ayer': pedidos_ayer,
+        'entregados_hoy': entregados_hoy,
     }
     return render(request, 'pedidos/panel_alertas.html', ctx)
 

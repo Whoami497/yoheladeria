@@ -83,12 +83,12 @@
     {% endif %}
   </div>
 
-  <!-- ===== HOY (FINALIZADOS) ===== -->
+  <!-- ===== HOY — FINALIZADOS (ENTREGADO/CANCELADO) ===== -->
   <details class="mt-4" open>
     <summary class="h6">Pedidos de HOY — Finalizados</summary>
     <div id="alerts-hoy-finalizados" class="mt-3">
-      {% if pedidos_hoy_finalizados %}
-        {% for p in pedidos_hoy_finalizados %}
+      {% if entregados_hoy %}
+        {% for p in entregados_hoy %}
           <div class="order-chip d-flex align-items-center justify-content-between" id="chip-hoy-{{ p.id }}" data-order-id="{{ p.id }}">
             <div class="d-flex align-items-center gap-2 flex-wrap">
               <span class="chip-id">#{{ p.id }}</span>
@@ -334,14 +334,13 @@
       });
       const data = await res.json();
       if(data.ok){
-        // actualizar badge
+        // actualizar badge visual
         const badge = root.querySelector('.badge');
         if(badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
 
-        // Si pasó a ENTREGADO o CANCELADO, mover a "Hoy — Finalizados"
+        // si pasó a ENTREGADO o CANCELADO: mover de "HOY (activos)" a "HOY — Finalizados"
         if((estado==='ENTREGADO' || estado==='CANCELADO') && root.classList.contains('order-card')){
           const id = root.dataset.orderId;
-          // recolectar info visible para el chip
           const total = root.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
           const cliente = root.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
           const cadeteNode = root.querySelector('.small .fw-semibold');
@@ -349,9 +348,11 @@
 
           const order = { id, estado, total_pedido: total, cliente_nombre: cliente, cadete };
           const chip = buildChip(order, true);
+          // si había mensaje de "vacío", lo removemos
+          const empty = alertsHoyFinalizados.querySelector('.alert');
+          if(empty) empty.remove();
           alertsHoyFinalizados.prepend(chip);
 
-          // quitar de HOY activos
           root.remove();
           if(!alertsHoy.querySelector('.order-card')){
             alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
@@ -382,7 +383,7 @@
     const orderId=data.order_id;
     const orderData=data.order_data||{};
     if(orderExists(orderId)) return;
-    // Nuevos pedidos -> sección HOY (activos)
+    // Nuevos pedidos -> HOY (activos)
     orderData.id = orderId;
     const card=buildCard(orderData);
     alertsHoy.prepend(card);
