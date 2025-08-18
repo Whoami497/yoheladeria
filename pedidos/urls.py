@@ -25,11 +25,10 @@ urlpatterns = [
 
     # --- Panel de alertas (tienda) ---
     path('panel-alertas/', views.panel_alertas, name='panel_alertas'),
-    path('panel-alertas/data/', views.panel_alertas_data, name='panel_alertas_data'),    # JSON para rehidratación
-    path('panel-alertas/board/', views.panel_alertas_board, name='panel_alertas_board'), # alias/tablero
+    path('panel-alertas/data/', views.panel_alertas_data, name='panel_alertas_data'),      # JSON para rehidratación
+    path('panel-alertas/board/', views.panel_alertas, name='panel_alertas_board'),        # alias/tablero -> usa la misma view
     path('panel-alertas/anteriores/', views.panel_alertas_anteriores, name='panel_alertas_anteriores'),
-    path('panel-alertas/anteriores/', views.panel_alertas_anteriores, name='panel_alertas_anteriores'),
- 
+
     # Confirmación de pedido (tienda)
     path('confirmar-pedido/<int:pedido_id>/', views.confirmar_pedido, name='confirmar_pedido'),
 
@@ -44,6 +43,6 @@ urlpatterns = [
     path('pagos/mp/webhook/', views.mp_webhook_view, name='mp_webhook'),
     path('pagos/mp/success/', views.mp_success, name='mp_success'),
 
+    # --- Cambiar estado desde panel ---
     path('panel-alertas/estado/<int:pedido_id>/', views.panel_alertas_set_estado, name='panel_alertas_set_estado'),
-
 ]
