@@ -1,0 +1,83 @@
+{% extends 'pedidos/base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container my-5">
+  <h2 class="section-title text-center mb-1">Pedidos Anteriores</h2>
+  <p class="text-center text-muted mb-4">Pedidos anteriores a AYER (más antiguos).</p>
+  <hr>
+
+  {% if page_obj.object_list %}
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Fecha</th>
+            <th>Cliente</th>
+            <th>Estado</th>
+            <th>Total</th>
+            <th>Cadete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in page_obj.object_list %}
+            <tr>
+              <td>#{{ p.id }}</td>
+              <td>{{ p.fecha_pedido|date:"d/m/Y H:i" }}</td>
+              <td>{{ p.cliente_nombre|default:"N/A" }}</td>
+              <td><span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span></td>
+              <td>${{ p.total_pedido|default_if_none:"0.00" }}</td>
+              <td>
+                {% if p.cadete_asignado %}
+                  {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
+                {% else %}—{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Paginación -->
+    <nav class="mt-3">
+      <ul class="pagination justify-content-center">
+        {% if page_obj.has_previous %}
+          <li class="page-item">
+            <a class="page-link" href="?page={{ page_obj.previous_page_number }}">&laquo;</a>
+          </li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">&laquo;</span></li>
+        {% endif %}
+
+        <li class="page-item disabled">
+          <span class="page-link">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+        </li>
+
+        {% if page_obj.has_next %}
+          <li class="page-item">
+            <a class="page-link" href="?page={{ page_obj.next_page_number }}">&raquo;</a>
+          </li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">&raquo;</span></li>
+        {% endif %}
+      </ul>
+    </nav>
+  {% else %}
+    <div class="alert alert-light border text-center">No hay pedidos anteriores a ayer.</div>
+  {% endif %}
+
+  <div class="text-center mt-4">
+    <a href="{% url 'panel_alertas' %}" class="btn btn-outline-primary">Volver al panel</a>
+  </div>
+</div>
+
+<style>
+  .bg-status-recibido{background:#0d6efd !important}
+  .bg-status-en_preparacion{background:#0dcaf0 !important}
+  .bg-status-asignado{background:#6f42c1 !important}
+  .bg-status-en_camino{background:#ffc107 !important; color:#212529 !important}
+  .bg-status-entregado{background:#198754 !important}
+  .bg-status-cancelado{background:#dc3545 !important}
+</style>
+{% endblock %}
