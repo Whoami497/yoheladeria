@@ -28,7 +28,8 @@ urlpatterns = [
     path('panel-alertas/data/', views.panel_alertas_data, name='panel_alertas_data'),    # JSON para rehidratación
     path('panel-alertas/board/', views.panel_alertas_board, name='panel_alertas_board'), # alias/tablero
     path('panel-alertas/anteriores/', views.panel_alertas_anteriores, name='panel_alertas_anteriores'),
-
+    path('panel-alertas/anteriores/', views.panel_alertas_anteriores, name='panel_alertas_anteriores'),
+ 
     # Confirmación de pedido (tienda)
     path('confirmar-pedido/<int:pedido_id>/', views.confirmar_pedido, name='confirmar_pedido'),
 
