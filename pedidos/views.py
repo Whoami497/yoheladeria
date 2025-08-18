@@ -28,9 +28,24 @@ import mercadopago
 
 
 # =========================
+# === util
+# =========================
+def _abs_https(request, url_or_path: str) -> str:
+    """
+    Devuelve una URL absoluta y forzada a https (Render puede dar http en request).
+    """
+    if url_or_path.startswith('http://') or url_or_path.startswith('https://'):
+        url = url_or_path
+    else:
+        url = request.build_absolute_uri(url_or_path)
+    if url.startswith('http://'):
+        url = 'https://' + url[len('http://'):]
+    return url
+
+
+# =========================
 # === CATÁLOGO / HOME
 # =========================
-
 def index(request):
     productos = Producto.objects.filter(disponible=True).order_by('nombre')
     categorias = Categoria.objects.filter(disponible=True).order_by('orden')
@@ -164,10 +179,11 @@ def detalle_producto(request, producto_id):
 # =========================
 # === MERCADO PAGO
 # =========================
-
 def crear_preferencia_mp(request, pedido):
     """
     Crea la preferencia de Mercado Pago y devuelve el link de checkout.
+    Fuerza HTTPS en back_urls/notification_url para evitar el error:
+    'auto_return invalid. back_url.success must be defined'
     """
     if not getattr(settings, "MERCADO_PAGO_ACCESS_TOKEN", None):
         raise RuntimeError("MERCADO_PAGO_ACCESS_TOKEN no está configurado en el servidor")
@@ -186,10 +202,10 @@ def crear_preferencia_mp(request, pedido):
             "currency_id": "ARS",
         })
 
-    success_url = request.build_absolute_uri(reverse("mp_success"))
-    failure_url = request.build_absolute_uri(reverse("index"))
-    pending_url = request.build_absolute_uri(reverse("index"))
-    notification_url = request.build_absolute_uri(reverse("mp_webhook"))
+    success_url = _abs_https(request, reverse("mp_success"))
+    failure_url = _abs_https(request, reverse("index"))
+    pending_url = _abs_https(request, reverse("index"))
+    notification_url = _abs_https(request, reverse("mp_webhook"))
 
     payload = {
         "items": items,
@@ -199,9 +215,11 @@ def crear_preferencia_mp(request, pedido):
             "failure": failure_url,
             "pending": pending_url,
         },
-        "auto_return": "approved",         # vuelve solo si queda aprobado
+        "auto_return": "approved",
         "notification_url": notification_url,
     }
+
+    print(f"MP DEBUG URLs -> success={success_url} failure={failure_url} pending={pending_url} notify={notification_url}")
 
     try:
         pref = sdk.preference().create(payload)
@@ -211,8 +229,7 @@ def crear_preferencia_mp(request, pedido):
 
     status = pref.get("status")
     resp = pref.get("response", {}) or {}
-
-    print(f"MP DEBUG: status={status} resp_keys={list(resp.keys())} back_urls={payload.get('back_urls')}")
+    print(f"MP DEBUG: create.status={status} resp_keys={list(resp.keys())}")
 
     if status not in (200, 201):
         msg = resp.get("message") or resp.get("error") or "Error desconocido de MP"
@@ -327,7 +344,6 @@ def ver_carrito(request):
                 nuevo_pedido.metodo_pago = 'MERCADOPAGO'
                 nuevo_pedido.save()
 
-                # Fallback: guardamos el ID para re-notificar al volver por success
                 request.session['mp_last_order_id'] = nuevo_pedido.id
                 request.session.modified = True
 
@@ -414,7 +430,6 @@ def pedido_exitoso(request):
 # =========================
 # === AUTENTICACIÓN Y PERFIL
 # =========================
-
 def register_cliente(request):
     if request.user.is_authenticated:
         messages.info(request, "Ya has iniciado sesión.")
@@ -494,7 +509,6 @@ def logout_cliente(request):
 # =========================
 # === PANEL DE ALERTAS TIENDA
 # =========================
-
 def panel_alertas(request):
     pedidos_iniciales = Pedido.objects.exclude(estado__in=['ENTREGADO', 'CANCELADO']).order_by('-fecha_pedido')[:100]
     return render(request, 'pedidos/panel_alertas.html', {'pedidos_iniciales': pedidos_iniciales})
@@ -545,7 +559,6 @@ def panel_alertas_set_estado(request, pedido_id):
 # =========================
 # === TIENDA / CADETES
 # =========================
-
 @staff_member_required
 def confirmar_pedido(request, pedido_id):
     pedido = get_object_or_404(Pedido, id=pedido_id)
@@ -699,7 +712,6 @@ def save_subscription(request):
 # =========================
 # === MERCADO PAGO (webhook + success)
 # =========================
-
 @csrf_exempt
 def mp_webhook_view(request):
     """
@@ -840,7 +852,6 @@ mp_webhook = mp_webhook_view
 # =========================
 # === CANJE DE PUNTOS
 # =========================
-
 @login_required
 def canjear_puntos(request):
     cliente_profile = request.user.clienteprofile
