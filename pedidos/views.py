@@ -15,7 +15,7 @@ from django.urls import reverse
 from .forms import ClienteRegisterForm, ClienteProfileForm
 from .models import (
     Producto, Sabor, Pedido, DetallePedido, Categoria,
-    Opcionproducto, ClienteProfile, ProductoCanje, CadeteProfile
+    OpcionProducto, ClienteProfile, ProductoCanje, CadeteProfile
 )
 from decimal import Decimal
 from django.contrib import messages
@@ -44,7 +44,7 @@ def detalle_producto(request, producto_id):
 
     opciones_disponibles = None
     if producto.opciones.exists():
-        opciones_disponibles = Opcionproducto.objects.filter(producto_base=producto, disponible=True)
+        opciones_disponibles = OpcionProducto.objects.filter(producto_base=producto, disponible=True)
 
     if request.method == 'POST':
         sabores_seleccionados_ids_raw = request.POST.getlist('sabores')
@@ -53,7 +53,7 @@ def detalle_producto(request, producto_id):
         opcion_id = request.POST.get('opcion_id')
         opcion_seleccionada_obj = None
         if producto.opciones.exists() and opcion_id:
-            opcion_seleccionada_obj = get_object_or_404(Opcionproducto, id=opcion_id, producto_base=producto)
+            opcion_seleccionada_obj = get_object_or_404(OpcionProducto, id=opcion_id, producto_base=producto)
 
         if producto.opciones.exists() and not opcion_seleccionada_obj:
             messages.error(request, 'Por favor, selecciona una opción para este producto.')
@@ -199,7 +199,7 @@ def crear_preferencia_mp(request, pedido):
             "failure": failure_url,
             "pending": pending_url,
         },
-        "auto_return": "approved",         # intenta volver solo cuando quedó APPROVED
+        "auto_return": "approved",         # vuelve solo si queda aprobado
         "notification_url": notification_url,
     }
 
@@ -294,7 +294,7 @@ def ver_carrito(request):
 
                 opcion_obj_pedido = None
                 if item_data.get('opcion_id'):
-                    opcion_obj_pedido = Opcionproducto.objects.get(id=item_data['opcion_id'])
+                    opcion_obj_pedido = OpcionProducto.objects.get(id=item_data['opcion_id'])
 
                 detalle = DetallePedido.objects.create(
                     pedido=nuevo_pedido,
@@ -314,7 +314,7 @@ def ver_carrito(request):
                     'sabores_nombres': [s.nombre for s in sabores_seleccionados],
                 })
 
-            except (Producto.DoesNotExist, Opcionproducto.DoesNotExist) as e:
+            except (Producto.DoesNotExist, OpcionProducto.DoesNotExist) as e:
                 messages.warning(request, f"Advertencia: Un ítem no pudo ser añadido al pedido final porque ya no existe. Error: {e}")
                 continue
             except Exception as e:
@@ -327,7 +327,7 @@ def ver_carrito(request):
                 nuevo_pedido.metodo_pago = 'MERCADOPAGO'
                 nuevo_pedido.save()
 
-                # Guardamos el ID para el fallback en mp_success
+                # Fallback: guardamos el ID para re-notificar al volver por success
                 request.session['mp_last_order_id'] = nuevo_pedido.id
                 request.session.modified = True
 
