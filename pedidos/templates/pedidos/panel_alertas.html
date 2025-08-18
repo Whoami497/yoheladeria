@@ -26,7 +26,12 @@
                 · {{ p.cliente_telefono|default:"—" }} · {{ p.cliente_direccion|default:"—" }}
               </div>
               <div class="small">
-                Cadete: <span class="fw-semibold">{{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username|default:"—" }}</span>
+                Cadete:
+                <span class="fw-semibold">
+                  {% if p.cadete_asignado %}
+                    {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
+                  {% else %}—{% endif %}
+                </span>
               </div>
 
               <details class="mt-2">
@@ -90,7 +95,11 @@
               <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
               <span class="text-muted small">$ {{ p.total_pedido|default_if_none:"0.00" }}</span>
               <span class="small text-truncate chip-client">{{ p.cliente_nombre|default:"N/A" }}</span>
-              <span class="small text-muted">· Cadete: {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username|default:"—" }}</span>
+              <span class="small text-muted">· Cadete:
+                {% if p.cadete_asignado %}
+                  {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
+                {% else %}—{% endif %}
+              </span>
             </div>
             <div class="dropdown">
               <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
@@ -251,7 +260,6 @@
     try{
       const res=await fetch(url,{method:'POST',headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'}});
       if(res.ok){
-        // No colapsamos: solo actualizamos badge y controles
         const badge=card.querySelector('.badge'); badge.className='badge '+badgeClass('EN_PREPARACION'); badge.textContent='EN_PREPARACION';
         btn.parentElement.innerHTML = `
           <div class="dropdown">
@@ -279,10 +287,8 @@
       const res=await fetch(url,{method:'POST',headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest','Content-Type':'application/x-www-form-urlencoded'}, body:`estado=${encodeURIComponent(estado)}`});
       const data = await res.json();
       if(data.ok){
-        // actualizar UI
         const badge = root.querySelector('.badge');
         if(badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
-        // si se entregó o canceló: ocultamos de HOY
         if((estado==='ENTREGADO' || estado==='CANCELADO') && root.classList.contains('order-card')){
           root.remove();
           if(!alertsHoy.querySelector('.order-card')){
@@ -313,7 +319,6 @@
     const orderId=data.order_id;
     const orderData=data.order_data||{};
     if(orderExists(orderId)) return;
-    // Nuevos pedidos -> sección HOY
     orderData.id = orderId;
     const card=buildCard(orderData);
     alertsHoy.prepend(card);
