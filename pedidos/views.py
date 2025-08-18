@@ -511,19 +511,32 @@ def logout_cliente(request):
 # =========================
 # === PANEL DE ALERTAS TIENDA (HOY/AYER/ANTERIORES)
 # =========================
+from django.utils import timezone
+from datetime import timedelta
+
 def panel_alertas(request):
     """
-    Muestra HOY (activos) y AYER (plegable).
+    Muestra HOY (activos), HOY (finalizados) y AYER (plegable).
     """
     hoy = timezone.localdate()
     ayer = hoy - timedelta(days=1)
 
+    # Activos de HOY
     pedidos_hoy = (
         Pedido.objects
         .filter(fecha_pedido__date=hoy)
         .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
         .order_by('-fecha_pedido')
     )
+
+    # Finalizados de HOY
+    pedidos_hoy_finalizados = (
+        Pedido.objects
+        .filter(fecha_pedido__date=hoy, estado__in=['ENTREGADO', 'CANCELADO'])
+        .order_by('-fecha_pedido')
+    )
+
+    # AYER (todos)
     pedidos_ayer = (
         Pedido.objects
         .filter(fecha_pedido__date=ayer)
@@ -532,34 +545,37 @@ def panel_alertas(request):
 
     ctx = {
         'pedidos_hoy': pedidos_hoy,
+        'pedidos_hoy_finalizados': pedidos_hoy_finalizados,
         'pedidos_ayer': pedidos_ayer,
     }
     return render(request, 'pedidos/panel_alertas.html', ctx)
 
 
-def panel_alertas_board(request):
-    return panel_alertas(request)
-
-
 def panel_alertas_data(request):
     """
     JSON para rehidratar/pollear el panel.
-    Soporta ?day=hoy|ayer|YYYY-MM-DD
+    Soporta scope=hoy | hoy_finalizados | ayer | YYYY-MM-DD
     """
-    day = (request.GET.get('day') or 'hoy').lower()
+    scope = (request.GET.get('scope') or 'hoy').lower()
     hoy = timezone.localdate()
-    if day == 'hoy':
+
+    if scope == 'hoy':
         qs = (Pedido.objects
               .filter(fecha_pedido__date=hoy)
               .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
               .order_by('-fecha_pedido'))
-    elif day == 'ayer':
+    elif scope == 'hoy_finalizados':
+        qs = (Pedido.objects
+              .filter(fecha_pedido__date=hoy, estado__in=['ENTREGADO', 'CANCELADO'])
+              .order_by('-fecha_pedido'))
+    elif scope == 'ayer':
         qs = (Pedido.objects
               .filter(fecha_pedido__date=hoy - timedelta(days=1))
               .order_by('-fecha_pedido'))
     else:
+        # scope como fecha YYYY-MM-DD
         try:
-            y, m, d = map(int, day.split('-'))
+            y, m, d = map(int, scope.split('-'))
             fecha = timezone.datetime(y, m, d).date()
         except Exception:
             fecha = hoy
@@ -585,6 +601,7 @@ def panel_alertas_data(request):
         }
 
     return JsonResponse({'pedidos': [serialize(p) for p in qs]})
+
 
 
 def panel_alertas_anteriores(request):
