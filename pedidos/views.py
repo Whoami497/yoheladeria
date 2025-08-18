@@ -15,7 +15,7 @@ from django.urls import reverse
 from .forms import ClienteRegisterForm, ClienteProfileForm
 from .models import (
     Producto, Sabor, Pedido, DetallePedido, Categoria,
-    OpcionProducto, ClienteProfile, ProductoCanje, CadeteProfile
+    Opcionproducto, ClienteProfile, ProductoCanje, CadeteProfile
 )
 from decimal import Decimal
 from django.contrib import messages
@@ -44,7 +44,7 @@ def detalle_producto(request, producto_id):
 
     opciones_disponibles = None
     if producto.opciones.exists():
-        opciones_disponibles = OpcionProducto.objects.filter(producto_base=producto, disponible=True)
+        opciones_disponibles = Opcionproducto.objects.filter(producto_base=producto, disponible=True)
 
     if request.method == 'POST':
         sabores_seleccionados_ids_raw = request.POST.getlist('sabores')
@@ -53,7 +53,7 @@ def detalle_producto(request, producto_id):
         opcion_id = request.POST.get('opcion_id')
         opcion_seleccionada_obj = None
         if producto.opciones.exists() and opcion_id:
-            opcion_seleccionada_obj = get_object_or_404(OpcionProducto, id=opcion_id, producto_base=producto)
+            opcion_seleccionada_obj = get_object_or_404(Opcionproducto, id=opcion_id, producto_base=producto)
 
         if producto.opciones.exists() and not opcion_seleccionada_obj:
             messages.error(request, 'Por favor, selecciona una opción para este producto.')
@@ -168,7 +168,6 @@ def detalle_producto(request, producto_id):
 def crear_preferencia_mp(request, pedido):
     """
     Crea la preferencia de Mercado Pago y devuelve el link de checkout.
-    IMPORTANTE: no enviar 'auto_return' para evitar 'auto_return invalid'.
     """
     if not getattr(settings, "MERCADO_PAGO_ACCESS_TOKEN", None):
         raise RuntimeError("MERCADO_PAGO_ACCESS_TOKEN no está configurado en el servidor")
@@ -188,9 +187,8 @@ def crear_preferencia_mp(request, pedido):
         })
 
     success_url = request.build_absolute_uri(reverse("mp_success"))
-    failure_url = request.build_absolute_uri(reverse("mp_success"))
-    pending_url = request.build_absolute_uri(reverse("mp_success"))
-    # name del url en urls.py: 'mp_webhook'
+    failure_url = request.build_absolute_uri(reverse("index"))
+    pending_url = request.build_absolute_uri(reverse("index"))
     notification_url = request.build_absolute_uri(reverse("mp_webhook"))
 
     payload = {
@@ -201,8 +199,7 @@ def crear_preferencia_mp(request, pedido):
             "failure": failure_url,
             "pending": pending_url,
         },
-        # NO enviar auto_return para evitar error en algunas cuentas
-        # "auto_return": "approved",
+        "auto_return": "approved",         # intenta volver solo cuando quedó APPROVED
         "notification_url": notification_url,
     }
 
@@ -215,7 +212,7 @@ def crear_preferencia_mp(request, pedido):
     status = pref.get("status")
     resp = pref.get("response", {}) or {}
 
-    print(f"MP DEBUG: status={status} init_point={resp.get('init_point')} back_urls={payload.get('back_urls')}")
+    print(f"MP DEBUG: status={status} resp_keys={list(resp.keys())} back_urls={payload.get('back_urls')}")
 
     if status not in (200, 201):
         msg = resp.get("message") or resp.get("error") or "Error desconocido de MP"
@@ -297,7 +294,7 @@ def ver_carrito(request):
 
                 opcion_obj_pedido = None
                 if item_data.get('opcion_id'):
-                    opcion_obj_pedido = OpcionProducto.objects.get(id=item_data['opcion_id'])
+                    opcion_obj_pedido = Opcionproducto.objects.get(id=item_data['opcion_id'])
 
                 detalle = DetallePedido.objects.create(
                     pedido=nuevo_pedido,
@@ -317,7 +314,7 @@ def ver_carrito(request):
                     'sabores_nombres': [s.nombre for s in sabores_seleccionados],
                 })
 
-            except (Producto.DoesNotExist, OpcionProducto.DoesNotExist) as e:
+            except (Producto.DoesNotExist, Opcionproducto.DoesNotExist) as e:
                 messages.warning(request, f"Advertencia: Un ítem no pudo ser añadido al pedido final porque ya no existe. Error: {e}")
                 continue
             except Exception as e:
@@ -329,6 +326,10 @@ def ver_carrito(request):
             try:
                 nuevo_pedido.metodo_pago = 'MERCADOPAGO'
                 nuevo_pedido.save()
+
+                # Guardamos el ID para el fallback en mp_success
+                request.session['mp_last_order_id'] = nuevo_pedido.id
+                request.session.modified = True
 
                 init_point = crear_preferencia_mp(request, nuevo_pedido)
 
@@ -374,6 +375,9 @@ def ver_carrito(request):
 
         del request.session['carrito']
         request.session.modified = True
+
+        messages.success(request, f'¡Tu pedido #{nuevo_pedido.id} ha sido realizado con éxito! Pronto nos contactaremos.')
+        return redirect('pedido_exitoso')
 
     contexto = {'carrito_items': items_carrito_procesados, 'total': total}
     return render(request, 'pedidos/carrito.html', contexto)
@@ -492,18 +496,15 @@ def logout_cliente(request):
 # =========================
 
 def panel_alertas(request):
-    # Persistimos en servidor: mostramos todo lo que no está ENTREGADO/CANCELADO
     pedidos_iniciales = Pedido.objects.exclude(estado__in=['ENTREGADO', 'CANCELADO']).order_by('-fecha_pedido')[:100]
     return render(request, 'pedidos/panel_alertas.html', {'pedidos_iniciales': pedidos_iniciales})
 
 
 def panel_alertas_board(request):
-    # Alias por si apuntás a /panel-alertas/board/
     return panel_alertas(request)
 
 
 def panel_alertas_data(request):
-    """JSON con pedidos vigentes (rehidratación del panel si hace falta)."""
     pedidos = Pedido.objects.exclude(estado__in=['ENTREGADO', 'CANCELADO']).order_by('-fecha_pedido')[:100]
     data = []
     for p in pedidos:
@@ -531,7 +532,6 @@ def panel_alertas_data(request):
 @staff_member_required
 @require_POST
 def panel_alertas_set_estado(request, pedido_id):
-    """Cambiar estado desde el panel (AJAX)."""
     pedido = get_object_or_404(Pedido, id=pedido_id)
     estado = (request.POST.get('estado') or '').upper()
     validos = {'RECIBIDO', 'EN_PREPARACION', 'ASIGNADO', 'EN_CAMINO', 'ENTREGADO', 'CANCELADO'}
@@ -559,9 +559,9 @@ def confirmar_pedido(request, pedido_id):
     pedido.estado = 'EN_PREPARACION'
     pedido.save(update_fields=['estado'])
 
-    # Notificación a cadetes
     try:
         channel_layer = get_channel_layer()
+
         detalles_para_notificacion = []
         for detalle in pedido.detalles.all():
             detalles_para_notificacion.append({
@@ -581,16 +581,12 @@ def confirmar_pedido(request, pedido_id):
 
         async_to_sync(channel_layer.group_send)(
             'cadetes_disponibles',
-            {
-                'type': 'send_cadete_notification',
-                'order_data': order_data
-            }
+            {'type': 'send_cadete_notification', 'order_data': order_data}
         )
         print(f"WEBSOCKET: Alerta para Pedido #{pedido.id} enviada al grupo 'cadetes_disponibles'.")
     except Exception as e:
         print(f"ERROR al enviar notificación por WebSocket a cadetes: {e}")
 
-    # Si es AJAX, devolvemos JSON para que la UI colapse a chip
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
         return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': 'EN_PREPARACION'})
 
@@ -796,11 +792,48 @@ def mp_webhook_view(request):
 
 
 def mp_success(request):
+    """
+    Página de retorno (back_urls.success). Fallback: si tenemos el ID del pedido
+    en sesión, re-enviamos la notificación al panel por si el webhook tardó.
+    """
+    last_id = request.session.pop('mp_last_order_id', None)
+    if last_id:
+        try:
+            pedido = Pedido.objects.get(id=last_id)
+            channel_layer = get_channel_layer()
+            detalles_para_notificacion = []
+            for d in pedido.detalles.all():
+                detalles_para_notificacion.append({
+                    'producto_nombre': d.producto.nombre,
+                    'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
+                    'cantidad': d.cantidad,
+                    'sabores_nombres': [s.nombre for s in d.sabores.all()],
+                })
+
+            async_to_sync(channel_layer.group_send)(
+                'pedidos_new_orders',
+                {
+                    'type': 'send_order_notification',
+                    'message': f'Pago aprobado. Pedido #{pedido.id}',
+                    'order_id': pedido.id,
+                    'order_data': {
+                        'cliente_nombre': pedido.cliente_nombre,
+                        'cliente_direccion': pedido.cliente_direccion,
+                        'cliente_telefono': pedido.cliente_telefono,
+                        'metodo_pago': 'MERCADOPAGO',
+                        'total_pedido': str(pedido.total_pedido),
+                        'detalles': detalles_para_notificacion,
+                    }
+                }
+            )
+            print(f"MP SUCCESS: notificación fallback enviada para pedido #{pedido.id}")
+        except Exception as e:
+            print(f"MP SUCCESS: error en fallback WS: {e}")
     messages.info(request, "Gracias. Estamos confirmando tu pago. En breve verás tu pedido en cocina.")
     return redirect('pedido_exitoso')
 
 
-# Alias de compatibilidad si alguna ruta antigua apunta a 'mp_webhook'
+# Alias de compatibilidad
 mp_webhook = mp_webhook_view
 
 
