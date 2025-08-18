@@ -168,6 +168,7 @@ def detalle_producto(request, producto_id):
 def crear_preferencia_mp(request, pedido):
     """
     Crea la preferencia de Mercado Pago y devuelve el link de checkout.
+    IMPORTANTE: no enviar 'auto_return' para evitar 'auto_return invalid'.
     """
     if not getattr(settings, "MERCADO_PAGO_ACCESS_TOKEN", None):
         raise RuntimeError("MERCADO_PAGO_ACCESS_TOKEN no está configurado en el servidor")
@@ -187,9 +188,9 @@ def crear_preferencia_mp(request, pedido):
         })
 
     success_url = request.build_absolute_uri(reverse("mp_success"))
-    failure_url = request.build_absolute_uri(reverse("index"))
-    pending_url = request.build_absolute_uri(reverse("index"))
-    # OJO: el name del url en urls.py es 'mp_webhook'
+    failure_url = request.build_absolute_uri(reverse("mp_success"))
+    pending_url = request.build_absolute_uri(reverse("mp_success"))
+    # name del url en urls.py: 'mp_webhook'
     notification_url = request.build_absolute_uri(reverse("mp_webhook"))
 
     payload = {
@@ -200,7 +201,8 @@ def crear_preferencia_mp(request, pedido):
             "failure": failure_url,
             "pending": pending_url,
         },
-        "auto_return": "approved",  # para volver solo al aprobarse
+        # NO enviar auto_return para evitar error en algunas cuentas
+        # "auto_return": "approved",
         "notification_url": notification_url,
     }
 
@@ -213,7 +215,7 @@ def crear_preferencia_mp(request, pedido):
     status = pref.get("status")
     resp = pref.get("response", {}) or {}
 
-    print(f"MP DEBUG: status={status} resp_keys={list(resp.keys())} back_urls={payload.get('back_urls')}")
+    print(f"MP DEBUG: status={status} init_point={resp.get('init_point')} back_urls={payload.get('back_urls')}")
 
     if status not in (200, 201):
         msg = resp.get("message") or resp.get("error") or "Error desconocido de MP"
@@ -372,9 +374,6 @@ def ver_carrito(request):
 
         del request.session['carrito']
         request.session.modified = True
-
-        messages.success(request, f'¡Tu pedido #{nuevo_pedido.id} ha sido realizado con éxito! Pronto nos contactaremos.')
-        return redirect('pedido_exitoso')
 
     contexto = {'carrito_items': items_carrito_procesados, 'total': total}
     return render(request, 'pedidos/carrito.html', contexto)
@@ -806,7 +805,7 @@ mp_webhook = mp_webhook_view
 
 
 # =========================
-# === CANJE DE PUNTOS  (¡ESTA ES LA QUE FALTABA!)
+# === CANJE DE PUNTOS
 # =========================
 
 @login_required
