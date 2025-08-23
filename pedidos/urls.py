@@ -42,6 +42,10 @@ urlpatterns = [
     # NUEVO: Acciones rápidas del cadete
     path('cadete/disponible/', views.cadete_toggle_disponible, name='cadete_toggle_disponible'),
     path('cadete/estado/<int:pedido_id>/', views.cadete_set_estado, name='cadete_set_estado'),
+# --- Cadetes extra ---
+path('cadete/feed/', views.cadete_feed, name='cadete_feed'),               # JSON: pedidos disponibles
+path('cadete/historial/', views.cadete_historial, name='cadete_historial'),# Historial del cadete
+path('cadete/estado/<int:pedido_id>/', views.cadete_set_estado, name='cadete_set_estado'),  # ya la tenías, por si faltaba
 
     # --- Mercado Pago ---
     path('pagos/mp/webhook/', views.mp_webhook_view, name='mp_webhook'),

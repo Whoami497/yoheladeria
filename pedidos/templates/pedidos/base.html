@@ -81,6 +81,11 @@
                   <i class="bi bi-bicycle"></i> Panel del Cadete
                 </a>
               </li>
+              <li class="nav-item">
+                <a class="nav-link {% if request.resolver_match.url_name == 'cadete_historial' %}active{% endif %}" href="{% url 'cadete_historial' %}">
+                  <i class="bi bi-clock-history"></i> Historial
+                </a>
+              </li>
               <li class="nav-item px-3 mt-2 text-white-50">Disponibilidad</li>
               <li class="nav-item px-3">
                 <button class="btn btn-sm btn-secondary" id="btn-cadete-dispo-desktop" data-on="0">
@@ -156,12 +161,15 @@
     {% with url_name=request.resolver_match.url_name %}
       {% if user.is_authenticated and user.cadeteprofile %}
         <!-- Barra para CADETE -->
-        <nav class="mobile-tabbar">
+        <nav class="mobile-tabbar" aria-label="Navegación cadete">
           <a class="mbn-item {% if url_name == 'panel_cadete' %}active{% endif %}" href="{% url 'panel_cadete' %}">
             <i class="bi bi-bicycle"></i><span>Panel</span>
           </a>
           <a href="#" class="mbn-item" id="btn-cadete-dispo" data-on="0">
             <i class="bi bi-power"></i><span>Disponible</span>
+          </a>
+          <a class="mbn-item {% if url_name == 'cadete_historial' %}active{% endif %}" href="{% url 'cadete_historial' %}">
+            <i class="bi bi-clock-history"></i><span>Historial</span>
           </a>
           <a class="mbn-item" href="{% url 'logout_cadete' %}">
             <i class="bi bi-box-arrow-right"></i><span>Salir</span>
@@ -169,7 +177,7 @@
         </nav>
       {% else %}
         <!-- Barra para CLIENTE -->
-        <nav class="mobile-tabbar">
+        <nav class="mobile-tabbar" aria-label="Navegación cliente">
           <a class="mbn-item {% if url_name == 'index' %}active{% endif %}" href="{% url 'index' %}">
             <i class="bi bi-house-door"></i><span>Inicio</span>
           </a>
@@ -214,7 +222,6 @@
           if(!res) return;
 
           const j = await res.json().catch(()=>({}));
-          const ok = j && j.ok;
           const val = !!(j && j.disponible);
 
           const btnM = document.getElementById('btn-cadete-dispo');

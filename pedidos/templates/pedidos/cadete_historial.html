@@ -1,0 +1,23 @@
+{% extends 'pedidos/base.html' %}
+{% block content %}
+<div class="container">
+  <h1 class="mb-3">Historial de Entregas</h1>
+  {% if pedidos %}
+    <div class="list-group">
+      {% for p in pedidos %}
+        <div class="list-group-item">
+          <div class="d-flex justify-content-between">
+            <div>
+              <div class="fw-semibold">#{{ p.id }} — {{ p.cliente_direccion }}</div>
+              <div class="small text-muted">{{ p.fecha_pedido|date:"d/m H:i" }} · {{ p.estado }}</div>
+            </div>
+            <div class="fw-bold">${{ p.total_pedido|default:"0" }}</div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="alert alert-info">Aún no tenés entregas registradas.</div>
+  {% endif %}
+</div>
+{% endblock %}

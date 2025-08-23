@@ -1,72 +1,172 @@
 {% extends 'pedidos/base.html' %}
+{% load static %}
 {% block content %}
 <div class="container">
-  <h1 class="mb-3">Panel del Cadete</h1>
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h1 class="mb-0">Panel del Cadete</h1>
+    <button id="btn-push" class="btn btn-outline-primary btn-sm">
+      <i class="bi bi-bell"></i> Activar notificaciones
+    </button>
+  </div>
 
-  {% if pedidos_en_curso %}
-    <div class="row g-3">
-      {% for p in pedidos_en_curso %}
-        <div class="col-12">
-          <div class="card shadow-sm">
-            <div class="card-body">
-              <div class="d-flex justify-content-between align-items-start">
-                <div>
-                  <h5 class="card-title mb-1">Pedido #{{ p.id }}</h5>
-                  <div class="text-muted small mb-2">
-                    {{ p.cliente_nombre }} — {{ p.cliente_direccion }} — {{ p.cliente_telefono }}
-                  </div>
-                  <ul class="mb-2">
-                    {% for d in p.detalles.all %}
-                      <li>
-                        {{ d.cantidad }}× {{ d.producto.nombre }}
-                        {% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %}
-                        {% if d.sabores.all %} — Sabores: {{ d.sabores.all|join:", " }}{% endif %}
-                      </li>
-                    {% endfor %}
-                  </ul>
-                  <span class="badge bg-info text-dark">Estado: <span id="estado-{{ p.id }}">{{ p.estado }}</span></span>
-                </div>
-                <div class="text-end">
-                  <button class="btn btn-outline-primary btn-sm mb-2 cadete-accion" data-id="{{ p.id }}" data-estado="EN_CAMINO">
-                    Marcar en camino
-                  </button>
-                  <br>
-                  <button class="btn btn-success btn-sm cadete-accion" data-id="{{ p.id }}" data-estado="ENTREGADO">
-                    Marcar entregado
-                  </button>
-                </div>
-              </div>
-            </div>
+  <div class="row g-3">
+    <div class="col-12 col-lg-6">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">Pedidos disponibles</h5>
+          <div id="feed">
+            <div class="text-muted">Buscando pedidos…</div>
           </div>
         </div>
-      {% endfor %}
+      </div>
     </div>
-  {% else %}
-    <div class="alert alert-info">No tenés pedidos en curso por ahora.</div>
-  {% endif %}
+
+    <div class="col-12 col-lg-6">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">Tus pedidos en curso</h5>
+
+          {% if pedidos_en_curso %}
+            {% for p in pedidos_en_curso %}
+              <div class="border rounded p-2 mb-2">
+                <div class="d-flex justify-content-between">
+                  <div>
+                    <div class="fw-semibold">#{{ p.id }} — {{ p.cliente_direccion }}</div>
+                    <div class="small text-muted">{{ p.cliente_nombre }} · {{ p.cliente_telefono }}</div>
+                    <ul class="small mt-2 mb-1">
+                      {% for d in p.detalles.all %}
+                        <li>{{ d.cantidad }}× {{ d.producto.nombre }}{% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %}</li>
+                      {% endfor %}
+                    </ul>
+                    <span class="badge bg-info text-dark">Estado: <span id="estado-{{ p.id }}">{{ p.estado }}</span></span>
+                  </div>
+                  <div class="text-end">
+                    <button class="btn btn-outline-primary btn-sm mb-1 cadete-accion" data-id="{{ p.id }}" data-estado="EN_CAMINO">En camino</button><br>
+                    <button class="btn btn-success btn-sm cadete-accion" data-id="{{ p.id }}" data-estado="ENTREGADO">Entregado</button>
+                  </div>
+                </div>
+              </div>
+            {% endfor %}
+          {% else %}
+            <div class="alert alert-info mb-0">No tenés pedidos en curso por ahora.</div>
+          {% endif %}
+
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
 (function(){
+  // ===== CSRF helper
   function getCookie(name){
     const v = `; ${document.cookie}`.split(`; ${name}=`); 
     if (v.length === 2) return v.pop().split(';').shift();
   }
   const csrftoken = getCookie('csrftoken');
 
+  // ===== Polling de feed
+  async function loadFeed(){
+    const box = document.getElementById('feed');
+    try{
+      const r = await fetch("{% url 'cadete_feed' %}", {headers:{'X-Requested-With':'XMLHttpRequest'}});
+      const j = await r.json();
+      if(!j.ok){ box.innerHTML = '<div class="text-danger">Error cargando feed.</div>'; return; }
+      if(!j.pedidos.length){ box.innerHTML = '<div class="alert alert-secondary mb-0">No hay pedidos disponibles ahora.</div>'; return; }
+
+      box.innerHTML = j.pedidos.map(p => `
+        <div class="border rounded p-2 mb-2">
+          <div class="d-flex justify-content-between">
+            <div>
+              <div class="fw-semibold">#${p.id} — ${p.cliente_direccion}</div>
+              <div class="small text-muted">${p.cliente_nombre} · ${p.cliente_telefono}</div>
+              <ul class="small mt-2 mb-1">
+                ${(p.detalles||[]).map(d => `<li>${d.cant}× ${d.producto}${d.opcion? ' - '+d.opcion : ''}</li>`).join('')}
+              </ul>
+            </div>
+            <div class="text-end">
+              <button class="btn btn-primary btn-sm" data-accept="${p.id}">Aceptar</button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+      // bind aceptar
+      box.querySelectorAll('[data-accept]').forEach(b=>{
+        b.addEventListener('click', async function(){
+          const id = this.dataset.accept;
+          const fd = new FormData();
+          fd.append('dummy','1'); // body no vacío
+          const res = await fetch(`/cadete/aceptar-pedido/${id}/`, {
+            method:'POST', headers:{'X-CSRFToken': csrftoken}
+            ,body: fd
+          }).catch(()=>null);
+          if(!res){ alert('Sin conexión'); return; }
+          if(res.redirected){ location.href = res.url; return; }
+          if(res.ok){ loadFeed(); location.reload(); return; }
+          alert('No se pudo aceptar el pedido.');
+        });
+      });
+
+    }catch(e){
+      box.innerHTML = '<div class="text-danger">Error de red.</div>';
+    }
+  }
+  loadFeed();
+  setInterval(loadFeed, 8000);
+
+  // ===== Acciones En camino / Entregado
   document.querySelectorAll('.cadete-accion').forEach(btn=>{
     btn.addEventListener('click', async function(){
       const id = this.dataset.id, estado = this.dataset.estado;
       const fd = new FormData(); fd.append('estado', estado);
       const res = await fetch(`/cadete/estado/${id}/`, {method:'POST', headers:{'X-CSRFToken': csrftoken}, body: fd}).catch(()=>null);
-      if(!res) return;
+      if(!res) return alert('Error de red');
       const j = await res.json().catch(()=>({}));
       if(j.ok){
         document.getElementById(`estado-${id}`).textContent = j.estado;
-      } else {
+      }else{
         alert('No se pudo actualizar el estado.');
       }
     });
+  });
+
+  // ===== Activar Push
+  function urlBase64ToUint8Array(b64){
+    const pad = '='.repeat((4 - b64.length % 4) % 4);
+    const base64 = (b64 + pad).replace(/-/g,'+').replace(/_/g,'/');
+    const raw = atob(base64);
+    const arr = new Uint8Array(raw.length);
+    for (let i=0;i<raw.length;i++) arr[i]=raw.charCodeAt(i);
+    return arr;
+  }
+
+  document.getElementById('btn-push').addEventListener('click', async ()=>{
+    try{
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)){
+        alert('Notificaciones no soportadas en este dispositivo.');
+        return;
+      }
+      const reg = await navigator.serviceWorker.register("{% static 'js/cadete-sw.js' %}");
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted'){ alert('Permiso denegado.'); return; }
+
+      const vapid = "{{ vapid_public_key|default:'' }}";
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapid)
+      });
+      const res = await fetch("{% url 'save_subscription' %}", {
+        method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken': csrftoken},
+        body: JSON.stringify(sub)
+      });
+      if(res.ok){ alert('Notificaciones activadas ✅'); }
+      else{ alert('No se pudo guardar la suscripción'); }
+    }catch(e){
+      alert('Error activando notificaciones');
+      console.log(e);
+    }
   });
 })();
 </script>

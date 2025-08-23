@@ -13,20 +13,20 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
+from django.db.models import Q
+from django.views.decorators.csrf import csrf_exempt
+from decimal import Decimal
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+import json
+import mercadopago
 
 from .forms import ClienteRegisterForm, ClienteProfileForm
 from .models import (
     Producto, Sabor, Pedido, DetallePedido, Categoria,
     OpcionProducto, ClienteProfile, ProductoCanje, CadeteProfile
 )
-from decimal import Decimal
 from django.contrib import messages
-
-from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
-import json
-from django.views.decorators.csrf import csrf_exempt
-import mercadopago
 
 
 # =========================
@@ -45,14 +45,51 @@ def _abs_https(request, url_or_path: str) -> str:
     return url
 
 
-# =========================
-# === CATÁLOGO / HOME
-# =========================
-# =========================
-# === CATÁLOGO / HOME
-# =========================
-from django.db.models import Q
+def _notify_cadetes_new_order(request, pedido):
+    """
+    Envia WebPush a todos los cadetes con subscription_info.
+    Llega aunque tengan Chrome cerrado/bloqueado.
+    Requiere WEBPUSH_SETTINGS con VAPID_PRIVATE_KEY y VAPID_ADMIN_EMAIL.
+    """
+    try:
+        from pywebpush import webpush
+    except Exception as e:
+        print(f"WEBPUSH no disponible: {e}")
+        return
 
+    vapid = getattr(settings, 'WEBPUSH_SETTINGS', {}) or {}
+    priv = vapid.get('VAPID_PRIVATE_KEY')
+    admin = vapid.get('VAPID_ADMIN_EMAIL') or 'admin@example.com'
+    if not priv:
+        print("WEBPUSH: Falta VAPID_PRIVATE_KEY en settings.")
+        return
+
+    url = _abs_https(request, reverse('panel_cadete'))
+    payload = {
+        "title": "Nuevo pedido disponible",
+        "body": f"Pedido #{pedido.id} — {pedido.cliente_direccion or ''}",
+        "url": url,
+    }
+
+    cadetes = CadeteProfile.objects.exclude(subscription_info__isnull=True)
+    for cp in cadetes:
+        sub = cp.subscription_info or {}
+        if not isinstance(sub, dict):
+            continue
+        try:
+            webpush(
+                subscription_info=sub,
+                data=json.dumps(payload),
+                vapid_private_key=priv,
+                vapid_claims={"sub": f"mailto:{admin}"}
+            )
+        except Exception as e:
+            print(f"WEBPUSH cadete {cp.user_id} error: {e}")
+
+
+# =========================
+# === CATÁLOGO / HOME
+# =========================
 def index(request):
     q = (request.GET.get('q') or '').strip()
     cat = request.GET.get('cat')  # id de categoría
@@ -65,7 +102,7 @@ def index(request):
     if q:
         productos = productos.filter(
             Q(nombre__icontains=q) |
-            Q(descripcion__icontains=q)  # si no tenés este campo, podés quitar esta línea
+            Q(descripcion__icontains=q)
         )
 
     if sort == 'precio_asc':
@@ -87,7 +124,6 @@ def index(request):
         'sort': sort,
     }
     return render(request, 'pedidos/index.html', contexto)
-
 
 
 def detalle_producto(request, producto_id):
@@ -444,8 +480,6 @@ def ver_carrito(request):
     return render(request, 'pedidos/carrito.html', contexto)
 
 
-
-
 def eliminar_del_carrito(request, item_key):
     if 'carrito' in request.session:
         carrito = request.session['carrito']
@@ -458,9 +492,11 @@ def eliminar_del_carrito(request, item_key):
             messages.warning(request, 'El producto que intentaste eliminar ya no está en tu carrito.')
     return redirect('ver_carrito')
 
+
 @require_POST
 def carrito_set_nota(request):
     """
+    (Aún disponible por compatibilidad, aunque ahora usamos nota general)
     Guarda/borra una 'nota' por ítem del carrito (en sesión).
     Espera: key (clave del item), nota (texto).
     """
@@ -479,7 +515,6 @@ def carrito_set_nota(request):
     request.session['carrito'] = cart
     request.session.modified = True
     return JsonResponse({'ok': True})
-
 
 
 def productos_por_categoria(request, categoria_id):
@@ -579,9 +614,6 @@ def logout_cliente(request):
 # =========================
 # === PANEL DE ALERTAS TIENDA (HOY/AYER/ANTERIORES)
 # =========================
-from django.utils import timezone
-from datetime import timedelta
-
 def panel_alertas(request):
     """
     Muestra HOY (activos), AYER (plegable) y ENTREGADOS de hoy (plegable al final).
@@ -666,7 +698,6 @@ def panel_alertas_data(request):
     return JsonResponse({'pedidos': [serialize(p) for p in qs]})
 
 
-
 def panel_alertas_anteriores(request):
     """
     Listado simple (HTML directo) de pedidos anteriores a AYER.
@@ -736,6 +767,7 @@ def confirmar_pedido(request, pedido_id):
     pedido.estado = 'EN_PREPARACION'
     pedido.save(update_fields=['estado'])
 
+    # WebSocket a tablets/tienda (como ya tenías) + Push a cadetes
     try:
         channel_layer = get_channel_layer()
 
@@ -763,6 +795,12 @@ def confirmar_pedido(request, pedido_id):
         print(f"WEBSOCKET: Alerta para Pedido #{pedido.id} enviada al grupo 'cadetes_disponibles'.")
     except Exception as e:
         print(f"ERROR al enviar notificación por WebSocket a cadetes: {e}")
+
+    # ➜ Enviar Push (para móviles con la app/navegador cerrado)
+    try:
+        _notify_cadetes_new_order(request, pedido)
+    except Exception as e:
+        print(f"Notify cadetes error: {e}")
 
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
         return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': 'EN_PREPARACION'})
@@ -843,7 +881,7 @@ def logout_cadete(request):
     logout(request)
     messages.info(request, "Has cerrado sesión como cadete.")
     return redirect('login_cadete')
-from django.views.decorators.http import require_http_methods
+
 
 @login_required
 @require_POST
@@ -860,7 +898,6 @@ def cadete_toggle_disponible(request):
     prof = request.user.cadeteprofile
     used_model_field = False
 
-    # Intentar usar campo del modelo si existe
     if hasattr(prof, 'disponible'):
         try:
             prof.disponible = val
@@ -869,7 +906,6 @@ def cadete_toggle_disponible(request):
         except Exception:
             used_model_field = False
 
-    # Fallback en sesión
     if not used_model_field:
         request.session['cadete_disponible'] = val
         request.session.modified = True
@@ -889,7 +925,6 @@ def cadete_set_estado(request, pedido_id):
 
     pedido = get_object_or_404(Pedido, id=pedido_id)
 
-    # Debe ser el cadete asignado
     if pedido.cadete_asignado != request.user.cadeteprofile:
         return JsonResponse({'ok': False, 'error': 'no_autorizado'}, status=403)
 
@@ -929,6 +964,55 @@ def save_subscription(request):
     except Exception as e:
         print(f"ERROR: Excepción inesperada en save_subscription: {e}")
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+
+@login_required
+def cadete_feed(request):
+    """
+    Lista pedidos disponibles para aceptar:
+      - estado EN_PREPARACION
+      - sin cadete asignado
+    Se usa por polling desde el panel del cadete.
+    """
+    if not hasattr(request.user, 'cadeteprofile'):
+        return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
+
+    pedidos = (Pedido.objects
+               .filter(estado='EN_PREPARACION', cadete_asignado__isnull=True)
+               .order_by('-fecha_pedido')[:50])
+
+    def ser(p):
+        return {
+            'id': p.id,
+            'cliente_nombre': p.cliente_nombre or '',
+            'cliente_direccion': p.cliente_direccion or '',
+            'cliente_telefono': p.cliente_telefono or '',
+            'total': str(p.total_pedido or 0),
+            'detalles': [{
+                'producto': d.producto.nombre,
+                'opcion': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
+                'cant': d.cantidad,
+                'sabores': [s.nombre for s in d.sabores.all()],
+            } for d in p.detalles.all()],
+        }
+
+    return JsonResponse({'ok': True, 'pedidos': [ser(p) for p in pedidos]})
+
+
+@login_required
+def cadete_historial(request):
+    """
+    Últimos 50 pedidos ENTREGADOS/CANCELADOS del cadete.
+    """
+    if not hasattr(request.user, 'cadeteprofile'):
+        return redirect('index')
+
+    pedidos = (Pedido.objects
+               .filter(cadete_asignado=request.user.cadeteprofile,
+                       estado__in=['ENTREGADO', 'CANCELADO'])
+               .order_by('-fecha_pedido')[:50])
+
+    return render(request, 'pedidos/cadete_historial.html', {'pedidos': pedidos})
 
 
 # =========================
