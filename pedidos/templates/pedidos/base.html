@@ -8,373 +8,242 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 
     <style>
-        /* ====== Paleta / base ====== */
-        body {
-            padding-top: 0;
-            background-color: #1a1a1a;
-            color: #e0e0e0;
-            font-family: 'Arial', sans-serif;
-        }
-        :root {
-            --color-principal-oscuro: #1a1a1a;
-            --color-secundario-oscuro: #2a2a2a;
+      /* ===== Paleta / base ===== */
+      body{padding-top:0;background:#1a1a1a;color:#e0e0e0;font-family:Arial,Helvetica,sans-serif}
+      :root{
+        --c-dark:#1a1a1a;--c-dark-2:#2a2a2a;
+        --c-azul:#073653;--c-azul-claro:#007bff;--c-azul-hover:#052a42;
+        --c-white:#fff;--c-light:#f8f9fa;--c-text:#343a40;--c-muted:#6c757d;--c-br:#dee2e6;
+        --s-soft:rgba(0,0,0,.2);--s-med:rgba(0,0,0,.3);--s-strong:rgba(0,0,0,.4);
+      }
 
-            --color-yo-azul: #073653;
-            --color-yo-azul-claro: #007bff;
-            --color-yo-azul-oscuro-hover: #052a42;
-            --color-yo-blanco: #ffffff;
-            --color-yo-fondo-claro: #f8f9fa;
-            --color-yo-texto-oscuro: #343a40;
-            --color-yo-gris-texto: #6c757d;
-            --color-yo-gris-borde: #dee2e6;
+      .page-wrapper{display:flex;min-height:100vh;background:var(--c-dark)}
+      .sidebar-desktop{width:250px;background:var(--c-dark-2);box-shadow:2px 0 10px var(--s-soft);padding-top:20px;position:fixed;height:100%;overflow-y:auto;border-right:1px solid rgba(255,255,255,.05)}
+      .sidebar-desktop .sidebar-logo{text-align:center;padding:0 15px 20px}
+      .sidebar-desktop .sidebar-logo img{max-width:100%;max-height:100px;object-fit:contain}
+      .sidebar-desktop .sidebar-nav .nav-link{color:#fff;padding:15px 20px;font-weight:500;display:flex;align-items:center;border-radius:8px;margin:0 10px}
+      .sidebar-desktop .sidebar-nav .nav-link i{margin-right:10px}
+      .sidebar-desktop .sidebar-nav .nav-link:hover,.sidebar-desktop .sidebar-nav .nav-link.active{background:var(--c-azul-claro);color:#fff!important;box-shadow:0 2px 5px var(--s-soft)}
 
-            --color-sombra-suave: rgba(0,0,0,0.2);
-            --color-sombra-media: rgba(0,0,0,0.3);
-            --color-sombra-fuerte: rgba(0,0,0,0.4);
-        }
+      .main-content-wrapper{flex-grow:1;background:var(--c-dark);padding:20px}
+      .main-content{background:#fff;border-radius:15px;padding:30px;box-shadow:0 5px 20px var(--s-med);min-height:calc(100vh - 40px);color:var(--c-text)}
 
-        /* ====== Layout principal ====== */
-        .page-wrapper { display:flex; min-height:100vh; background-color:var(--color-principal-oscuro); }
+      /* Mensajes */
+      .alert{border-radius:10px;font-weight:500}
+      .alert-success{background:#d1ecf1;border-color:#bee5eb;color:var(--c-azul)}
+      .alert-info{background:#e0f7fa;border-color:#b2ebf2;color:var(--c-azul)}
+      .alert-warning{background:#ffecb3;border-color:#ffe082;color:#cc9900}
+      .alert-danger{background:#ffcdd2;border-color:#ef9a9a;color:#d32f2f}
 
-        /* ====== Sidebar desktop ====== */
-        .sidebar-desktop {
-            width: 250px;
-            background-color: var(--color-secundario-oscuro);
-            box-shadow: 2px 0 10px var(--color-sombra-suave);
-            padding-top: 20px;
-            position: fixed;
-            height: 100%;
-            overflow-y: auto;
-            border-right: 1px solid rgba(255,255,255,0.05);
-        }
-        .sidebar-desktop .sidebar-logo { text-align:center; padding:0 15px 20px; }
-        .sidebar-desktop .sidebar-logo img { max-width:100%; height:auto; max-height:100px; display:block; margin:0 auto; object-fit:contain; }
-        .sidebar-desktop .sidebar-nav .nav-item { margin-bottom:5px; }
-        .sidebar-desktop .sidebar-nav .nav-link {
-            color: var(--color-yo-blanco);
-            padding: 15px 20px;
-            font-size: 1.1rem;
-            font-weight: 500;
-            transition: background-color .2s, color .2s;
-            display:flex; align-items:center;
-            border-radius: 8px; margin:0 10px;
-        }
-        .sidebar-desktop .sidebar-nav .nav-link i { margin-right:10px; font-size:1.3rem; }
-        .sidebar-desktop .sidebar-nav .nav-link:hover,
-        .sidebar-desktop .sidebar-nav .nav-link.active {
-            background-color: var(--color-yo-azul-claro);
-            color: var(--color-yo-blanco) !important;
-            box-shadow: 0 2px 5px var(--color-sombra-suave);
-        }
+      /* Botones */
+      .btn-primary{background:var(--c-azul-claro);border-color:var(--c-azul-claro);font-weight:700}
+      .btn-primary:hover{background:var(--c-azul);border-color:var(--c-azul);transform:translateY(-2px)}
+      .btn-secondary{background:#fff;border-color:#fff;color:var(--c-azul);font-weight:700}
+      .btn-secondary:hover{background:var(--c-br);border-color:var(--c-br);color:var(--c-azul-hover)}
 
-        /* (sin navbar superior móvil) */
-        .navbar-mobile { display:none !important; }
+      /* Bottom bar móvil */
+      .mobile-tabbar{position:fixed;left:0;right:0;bottom:0;display:none;gap:.25rem;background:rgba(255,255,255,.86);backdrop-filter:blur(10px);border-top:1px solid rgba(7,54,83,.12);box-shadow:0 -6px 20px rgba(0,0,0,.15);z-index:1030;padding:.2rem .4rem}
+      .mobile-tabbar a.mbn-item{flex:1;text-align:center;text-decoration:none;color:var(--c-azul);font-weight:600;font-size:.86rem;padding:.35rem .25rem .5rem;border-radius:12px;display:flex;flex-direction:column;align-items:center}
+      .mobile-tabbar a.mbn-item .bi{font-size:1.25rem;margin-bottom:.1rem}
+      .mobile-tabbar a.mbn-item.active{color:var(--c-azul-claro);background:rgba(0,123,255,.08)}
 
-        /* ====== Contenido principal ====== */
-        .main-content-wrapper { flex-grow:1; background-color:var(--color-principal-oscuro); padding:20px; }
-        .main-content {
-            background-color: var(--color-yo-blanco);
-            border-radius: 15px;
-            padding: 30px;
-            box-shadow: 0 5px 20px var(--color-sombra-media);
-            min-height: calc(100vh - 40px);
-            color: var(--color-yo-texto-oscuro);
-        }
-
-        /* Mensajes */
-        .messages { margin: 0 0 20px 0; }
-        .alert { border-radius:10px; font-weight:500; padding:1.2rem 1.5rem; }
-        .alert-success { background:#d1ecf1; border-color:#bee5eb; color:var(--color-yo-azul); }
-        .alert-info    { background:#e0f7fa; border-color:#b2ebf2; color:var(--color-yo-azul); }
-        .alert-warning { background:#ffecb3; border-color:#ffe082; color:#cc9900; }
-        .alert-danger  { background:#ffcdd2; border-color:#ef9a9a; color:#d32f2f; }
-
-        .section-title { color:var(--color-yo-azul); font-size:2.5rem; font-weight:700; margin:2rem 0; text-align:center; line-height:1.2; }
-
-        .btn-primary{ background:var(--color-yo-azul-claro); border-color:var(--color-yo-azul-claro); font-weight:700; color:#fff; }
-        .btn-primary:hover{ background:var(--color-yo-azul); border-color:var(--color-yo-azul); transform:translateY(-2px); box-shadow:0 4px 8px var(--color-sombra-suave); }
-        .btn-success{ background:var(--color-yo-azul); border-color:var(--color-yo-azul); font-weight:700; color:#fff; }
-        .btn-success:hover{ background:var(--color-yo-azul-oscuro-hover); border-color:var(--color-yo-azul-oscuro-hover); transform:translateY(-2px); box-shadow:0 4px 8px var(--color-sombra-suave); }
-        .btn-secondary{ background:#fff; border-color:#fff; color:var(--color-yo-azul); font-weight:700; }
-        .btn-secondary:hover{ background:var(--color-yo-gris-borde); border-color:var(--color-yo-gris-borde); color:var(--color-yo-azul-oscuro-hover); transform:translateY(-2px); box-shadow:0 4px 8px var(--color-sombra-suave); }
-
-        .card{ border:1px solid var(--color-yo-gris-borde); border-radius:15px; box-shadow:0 6px 12px var(--color-sombra-suave); transition:transform .3s, box-shadow .3s; background:#fff; overflow:hidden; }
-        .card:hover{ transform:translateY(-8px); box-shadow:0 12px 24px var(--color-sombra-media); }
-        .card-title{ color:var(--color-yo-azul); font-weight:700; font-size:1.35rem; }
-        .card-text.text-muted{ color:var(--color-yo-gris-texto) !important; font-size:.95rem; }
-        .card-img-top{ border-radius:15px 15px 0 0; }
-
-        .display-4 { color:var(--color-yo-azul); font-weight:bold; }
-        .lead .fw-bold { color:var(--color-yo-azul); }
-        h3 { color:var(--color-yo-azul); }
-
-        table.table th{ color:#fff; background:var(--color-yo-azul); }
-        table.table tfoot th, table.table tfoot td { font-size:1.6rem; color:var(--color-yo-azul); font-weight:700; }
-
-        .placeholder-image{
-            border:2px dashed var(--color-yo-gris-borde) !important;
-            color: var(--color-yo-gris-texto);
-            background: var(--color-yo-fondo-claro);
-            min-height:200px; font-weight:700; display:flex; align-items:center; justify-content:center; text-align:center; border-radius:15px 15px 0 0;
-        }
-
-        /* ====== HERO ====== */
-        .hero-section-new {
-            background-color: var(--color-yo-azul);
-            color:#fff; padding:3rem 1.5rem; border-radius:20px; box-shadow:0 10px 25px var(--color-sombra-fuerte);
-            text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center;
-        }
-        .hero-section-new h1 { font-size:3rem; font-weight:900; margin-bottom:.8rem; line-height:1.2; text-shadow:2px 2px 6px rgba(0,0,0,.4); }
-        .hero-section-new p { font-size:1.3rem; margin-bottom:1.5rem; max-width:600px; text-shadow:1px 1px 3px rgba(0,0,0,.3); }
-        .hero-section-new .hero-image-container-new{ margin-top:2rem; width:100%; display:flex; justify-content:center; }
-        .hero-section-new .hero-image-container-new img{ max-width:300px; height:auto; object-fit:contain; border-radius:10px; box-shadow:0 5px 10px var(--color-sombra-suave); }
-
-        /* ===== Bottom Nav (móvil) ===== */
-        .mobile-bottom-nav{
-          position:fixed; left:0; right:0; bottom:0; z-index:1030;
-          height:58px; background: rgba(10,10,10,.75); backdrop-filter: blur(8px);
-          border-top: 1px solid rgba(255,255,255,.08);
-          display:flex; align-items:center; justify-content:space-around;
-          gap:.25rem; padding:0 .35rem;
-        }
-        .mbn-item{
-          appearance:none; background:none; border:0; color:#cfe6ff;
-          text-decoration:none; display:flex; flex-direction:column;
-          align-items:center; justify-content:center; gap:2px;
-          flex:1; height:100%; border-radius:12px;
-          font-size:.78rem; font-weight:600;
-        }
-        .mbn-item i{ font-size:1.25rem; line-height:1; }
-        .mbn-item.active{ color: var(--color-yo-azul-claro); background: rgba(0,123,255,.08); }
-        .mbn-more{ cursor:pointer; }
-
-        /* ===== Sheet de “Más” ===== */
-        .sheet-overlay{
-          position:fixed; inset:0; background:rgba(0,0,0,.35);
-          opacity:0; pointer-events:none; transition:.2s; z-index:1029;
-        }
-        .sheet-overlay.show{ opacity:1; pointer-events:auto; }
-
-        .mobile-sheet{
-          position:fixed; left:0; right:0; bottom:0; z-index:1031;
-          background:#fff; color:var(--color-yo-texto-oscuro);
-          border-top-left-radius:18px; border-top-right-radius:18px;
-          box-shadow: 0 -8px 24px rgba(0,0,0,.25);
-          transform: translateY(110%); transition: transform .25s ease;
-          padding:12px 12px 16px;
-        }
-        .mobile-sheet.open{ transform: translateY(0); }
-        .sheet-handle{
-          width:42px; height:4px; background:#d8e2ef; border-radius:999px;
-          margin:6px auto 10px;
-        }
-        .sheet-title{ color: var(--color-yo-azul); }
-
-        /* ====== Responsive ====== */
-        @media (min-width: 992px){
-            .page-wrapper{ flex-direction:row; }
-            .sidebar-desktop{ display:block; }
-            .main-content-wrapper{ margin-left:250px; padding:20px; }
-            .main-content{ min-height: calc(100vh - 40px); }
-            .mobile-bottom-nav, .sheet-overlay, .mobile-sheet{ display:none; }
-        }
-        @media (max-width: 991.98px){
-            body{ padding-top:0; padding-bottom:70px; } /* espacio para la bottom-nav */
-            .page-wrapper{ flex-direction:column; }
-            .sidebar-desktop{ display:none; }
-            .main-content-wrapper{ margin-left:0; padding:15px; }
-            .main-content{ padding:20px; min-height:auto; }
-            .hero-section-new{ padding:2rem 1rem; }
-            .hero-section-new h1{ font-size:2rem; }
-            .hero-section-new p{ font-size:1rem; }
-            .hero-section-new .hero-image-container-new img{ max-width:150px; }
-            .section-title{ font-size:1.8rem; margin:1.5rem 0; }
-        }
+      @media (min-width:992px){
+        .page-wrapper{flex-direction:row}
+        .sidebar-desktop{display:block}
+        .main-content-wrapper{margin-left:250px}
+      }
+      @media (max-width:991.98px){
+        body{padding-bottom:64px}
+        .sidebar-desktop{display:none}
+        .mobile-tabbar{display:flex}
+      }
     </style>
   </head>
   <body>
     {% load static %}
 
     <div class="page-wrapper">
-        <!-- ===== Sidebar (solo desktop) ===== -->
-        <aside class="sidebar-desktop">
-            <div class="sidebar-logo">
-                <a href="{% url 'index' %}">
-                    <img src="{% static 'images/logo_yo_heladeria_blanco.png' %}" alt="Yo Heladerías Alto del Solar">
-                </a>
-            </div>
-            <nav class="sidebar-nav">
-                <ul class="nav flex-column">
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'index' %}active{% endif %}" href="{% url 'index' %}">
-                            <i class="bi bi-house-door-fill"></i> Inicio
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'ver_carrito' %}active{% endif %}" href="{% url 'ver_carrito' %}">
-                            <i class="bi bi-cart-fill"></i> Carrito
-                        </a>
-                    </li>
-
-                    {% if categorias %}
-                        <li class="nav-item nav-category-title px-3 mt-2 text-white-50">Categorías</li>
-                        {% for categoria in categorias %}
-                        <li class="nav-item">
-                            <a class="nav-link" href="{% url 'productos_por_categoria' categoria.id %}">
-                                <i class="bi bi-dot"></i> {{ categoria.nombre }}
-                            </a>
-                        </li>
-                        {% endfor %}
-                    {% endif %}
-
-                    <li class="nav-item nav-category-title px-3 mt-2 text-white-50">Más Opciones</li>
-                    {% if user.is_authenticated %}
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'perfil_cliente' %}active{% endif %}" href="{% url 'perfil_cliente' %}">
-                            <i class="bi bi-person-fill"></i> Mi Perfil ({{ user.username }})
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'historial_pedidos_cliente' %}active{% endif %}" href="{% url 'historial_pedidos_cliente' %}">
-                            <i class="bi bi-clock-history"></i> Historial de Pedidos
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'canjear_puntos' %}active{% endif %}" href="{% url 'canjear_puntos' %}">
-                            <i class="bi bi-gift-fill"></i> Canjear Puntos
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'logout_cliente' %}">
-                            <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
-                        </a>
-                    </li>
-                    {% else %}
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'login' %}active{% endif %}" href="{% url 'login' %}">
-                            <i class="bi bi-box-arrow-in-right"></i> Iniciar Sesión
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'register_cliente' %}active{% endif %}" href="{% url 'register_cliente' %}">
-                            <i class="bi bi-person-plus-fill"></i> Registrarse
-                        </a>
-                    </li>
-                    {% endif %}
-
-                    <li class="nav-item">
-                        <a class="nav-link" href="#"><i class="bi bi-star-fill"></i> Sorteos</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#"><i class="bi bi-info-circle-fill"></i> Contacto</a>
-                    </li>
-                </ul>
-            </nav>
-        </aside>
-
-        <!-- ===== Contenido principal ===== -->
-        <div class="main-content-wrapper">
-            <div class="main-content">
-                {% if messages %}
-                    <div class="messages mt-3">
-                        {% for message in messages %}
-                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                            {{ message }}
-                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                        </div>
-                        {% endfor %}
-                    </div>
-                {% endif %}
-
-                {% block content %}{% endblock %}
-            </div>
+      <!-- ===== Sidebar (desktop) ===== -->
+      <aside class="sidebar-desktop">
+        <div class="sidebar-logo">
+          <a href="{% url 'index' %}">
+            <img src="{% static 'images/logo_yo_heladeria_blanco.png' %}" alt="Yo Heladerías">
+          </a>
         </div>
-    </div>
 
-    <!-- ===== Bottom Nav + Sheet (Móvil) ===== -->
-    {% with url_name=request.resolver_match.url_name %}
-    <nav class="mobile-bottom-nav" aria-label="Navegación inferior">
-      <a class="mbn-item" href="{% url 'index' %}#nuestro-catalogo">
-        <i class="bi bi-collection"></i>
-        <span>Catálogo</span>
-      </a>
+        <nav class="sidebar-nav">
+          <ul class="nav flex-column">
 
-      <a class="mbn-item {% if url_name == 'ver_carrito' %}active{% endif %}" href="{% url 'ver_carrito' %}">
-        <i class="bi bi-cart3"></i>
-        <span>Carrito</span>
-      </a>
+            {% if user.is_authenticated and user.cadeteprofile %}
+              <!-- ===== Menú de CADETE (desktop) ===== -->
+              <li class="nav-item">
+                <a class="nav-link {% if request.resolver_match.url_name == 'panel_cadete' %}active{% endif %}" href="{% url 'panel_cadete' %}">
+                  <i class="bi bi-bicycle"></i> Panel del Cadete
+                </a>
+              </li>
+              <li class="nav-item px-3 mt-2 text-white-50">Disponibilidad</li>
+              <li class="nav-item px-3">
+                <button class="btn btn-sm btn-secondary" id="btn-cadete-dispo-desktop" data-on="0">
+                  <i class="bi bi-power"></i> <span>Activar disponible</span>
+                </button>
+              </li>
+              <li class="nav-item mt-2">
+                <a class="nav-link" href="{% url 'logout_cadete' %}">
+                  <i class="bi bi-box-arrow-right"></i> Cerrar sesión
+                </a>
+              </li>
 
-      {% if user.is_authenticated %}
-        <a class="mbn-item {% if url_name == 'perfil_cliente' %}active{% endif %}" href="{% url 'perfil_cliente' %}">
-          <i class="bi bi-person-circle"></i>
-          <span>Perfil</span>
-        </a>
-      {% else %}
-        <a class="mbn-item {% if url_name == 'login' %}active{% endif %}" href="{% url 'login' %}">
-          <i class="bi bi-box-arrow-in-right"></i>
-          <span>Ingresar</span>
-        </a>
-      {% endif %}
+            {% else %}
+              <!-- ===== Menú de CLIENTE (desktop) ===== -->
+              <li class="nav-item">
+                <a class="nav-link {% if request.resolver_match.url_name == 'index' %}active{% endif %}" href="{% url 'index' %}">
+                  <i class="bi bi-house-door-fill"></i> Inicio
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link {% if request.resolver_match.url_name == 'ver_carrito' %}active{% endif %}" href="{% url 'ver_carrito' %}">
+                  <i class="bi bi-cart-fill"></i> Carrito
+                </a>
+              </li>
 
-      <button type="button" class="mbn-item mbn-more" id="btnMore">
-        <i class="bi bi-three-dots"></i>
-        <span>Más</span>
-      </button>
-    </nav>
-    {% endwith %}
+              {% if categorias %}
+                <li class="nav-item px-3 mt-2 text-white-50">Categorías</li>
+                {% for categoria in categorias %}
+                  <li class="nav-item">
+                    <a class="nav-link" href="{% url 'productos_por_categoria' categoria.id %}">
+                      <i class="bi bi-dot"></i> {{ categoria.nombre }}
+                    </a>
+                  </li>
+                {% endfor %}
+              {% endif %}
 
-    <!-- Overlay + Sheet -->
-    <div id="sheetOverlay" class="sheet-overlay"></div>
-    <div id="moreSheet" class="mobile-sheet" aria-hidden="true">
-      <div class="sheet-handle"></div>
-      <h6 class="sheet-title mb-3">Más opciones</h6>
-      <div class="list-group list-group-flush">
-        <a class="list-group-item list-group-item-action" href="{% url 'index' %}">
-          <i class="bi bi-house-door me-2"></i> Inicio
-        </a>
+              <li class="nav-item px-3 mt-2 text-white-50">Más Opciones</li>
+              {% if user.is_authenticated %}
+                <li class="nav-item"><a class="nav-link {% if request.resolver_match.url_name == 'perfil_cliente' %}active{% endif %}" href="{% url 'perfil_cliente' %}"><i class="bi bi-person-fill"></i> Mi Perfil ({{ user.username }})</a></li>
+                <li class="nav-item"><a class="nav-link {% if request.resolver_match.url_name == 'historial_pedidos_cliente' %}active{% endif %}" href="{% url 'historial_pedidos_cliente' %}"><i class="bi bi-clock-history"></i> Historial</a></li>
+                <li class="nav-item"><a class="nav-link {% if request.resolver_match.url_name == 'canjear_puntos' %}active{% endif %}" href="{% url 'canjear_puntos' %}"><i class="bi bi-gift-fill"></i> Canjear Puntos</a></li>
+                <li class="nav-item"><a class="nav-link" href="{% url 'logout_cliente' %}"><i class="bi bi-box-arrow-right"></i> Cerrar Sesión</a></li>
+              {% else %}
+                <li class="nav-item"><a class="nav-link {% if request.resolver_match.url_name == 'login' %}active{% endif %}" href="{% url 'login' %}"><i class="bi bi-box-arrow-in-right"></i> Iniciar Sesión</a></li>
+                <li class="nav-item"><a class="nav-link {% if request.resolver_match.url_name == 'register_cliente' %}active{% endif %}" href="{% url 'register_cliente' %}"><i class="bi bi-person-plus-fill"></i> Registrarse</a></li>
+              {% endif %}
+            {% endif %}
 
-        {% if user.is_authenticated %}
-          <a class="list-group-item list-group-item-action" href="{% url 'historial_pedidos_cliente' %}">
-            <i class="bi bi-clock-history me-2"></i> Historial de pedidos
-          </a>
-          <a class="list-group-item list-group-item-action" href="{% url 'canjear_puntos' %}">
-            <i class="bi bi-gift me-2"></i> Canjear puntos
-          </a>
-          <a class="list-group-item list-group-item-action" href="{% url 'logout_cliente' %}">
-            <i class="bi bi-box-arrow-right me-2"></i> Cerrar sesión
-          </a>
-        {% else %}
-          <a class="list-group-item list-group-item-action" href="{% url 'register_cliente' %}">
-            <i class="bi bi-person-add me-2"></i> Registrarse
-          </a>
-          <a class="list-group-item list-group-item-action" href="{% url 'login' %}">
-            <i class="bi bi-box-arrow-in-right me-2"></i> Iniciar sesión
-          </a>
-        {% endif %}
+          </ul>
+        </nav>
+      </aside>
 
-        <a class="list-group-item list-group-item-action" href="#">
-          <i class="bi bi-stars me-2"></i> Sorteos
-        </a>
-        <a class="list-group-item list-group-item-action" href="#">
-          <i class="bi bi-info-circle me-2"></i> Contacto
-        </a>
+      <!-- ===== Contenido principal ===== -->
+      <div class="main-content-wrapper">
+        <div class="main-content">
+          {% if messages %}
+            <div class="messages mt-3">
+              {% for message in messages %}
+                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                  {{ message }}
+                  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+
+          {% block content %}{% endblock %}
+        </div>
       </div>
     </div>
 
+    <!-- ===== Bottom Tab Bar (móvil) ===== -->
+    {% with url_name=request.resolver_match.url_name %}
+      {% if user.is_authenticated and user.cadeteprofile %}
+        <!-- Barra para CADETE -->
+        <nav class="mobile-tabbar">
+          <a class="mbn-item {% if url_name == 'panel_cadete' %}active{% endif %}" href="{% url 'panel_cadete' %}">
+            <i class="bi bi-bicycle"></i><span>Panel</span>
+          </a>
+          <a href="#" class="mbn-item" id="btn-cadete-dispo" data-on="0">
+            <i class="bi bi-power"></i><span>Disponible</span>
+          </a>
+          <a class="mbn-item" href="{% url 'logout_cadete' %}">
+            <i class="bi bi-box-arrow-right"></i><span>Salir</span>
+          </a>
+        </nav>
+      {% else %}
+        <!-- Barra para CLIENTE -->
+        <nav class="mobile-tabbar">
+          <a class="mbn-item {% if url_name == 'index' %}active{% endif %}" href="{% url 'index' %}">
+            <i class="bi bi-house-door"></i><span>Inicio</span>
+          </a>
+          <a class="mbn-item" href="/#nuestro-catalogo">
+            <i class="bi bi-list-ul"></i><span>Catálogo</span>
+          </a>
+          <a class="mbn-item {% if url_name == 'ver_carrito' %}active{% endif %}" href="{% url 'ver_carrito' %}">
+            <i class="bi bi-cart3"></i><span>Carrito</span>
+          </a>
+          {% if user.is_authenticated %}
+            <a class="mbn-item {% if url_name == 'perfil_cliente' %}active{% endif %}" href="{% url 'perfil_cliente' %}">
+              <i class="bi bi-person"></i><span>Perfil</span>
+            </a>
+          {% else %}
+            <a class="mbn-item {% if url_name == 'login' %}active{% endif %}" href="{% url 'login' %}">
+              <i class="bi bi-box-arrow-in-right"></i><span>Ingresar</span>
+            </a>
+          {% endif %}
+        </nav>
+      {% endif %}
+    {% endwith %}
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 
+    <!-- ===== JS: toggle disponibilidad cadete (desktop + móvil) ===== -->
     <script>
       (function(){
-        const btn = document.getElementById('btnMore');
-        const sheet = document.getElementById('moreSheet');
-        const overlay = document.getElementById('sheetOverlay');
+        function getCookie(name){
+          const v = `; ${document.cookie}`.split(`; ${name}=`); 
+          if (v.length === 2) return v.pop().split(';').shift();
+        }
+        const csrftoken = getCookie('csrftoken');
 
-        function openSheet(){ sheet.classList.add('open'); overlay.classList.add('show'); sheet.setAttribute('aria-hidden','false'); }
-        function closeSheet(){ sheet.classList.remove('open'); overlay.classList.remove('show'); sheet.setAttribute('aria-hidden','true'); }
+        async function setDisponible(on){
+          const fd = new FormData();
+          fd.append('disponible', on ? '1' : '0');
+          const res = await fetch("{% url 'cadete_toggle_disponible' %}", {
+            method: 'POST',
+            headers: {'X-CSRFToken': csrftoken},
+            body: fd
+          }).catch(()=>null);
+          if(!res) return;
 
-        btn?.addEventListener('click', openSheet);
-        overlay?.addEventListener('click', closeSheet);
-        window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeSheet(); });
+          const j = await res.json().catch(()=>({}));
+          const ok = j && j.ok;
+          const val = !!(j && j.disponible);
+
+          const btnM = document.getElementById('btn-cadete-dispo');
+          const btnD = document.getElementById('btn-cadete-dispo-desktop');
+
+          if (btnM){
+            btnM.dataset.on = val ? '1':'0';
+            btnM.classList.toggle('active', val);
+            btnM.querySelector('span').textContent = val ? 'Disponible' : 'No disp.';
+          }
+          if (btnD){
+            btnD.dataset.on = val ? '1':'0';
+            btnD.classList.toggle('btn-success', val);
+            btnD.classList.toggle('btn-secondary', !val);
+            btnD.querySelector('span').textContent = val ? 'Disponible' : 'Activar disponible';
+          }
+        }
+
+        function bindBtn(el){
+          if(!el) return;
+          el.addEventListener('click', function(ev){
+            ev.preventDefault();
+            const on = (this.dataset.on === '1');
+            setDisponible(!on);
+          });
+        }
+
+        bindBtn(document.getElementById('btn-cadete-dispo'));
+        bindBtn(document.getElementById('btn-cadete-dispo-desktop'));
       })();
     </script>
   </body>

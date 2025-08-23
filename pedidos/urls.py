@@ -1,5 +1,4 @@
 # pedidos/urls.py
-
 from django.urls import path
 from . import views
 
@@ -12,7 +11,6 @@ urlpatterns = [
     # --- Carrito / pedidos del cliente ---
     path('carrito/', views.ver_carrito, name='ver_carrito'),
     path('carrito/eliminar/<str:item_key>/', views.eliminar_del_carrito, name='eliminar_del_carrito'),
-    path('carrito/nota/', views.carrito_set_nota, name='carrito_set_nota'),   # ✅ ahora está bien dentro
     path('pedido_exitoso/', views.pedido_exitoso, name='pedido_exitoso'),
 
     # --- Autenticación y perfil de clientes ---
@@ -29,21 +27,23 @@ urlpatterns = [
     path('panel-alertas/data/', views.panel_alertas_data, name='panel_alertas_data'),
     path('panel-alertas/board/', views.panel_alertas, name='panel_alertas_board'),
     path('panel-alertas/anteriores/', views.panel_alertas_anteriores, name='panel_alertas_anteriores'),
+    path('panel-alertas/estado/<int:pedido_id>/', views.panel_alertas_set_estado, name='panel_alertas_set_estado'),
 
-    # Confirmación de pedido (tienda)
+    # --- Confirmación de pedido (tienda) ---
     path('confirmar-pedido/<int:pedido_id>/', views.confirmar_pedido, name='confirmar_pedido'),
 
-    # --- Panel de cadetes ---
+    # --- Cadetes ---
     path('cadete/login/', views.login_cadete, name='login_cadete'),
     path('cadete/panel/', views.panel_cadete, name='panel_cadete'),
     path('cadete/logout/', views.logout_cadete, name='logout_cadete'),
     path('save-subscription/', views.save_subscription, name='save_subscription'),
     path('cadete/aceptar-pedido/<int:pedido_id>/', views.aceptar_pedido, name='aceptar_pedido'),
 
+    # NUEVO: Acciones rápidas del cadete
+    path('cadete/disponible/', views.cadete_toggle_disponible, name='cadete_toggle_disponible'),
+    path('cadete/estado/<int:pedido_id>/', views.cadete_set_estado, name='cadete_set_estado'),
+
     # --- Mercado Pago ---
     path('pagos/mp/webhook/', views.mp_webhook_view, name='mp_webhook'),
     path('pagos/mp/success/', views.mp_success, name='mp_success'),
-
-    # --- Cambiar estado desde panel ---
-    path('panel-alertas/estado/<int:pedido_id>/', views.panel_alertas_set_estado, name='panel_alertas_set_estado'),
 ]

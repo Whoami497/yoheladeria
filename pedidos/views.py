@@ -843,6 +843,64 @@ def logout_cadete(request):
     logout(request)
     messages.info(request, "Has cerrado sesión como cadete.")
     return redirect('login_cadete')
+from django.views.decorators.http import require_http_methods
+
+@login_required
+@require_POST
+def cadete_toggle_disponible(request):
+    """
+    Marca disponible/no-disponible al cadete.
+    - Si CadeteProfile tiene booleano 'disponible', lo usa.
+    - Si no existe, guarda en sesión como fallback.
+    """
+    if not hasattr(request.user, 'cadeteprofile'):
+        return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
+
+    val = (request.POST.get('disponible') == '1')
+    prof = request.user.cadeteprofile
+    used_model_field = False
+
+    # Intentar usar campo del modelo si existe
+    if hasattr(prof, 'disponible'):
+        try:
+            prof.disponible = val
+            prof.save(update_fields=['disponible'])
+            used_model_field = True
+        except Exception:
+            used_model_field = False
+
+    # Fallback en sesión
+    if not used_model_field:
+        request.session['cadete_disponible'] = val
+        request.session.modified = True
+
+    return JsonResponse({'ok': True, 'disponible': val})
+
+
+@login_required
+@require_POST
+def cadete_set_estado(request, pedido_id):
+    """
+    Permite al cadete avanzar estado de su pedido:
+    EN_CAMINO -> ENTREGADO.
+    """
+    if not hasattr(request.user, 'cadeteprofile'):
+        return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
+
+    pedido = get_object_or_404(Pedido, id=pedido_id)
+
+    # Debe ser el cadete asignado
+    if pedido.cadete_asignado != request.user.cadeteprofile:
+        return JsonResponse({'ok': False, 'error': 'no_autorizado'}, status=403)
+
+    estado = (request.POST.get('estado') or '').upper()
+    if estado not in {'EN_CAMINO', 'ENTREGADO'}:
+        return JsonResponse({'ok': False, 'error': 'estado_invalido'}, status=400)
+
+    pedido.estado = estado
+    pedido.save(update_fields=['estado'])
+
+    return JsonResponse({'ok': True, 'estado': pedido.estado, 'pedido_id': pedido.id})
 
 
 @login_required

@@ -1,161 +1,73 @@
 {% extends 'pedidos/base.html' %}
-{% load static %}
-
-{% block title %}Panel de Cadete - {{ block.super }}{% endblock %}
-
 {% block content %}
-<div class="container mt-5 mb-5">
+<div class="container">
+  <h1 class="mb-3">Panel del Cadete</h1>
 
-    {# Este div oculto contiene el token CSRF para que JavaScript pueda usarlo #}
-    <div id="csrf-token-container" style="display: none;">{% csrf_token %}</div>
-
-    <div class="row">
+  {% if pedidos_en_curso %}
+    <div class="row g-3">
+      {% for p in pedidos_en_curso %}
         <div class="col-12">
-            
-            {% if messages %}
-                {% for message in messages %}
-                    <div class="alert alert-{% if message.tags %}{{ message.tags }}{% else %}info{% endif %} alert-dismissible fade show" role="alert">
-                        {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                    </div>
-                {% endfor %}
-            {% endif %}
-
-            <div class="card shadow-sm mb-4">
-                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-                    <h3 class="mb-0"><i class="bi bi-speedometer2"></i> Panel de Control</h3>
-                    <a href="{% url 'logout_cadete' %}" class="btn btn-outline-light btn-sm">
-                        Cerrar Sesión <i class="bi bi-box-arrow-right"></i>
-                    </a>
+          <div class="card shadow-sm">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-start">
+                <div>
+                  <h5 class="card-title mb-1">Pedido #{{ p.id }}</h5>
+                  <div class="text-muted small mb-2">
+                    {{ p.cliente_nombre }} — {{ p.cliente_direccion }} — {{ p.cliente_telefono }}
+                  </div>
+                  <ul class="mb-2">
+                    {% for d in p.detalles.all %}
+                      <li>
+                        {{ d.cantidad }}× {{ d.producto.nombre }}
+                        {% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %}
+                        {% if d.sabores.all %} — Sabores: {{ d.sabores.all|join:", " }}{% endif %}
+                      </li>
+                    {% endfor %}
+                  </ul>
+                  <span class="badge bg-info text-dark">Estado: <span id="estado-{{ p.id }}">{{ p.estado }}</span></span>
                 </div>
-                <div class="card-body">
-                    <h4>¡Bienvenido, {{ user.first_name|default:user.username }}!</h4>
-                    <p>Este es tu centro de operaciones. Desde aquí podrás ver y gestionar los pedidos asignados.</p>
-                    <hr>
-                    <h5>Tu Estado Actual:</h5>
-                    <ul class="list-group list-group-flush">
-                        <li class="list-group-item"><strong>Usuario:</strong> {{ user.username }}</li>
-                        <li class="list-group-item"><strong>Teléfono:</strong> {{ user.cadeteprofile.telefono }}</li>
-                        <li class="list-group-item"><strong>Vehículo:</strong> {{ user.cadeteprofile.get_vehiculo_display }}</li>
-                        <li class="list-group-item">
-                            <strong>Disponible para entregas:</strong>
-                            {% if user.cadeteprofile.disponible %}
-                                <span class="badge bg-success fs-6">SÍ</span>
-                            {% else %}
-                                <span class="badge bg-danger fs-6">NO</span>
-                            {% endif %}
-                        </li>
-                    </ul>
+                <div class="text-end">
+                  <button class="btn btn-outline-primary btn-sm mb-2 cadete-accion" data-id="{{ p.id }}" data-estado="EN_CAMINO">
+                    Marcar en camino
+                  </button>
+                  <br>
+                  <button class="btn btn-success btn-sm cadete-accion" data-id="{{ p.id }}" data-estado="ENTREGADO">
+                    Marcar entregado
+                  </button>
                 </div>
+              </div>
             </div>
-
-            <div class="card mb-4">
-                <div class="card-header bg-warning">
-                    <h4 class="mb-0"><i class="bi bi-list-check"></i> Mis Pedidos en Curso</h4>
-                </div>
-                <div class="card-body">
-                    {% if pedidos_en_curso %}
-                        {% for pedido in pedidos_en_curso %}
-                            <div class="card mb-3">
-                                <div class="card-header">
-                                    <strong>Pedido Asignado #${{ pedido.id }}</strong> (Estado: {{ pedido.get_estado_display }})
-                                </div>
-                                <div class="card-body">
-                                    <p class="mb-1"><strong>Cliente:</strong> {{ pedido.cliente_nombre }}</p>
-                                    <p class="mb-1"><strong>Dirección:</strong> {{ pedido.cliente_direccion }}</p>
-                                    <p class="mb-1"><strong>Total:</strong> ${{ pedido.total_pedido }}</p>
-                                </div>
-                                <div class="card-footer d-flex justify-content-around">
-                                    <button class="btn btn-info btn-sm">Marcar EN CAMINO</button>
-                                    <button class="btn btn-primary btn-sm">Marcar ENTREGADO</button>
-                                </div>
-                            </div>
-                        {% endfor %}
-                    {% else %}
-                        <p class="text-muted text-center">No tienes pedidos asignados en este momento.</p>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="card">
-                <div class="card-header">
-                    <h4 class="mb-0"><i class="bi bi-box-seam"></i> Pedidos Disponibles</h4>
-                </div>
-                <div id="pedidos-container" class="card-body">
-                    <p class="text-muted text-center fs-5">Conectado. Esperando nuevos pedidos...</p>
-                </div>
-            </div>
-
+          </div>
         </div>
+      {% endfor %}
     </div>
+  {% else %}
+    <div class="alert alert-info">No tenés pedidos en curso por ahora.</div>
+  {% endif %}
 </div>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const pedidosContainer = document.getElementById('pedidos-container');
-    const csrfTokenHtml = document.getElementById('csrf-token-container').innerHTML;
-    
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-    const websocketUrl = wsProtocol + window.location.host + '/ws/cadete/notifications/';
-    
-    console.log("Conectando al WebSocket de cadetes:", websocketUrl);
-    const cadeteSocket = new WebSocket(websocketUrl);
+(function(){
+  function getCookie(name){
+    const v = `; ${document.cookie}`.split(`; ${name}=`); 
+    if (v.length === 2) return v.pop().split(';').shift();
+  }
+  const csrftoken = getCookie('csrftoken');
 
-    cadeteSocket.onopen = function(e) {
-        console.log('Conexión WebSocket de cadete establecida.');
-    };
-
-    cadeteSocket.onmessage = function(e) {
-        console.log('¡Nuevo pedido recibido por WebSocket para cadete!');
-        const eventData = JSON.parse(e.data);
-        const orderData = eventData.order_data;
-
-        const initialMessage = pedidosContainer.querySelector('p');
-        if(initialMessage) {
-            initialMessage.remove();
-        }
-
-        const pedidoCard = document.createElement('div');
-        pedidoCard.className = 'card mb-3 border-primary';
-        pedidoCard.id = `pedido-${orderData.id}`;
-
-        let detailsHtml = '';
-        if (orderData.detalles && orderData.detalles.length > 0) {
-            detailsHtml += `<ul class="list-group list-group-flush">`;
-            orderData.detalles.forEach(detail => {
-                let productName = detail.producto_nombre;
-                if (detail.opcion_nombre) { productName += ` - ${detail.opcion_nombre}`; }
-                let flavors = detail.sabores_nombres.join(', ') || 'Sin sabores';
-                detailsHtml += `<li class="list-group-item">${productName} (x${detail.cantidad}) <br><small class="text-muted">${flavors}</small></li>`;
-            });
-            detailsHtml += `</ul>`;
-        }
-
-        pedidoCard.innerHTML = `
-            <div class="card-header bg-primary text-white">
-                <strong>Nuevo Pedido #${orderData.id}</strong>
-            </div>
-            <div class="card-body">
-                <p class="mb-1"><strong>Cliente:</strong> ${orderData.cliente_nombre}</p>
-                <p class="mb-1"><strong>Dirección:</strong> ${orderData.cliente_direccion}</p>
-                <p class="mb-1"><strong>Total:</strong> $${parseFloat(orderData.total_pedido).toFixed(2)}</p>
-                <hr>
-                ${detailsHtml}
-            </div>
-            <div class="card-footer text-center">
-                <form action="/cadete/aceptar-pedido/${orderData.id}/" method="POST" class="d-grid">
-                    ${csrfTokenHtml}
-                    <button type="submit" class="btn btn-warning fw-bold">Aceptar Pedido</button>
-                </form>
-            </div>
-        `;
-        
-        pedidosContainer.prepend(pedidoCard);
-    };
-
-    cadeteSocket.onclose = function(e) {
-        console.error('WebSocket de cadete cerrado.');
-        pedidosContainer.innerHTML = '<p class="text-danger text-center">Conexión perdida. Recarga la página para ver nuevos pedidos.</p>';
-    };
-});
+  document.querySelectorAll('.cadete-accion').forEach(btn=>{
+    btn.addEventListener('click', async function(){
+      const id = this.dataset.id, estado = this.dataset.estado;
+      const fd = new FormData(); fd.append('estado', estado);
+      const res = await fetch(`/cadete/estado/${id}/`, {method:'POST', headers:{'X-CSRFToken': csrftoken}, body: fd}).catch(()=>null);
+      if(!res) return;
+      const j = await res.json().catch(()=>({}));
+      if(j.ok){
+        document.getElementById(`estado-${id}`).textContent = j.estado;
+      } else {
+        alert('No se pudo actualizar el estado.');
+      }
+    });
+  });
+})();
 </script>
 {% endblock %}
