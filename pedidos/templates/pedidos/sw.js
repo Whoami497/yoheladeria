@@ -13,13 +13,14 @@ self.addEventListener('push', (event) => {
 
   const title = data.title || 'Yo Heladerías';
   const options = {
-    body: data.body || 'Tocá para abrir',
-    // sin icon ni badge
-    data: { url: data.url || '/cadete/panel/' }
-  };
+  body: data.body || 'Tocá para abrir',
+  tag: 'order-alert',        // agrupa notis del mismo tipo
+  renotify: true,            // vuelve a vibrar si llega otra del mismo tag
+  vibrate: [100, 50, 100],
+  requireInteraction: true,  // queda visible hasta que el usuario interactúe
+  data: { url: data.url || '/cadete/panel/' }
+};
 
-  event.waitUntil(self.registration.showNotification(title, options));
-});
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();

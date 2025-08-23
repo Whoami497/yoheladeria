@@ -47,12 +47,12 @@ def _abs_https(request, url_or_path: str) -> str:
 
 def _notify_cadetes_new_order(request, pedido):
     """
-    Envia WebPush a todos los cadetes con subscription_info.
-    Llega aunque tengan Chrome cerrado/bloqueado.
-    Requiere WEBPUSH_SETTINGS con VAPID_PRIVATE_KEY y VAPID_ADMIN_EMAIL.
+    Envía WebPush:
+      - solo a cadetes disponibles (si el modelo tiene booleano 'disponible')
+      - limpia suscripciones inválidas (410/404)
     """
     try:
-        from pywebpush import webpush
+        from pywebpush import webpush, WebPushException
     except Exception as e:
         print(f"WEBPUSH no disponible: {e}")
         return
@@ -71,8 +71,12 @@ def _notify_cadetes_new_order(request, pedido):
         "url": url,
     }
 
-    cadetes = CadeteProfile.objects.exclude(subscription_info__isnull=True)
-    for cp in cadetes:
+    qs = CadeteProfile.objects.exclude(subscription_info__isnull=True)
+    # Si tu modelo tiene 'disponible', filtramos:
+    if hasattr(CadeteProfile, 'disponible'):
+        qs = qs.filter(disponible=True)
+
+    for cp in qs:
         sub = cp.subscription_info or {}
         if not isinstance(sub, dict):
             continue
@@ -83,8 +87,17 @@ def _notify_cadetes_new_order(request, pedido):
                 vapid_private_key=priv,
                 vapid_claims={"sub": f"mailto:{admin}"}
             )
+        except WebPushException as e:
+            # Si la suscripción ya no es válida, la borramos para evitar errores futuros
+            status = getattr(e.response, "status_code", None)
+            if status in (404, 410):
+                CadeteProfile.objects.filter(pk=cp.pk).update(subscription_info=None)
+                print(f"WEBPUSH: suscripción expirada limpiada (cadete {cp.user_id})")
+            else:
+                print(f"WEBPUSH cadete {cp.user_id} error: {e}")
         except Exception as e:
-            print(f"WEBPUSH cadete {cp.user_id} error: {e}")
+            print(f"WEBPUSH cadete {cp.user_id} error genérico: {e}")
+
 
 
 # =========================
