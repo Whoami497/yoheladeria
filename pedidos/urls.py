@@ -50,4 +50,13 @@ path('cadete/estado/<int:pedido_id>/', views.cadete_set_estado, name='cadete_set
     # --- Mercado Pago ---
     path('pagos/mp/webhook/', views.mp_webhook_view, name='mp_webhook'),
     path('pagos/mp/success/', views.mp_success, name='mp_success'),
+    # pedidos/urls.py
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    # ...tus rutas...
+    path('sw.js', views.service_worker, name='service_worker'),  # <-- NUEVO
+]
+
 ]

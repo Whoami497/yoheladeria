@@ -129,3 +129,8 @@ WEBPUSH_SETTINGS = {
 MERCADO_PAGO_ACCESS_TOKEN = os.environ.get('MERCADO_PAGO_ACCESS_TOKEN', '')
 MERCADO_PAGO_PUBLIC_KEY = os.environ.get('MERCADO_PAGO_PUBLIC_KEY', '')
 # --- FIN: MERCADO PAGO ---
+WEBPUSH_SETTINGS = {
+    "VAPID_PUBLIC_KEY": "BDp_wB1ExvnVF_GXHbCY_nCuFeixaDcMOW2-x9PrXcA6bKaWku1bjn4QyMZxORPJUpZNYBznZUQ3lSXxKGjLvUc",  # pega tu publicKey
+    "VAPID_PRIVATE_KEY": "rc3tobb6ie6JWXwLf9YUFvkcb2yn1FV0VKxMq38ri5E",   # pega tu privateKey
+    "VAPID_ADMIN_EMAIL": "mailto:lucasxlo89@gmail.com"          # poné tu correo
+}

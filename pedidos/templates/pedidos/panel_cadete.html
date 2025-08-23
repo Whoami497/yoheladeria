@@ -4,9 +4,12 @@
 <div class="container">
   <div class="d-flex align-items-center justify-content-between mb-3">
     <h1 class="mb-0">Panel del Cadete</h1>
-    <button id="btn-push" class="btn btn-outline-primary btn-sm">
-      <i class="bi bi-bell"></i> Activar notificaciones
-    </button>
+    <div class="d-flex align-items-center gap-2">
+      <span id="push-status" class="badge text-bg-secondary">Notificaciones: sin activar</span>
+      <button id="btn-push" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-bell"></i> Activar notificaciones
+      </button>
+    </div>
   </div>
 
   <div class="row g-3">
@@ -66,6 +69,20 @@
   }
   const csrftoken = getCookie('csrftoken');
 
+  // ===== UI helpers
+  const $status = document.getElementById('push-status');
+  const $btnPush = document.getElementById('btn-push');
+
+  function setPushStatus(text, type){
+    // type: 'ok' | 'warn' | 'err' | 'off'
+    $status.textContent = `Notificaciones: ${text}`;
+    $status.className = 'badge';
+    if(type === 'ok') $status.classList.add('text-bg-success');
+    else if(type === 'warn') $status.classList.add('text-bg-warning');
+    else if(type === 'err') $status.classList.add('text-bg-danger');
+    else $status.classList.add('text-bg-secondary');
+  }
+
   // ===== Polling de feed
   async function loadFeed(){
     const box = document.getElementById('feed');
@@ -99,8 +116,10 @@
           const fd = new FormData();
           fd.append('dummy','1'); // body no vacío
           const res = await fetch(`/cadete/aceptar-pedido/${id}/`, {
-            method:'POST', headers:{'X-CSRFToken': csrftoken}
-            ,body: fd
+            method:'POST',
+            headers:{'X-CSRFToken': csrftoken},
+            body: fd,
+            credentials: 'same-origin'
           }).catch(()=>null);
           if(!res){ alert('Sin conexión'); return; }
           if(res.redirected){ location.href = res.url; return; }
@@ -121,7 +140,12 @@
     btn.addEventListener('click', async function(){
       const id = this.dataset.id, estado = this.dataset.estado;
       const fd = new FormData(); fd.append('estado', estado);
-      const res = await fetch(`/cadete/estado/${id}/`, {method:'POST', headers:{'X-CSRFToken': csrftoken}, body: fd}).catch(()=>null);
+      const res = await fetch(`/cadete/estado/${id}/`, {
+        method:'POST',
+        headers:{'X-CSRFToken': csrftoken},
+        body: fd,
+        credentials: 'same-origin'
+      }).catch(()=>null);
       if(!res) return alert('Error de red');
       const j = await res.json().catch(()=>({}));
       if(j.ok){
@@ -132,7 +156,7 @@
     });
   });
 
-  // ===== Activar Push
+  // ===== Push: helpers
   function urlBase64ToUint8Array(b64){
     const pad = '='.repeat((4 - b64.length % 4) % 4);
     const base64 = (b64 + pad).replace(/-/g,'+').replace(/_/g,'/');
@@ -142,28 +166,91 @@
     return arr;
   }
 
-  document.getElementById('btn-push').addEventListener('click', async ()=>{
+  const VAPID = "{{ vapid_public_key|default:'' }}";
+
+  // Estado inicial del botón/permiso
+  (async function initPushUI(){
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)){
+      $btnPush.disabled = true;
+      setPushStatus('no soportadas en este dispositivo', 'err');
+      return;
+    }
+    if (!VAPID){
+      $btnPush.disabled = true;
+      setPushStatus('FALTA VAPID_PUBLIC_KEY (configurar en servidor)', 'warn');
+      return;
+    }
+    // Si ya hay permiso, intentamos detectar subscripción existente
+    if (Notification.permission === 'granted'){
+      try{
+        const reg = await navigator.serviceWorker.register("{% static 'js/cadete-sw.js' %}");
+        const sub = await reg.pushManager.getSubscription();
+        if (sub){
+          // Re-asegurar que está guardada en el backend
+          await fetch("{% url 'save_subscription' %}", {
+            method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken': csrftoken},
+            body: JSON.stringify(sub)
+          }).catch(()=>{});
+          setPushStatus('activadas', 'ok');
+        }else{
+          setPushStatus('sin activar', 'off');
+        }
+      }catch(e){
+        setPushStatus('error inicializando', 'err');
+        console.error(e);
+      }
+    }else if (Notification.permission === 'denied'){
+      $btnPush.disabled = true;
+      setPushStatus('bloqueadas por el navegador', 'err');
+    }else{
+      setPushStatus('sin activar', 'off');
+    }
+  })();
+
+  // Click en "Activar notificaciones"
+  $btnPush.addEventListener('click', async ()=>{
     try{
       if (!('serviceWorker' in navigator) || !('PushManager' in window)){
         alert('Notificaciones no soportadas en este dispositivo.');
         return;
       }
+      if (!VAPID){
+        alert('Falta configurar VAPID_PUBLIC_KEY en el servidor.');
+        return;
+      }
+
       const reg = await navigator.serviceWorker.register("{% static 'js/cadete-sw.js' %}");
       const perm = await Notification.requestPermission();
-      if (perm !== 'granted'){ alert('Permiso denegado.'); return; }
+      if (perm !== 'granted'){
+        setPushStatus('permiso denegado', 'err');
+        alert('Permiso denegado.');
+        return;
+      }
 
-      const vapid = "{{ vapid_public_key|default:'' }}";
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapid)
-      });
+      // Si ya existía, la reutilizamos
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub){
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID)
+        });
+      }
+
       const res = await fetch("{% url 'save_subscription' %}", {
-        method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken': csrftoken},
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-CSRFToken': csrftoken},
         body: JSON.stringify(sub)
       });
-      if(res.ok){ alert('Notificaciones activadas ✅'); }
-      else{ alert('No se pudo guardar la suscripción'); }
+
+      if(res.ok){
+        setPushStatus('activadas', 'ok');
+        alert('Notificaciones activadas ✅');
+      }else{
+        setPushStatus('no guardadas', 'err');
+        alert('No se pudo guardar la suscripción');
+      }
     }catch(e){
+      setPushStatus('error', 'err');
       alert('Error activando notificaciones');
       console.log(e);
     }

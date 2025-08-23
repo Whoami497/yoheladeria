@@ -1217,3 +1217,16 @@ def canjear_puntos(request):
 
     contexto = {'cliente_profile': cliente_profile, 'productos_canje': productos_canje}
     return render(request, 'pedidos/canjear_puntos.html', contexto)
+# pedidos/views.py
+
+from django.views.decorators.http import require_GET
+
+@require_GET
+def service_worker(request):
+    """
+    Sirve el service worker con scope raíz (/) para permitir notificaciones
+    desde cualquier URL del sitio.
+    """
+    resp = render(request, 'pedidos/sw.js', {})
+    resp["Content-Type"] = "application/javascript"
+    return resp
