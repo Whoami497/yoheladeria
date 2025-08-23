@@ -3,13 +3,10 @@
 
 {% block content %}
 <div class="container my-4">
-
   <h1 class="display-6 mb-3">Tu Carrito</h1>
 
-  <!-- Layout: izquierda items / derecha resumen+form en desktop -->
   <div class="row g-4">
-
-    <!-- ===================== ÍTEMS (mobile-first) ===================== -->
+    <!-- Ítems -->
     <div class="col-lg-8">
       <div id="cart-list">
         {% for item in carrito_items %}
@@ -38,22 +35,7 @@
                     Sabores:
                     {% if item.sabores_nombres %}
                       {{ item.sabores_nombres|join:", " }}
-                    {% else %}
-                      N/A
-                    {% endif %}
-                  </div>
-
-                  <!-- ===== Nota por ítem (se guarda sola) ===== -->
-                  <div class="mt-2">
-                    <label class="form-label small mb-1">Nota para este ítem (opcional)</label>
-                    <textarea
-                      class="form-control form-control-sm js-note"
-                      rows="2"
-                      maxlength="280"
-                      placeholder="Ej: un poco más de Crema del Cielo / poca crema / sin maní etc."
-                      data-key="{{ item.key }}"
-                    >{{ item.nota|default:'' }}</textarea>
-                    <small class="note-status text-muted d-block mt-1">&nbsp;</small>
+                    {% else %}N/A{% endif %}
                   </div>
 
                   <div class="mt-2 d-flex justify-content-end">
@@ -71,9 +53,8 @@
       </div>
     </div>
 
-    <!-- ===================== SIDEBAR: RESUMEN + FORM ===================== -->
+    <!-- Sidebar: resumen + formulario -->
     <div class="col-lg-4">
-
       <!-- Resumen -->
       <div class="card summary shadow-sm mb-3">
         <div class="card-body p-3">
@@ -119,7 +100,7 @@
           <form method="post">
             {% csrf_token %}
 
-            <!-- Estos campos se completan con la selección de envío (sólo informativos para cocina) -->
+            <!-- guardamos lo elegido en el selector de envío solo para referencia -->
             <input type="hidden" name="envio_visual_opcion" id="envio-visual-opcion" value="Retiro en local — $0">
             <input type="hidden" name="envio_visual_costo" id="envio-visual-costo" value="0">
 
@@ -137,6 +118,14 @@
             <div class="mb-3">
               <label class="form-label">Teléfono:</label>
               <input type="text" class="form-control" name="cliente_telefono" placeholder="Ej: 3834 123456">
+            </div>
+
+            <!-- NUEVO: una sola aclaración general -->
+            <div class="mb-3">
+              <label class="form-label">Aclaraciones para tu pedido (opcional)</label>
+              <textarea class="form-control" name="nota_pedido" rows="3"
+                        placeholder="Ej: tocar timbre; más crema del cielo en el 1/2 kg; sin maní; etc."></textarea>
+              <div class="form-text">Se envía a cocina junto con tu pedido.</div>
             </div>
 
             <h5 class="mt-3 mb-2">Método de Pago</h5>
@@ -158,15 +147,13 @@
           </div>
         </div>
       </div>
-
     </div>
   </div>
 </div>
 
-<!-- ===================== JS: cálculo visual envío/total + notas ===================== -->
+<!-- JS: cálculo visual envío/total -->
 <script>
 (function(){
-  // ---- totales/ envío visual
   const fmt = (n) => '$' + Number(n).toFixed(2);
   const subtotal = parseFloat('{{ total|floatformat:2 }}') || 0;
 
@@ -174,7 +161,6 @@
   const envioEl  = document.getElementById('envio-amount');
   const totalEl  = document.getElementById('total-final');
   const subEl    = document.getElementById('subtotal-amount');
-
   const envioLabelHidden = document.getElementById('envio-visual-opcion');
   const envioCostHidden  = document.getElementById('envio-visual-costo');
 
@@ -183,85 +169,25 @@
     envioEl.textContent  = fmt(envio);
     totalEl.textContent  = fmt(subtotal + envio);
     subEl.textContent    = fmt(subtotal);
-
-    const label = envioSel.options[envioSel.selectedIndex].text;
-    envioLabelHidden.value = label;
+    envioLabelHidden.value = envioSel.options[envioSel.selectedIndex].text;
     envioCostHidden.value  = String(envio);
   }
-  if (envioSel) {
-    envioSel.addEventListener('change', recalc);
-    recalc();
-  }
-
-  // ---- Notas por ítem (AJAX con debounce)
-  function getCookie(name){
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-    if (parts.length === 2) return parts.pop().split(';').shift();
-  }
-  const csrftoken = getCookie('csrftoken');
-  const endpoint = "{% url 'carrito_set_nota' %}";
-
-  function debounce(fn, wait){
-    let t;
-    return function(...args){
-      clearTimeout(t);
-      t = setTimeout(()=>fn.apply(this,args), wait);
-    };
-  }
-
-  async function saveNote(el){
-    const key = el.dataset.key;
-    const nota = el.value.trim();
-    const status = el.parentElement.querySelector('.note-status');
-    try{
-      status.textContent = 'Guardando…';
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'X-CSRFToken': csrftoken,
-          'X-Requested-With': 'XMLHttpRequest',
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: `key=${encodeURIComponent(key)}&nota=${encodeURIComponent(nota)}`
-      });
-      const data = await res.json();
-      if(data.ok){
-        status.textContent = 'Guardado ✓';
-        setTimeout(()=>{ if(status.textContent==='Guardado ✓') status.textContent = ''; }, 1200);
-      }else{
-        status.textContent = 'Error al guardar';
-      }
-    }catch(e){
-      status.textContent = 'Error de red';
-    }
-  }
-
-  const debounced = debounce(saveNote, 600);
-  document.querySelectorAll('.js-note').forEach((ta)=>{
-    ta.addEventListener('input', ()=>debounced(ta));
-    ta.addEventListener('change', ()=>saveNote(ta)); // por si sale rápido del campo
-  });
+  envioSel.addEventListener('change', recalc);
+  recalc();
 })();
 </script>
 
 <style>
-  /* —— Mini estilos mobile-first —— */
   .cart-item .thumb-wrap{ width:84px; flex:0 0 84px; }
   .cart-item .thumb{
-    width:84px; height:84px; object-fit:cover; border-radius:12px;
-    background:#f2f2f2;
+    width:84px; height:84px; object-fit:cover; border-radius:12px; background:#f2f2f2;
   }
   .thumb-placeholder{
     display:flex; align-items:center; justify-content:center; color:#999;
     background:#f3f6fa; border:1px dashed #c9d4e5; border-radius:12px;
     width:84px; height:84px; font-size:.8rem;
   }
-  .js-note{ resize:vertical; min-height:52px; }
-  .note-status{ font-size:.8rem; }
   .summary{ position:sticky; top:.75rem; }
-  @media (min-width: 992px){
-    .summary{ position:sticky; top:1rem; }
-  }
+  @media (min-width: 992px){ .summary{ position:sticky; top:1rem; } }
 </style>
 {% endblock %}

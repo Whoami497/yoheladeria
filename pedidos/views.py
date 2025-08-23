@@ -305,7 +305,6 @@ def ver_carrito(request):
                 'opcion_nombre': item.get('opcion_nombre'),
                 'imagen_mostrada': item.get('imagen_mostrada'),
                 'subtotal': item_subtotal,
-                'nota': item.get('nota'),  # <-- NUEVO: mostrar en carrito
             })
         except Exception as e:
             print(f"Error procesando ítem en carrito: {e} - Item: {item}")
@@ -314,9 +313,14 @@ def ver_carrito(request):
 
     if request.method == 'POST':
         nombre = request.POST.get('cliente_nombre')
-        direccion = request.POST.get('cliente_direccion')
+        direccion = (request.POST.get('cliente_direccion') or '').strip()
         telefono = request.POST.get('cliente_telefono')
         metodo_pago = request.POST.get('metodo_pago')
+        nota_pedido = (request.POST.get('nota_pedido') or '').strip()
+
+        # Si hay nota general, la anexamos a la dirección para que quede guardada en DB
+        if nota_pedido:
+            direccion = (f"{direccion} — Nota: {nota_pedido}" if direccion else f"Nota: {nota_pedido}")
 
         pedido_kwargs = {
             'cliente_nombre': nombre,
@@ -367,7 +371,6 @@ def ver_carrito(request):
                     'opcion_nombre': opcion_obj_pedido.nombre_opcion if opcion_obj_pedido else None,
                     'cantidad': item_data['cantidad'],
                     'sabores_nombres': [s.nombre for s in sabores_seleccionados],
-                    'nota': item_data.get('nota'),  # <-- NUEVO: enviar a cocina/panel
                 })
 
             except (Producto.DoesNotExist, OpcionProducto.DoesNotExist) as e:
@@ -405,6 +408,7 @@ def ver_carrito(request):
             request.user.clienteprofile.save()
             messages.success(request, f"¡Has ganado {puntos_ganados} puntos de fidelidad con este pedido!")
 
+        # Aviso a panel (incluimos la nota general en el payload)
         try:
             channel_layer = get_channel_layer()
             async_to_sync(channel_layer.group_send)(
@@ -419,7 +423,8 @@ def ver_carrito(request):
                         'cliente_telefono': nuevo_pedido.cliente_telefono,
                         'metodo_pago': nuevo_pedido.metodo_pago,
                         'total_pedido': str(nuevo_pedido.total_pedido),
-                        'detalles': detalles_para_notificacion,  # incluye 'nota'
+                        'nota_pedido': (nota_pedido or None),
+                        'detalles': detalles_para_notificacion,
                     }
                 }
             )
@@ -428,6 +433,7 @@ def ver_carrito(request):
             print(f"ERROR al enviar notificación de pedido a Channels: {e}")
             messages.error(request, f"ERROR INTERNO: No se pudo enviar la alerta en tiempo real. Contacta a soporte. Error: {e}")
 
+        # limpiar carrito
         del request.session['carrito']
         request.session.modified = True
 
@@ -436,6 +442,7 @@ def ver_carrito(request):
 
     contexto = {'carrito_items': items_carrito_procesados, 'total': total}
     return render(request, 'pedidos/carrito.html', contexto)
+
 
 
 
