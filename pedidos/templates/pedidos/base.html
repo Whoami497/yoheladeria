@@ -8,43 +8,35 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 
     <style>
-        /* Estilos generales del cuerpo */
+        /* ====== Paleta / base ====== */
         body { 
             padding-top: 0; 
-            background-color: #1a1a1a; /* FONDO MUY OSCURO (casi negro) */
-            color: #e0e0e0; /* Color de texto base claro */
+            background-color: #1a1a1a;
+            color: #e0e0e0;
             font-family: 'Arial', sans-serif; 
         }
-
-        /* Variables CSS para la Paleta de Colores AZUL y BLANCO de Yo Heladerías */
         :root {
-            --color-principal-oscuro: #1a1a1a; /* Fondo principal de la página */
-            --color-secundario-oscuro: #2a2a2a; /* Fondo para elementos flotantes en oscuro */
+            --color-principal-oscuro: #1a1a1a;
+            --color-secundario-oscuro: #2a2a2a;
 
-            --color-yo-azul: #073653;       /* AZUL OSCURO ESPECÍFICO */
-            --color-yo-azul-claro: #007bff; /* Azul vibrante (para botones primarios) */
-            --color-yo-azul-oscuro-hover: #052a42; /* Hover para azul oscuro */
-            --color-yo-blanco: #ffffff;    /* Blanco puro */
-            --color-yo-fondo-claro: #f8f9fa; /* Fondo claro para tarjetas */
-            --color-yo-texto-oscuro: #343a40; /* Gris muy oscuro casi negro para textos en fondos claros */
-            --color-yo-gris-texto: #6c757d; /* Gris para textos secundarios en fondos claros */
-            --color-yo-gris-borde: #dee2e6; /* Gris muy claro para bordes */
-
-            --color-borde-resaltado: var(--color-yo-azul-claro); /* Borde para resaltar secciones */
+            --color-yo-azul: #073653;
+            --color-yo-azul-claro: #007bff;
+            --color-yo-azul-oscuro-hover: #052a42;
+            --color-yo-blanco: #ffffff;
+            --color-yo-fondo-claro: #f8f9fa;
+            --color-yo-texto-oscuro: #343a40;
+            --color-yo-gris-texto: #6c757d;
+            --color-yo-gris-borde: #dee2e6;
 
             --color-sombra-suave: rgba(0,0,0,0.2);
             --color-sombra-media: rgba(0,0,0,0.3);
             --color-sombra-fuerte: rgba(0,0,0,0.4);
         }
 
-        /* LAYOUT PRINCIPAL */
-        .page-wrapper {
-            display: flex; 
-            min-height: 100vh; 
-            background-color: var(--color-principal-oscuro);
-        }
+        /* ====== Layout principal ====== */
+        .page-wrapper { display:flex; min-height:100vh; background-color:var(--color-principal-oscuro); }
 
-        /* BARRA LATERAL IZQUIERDA (Desktop) */
+        /* ====== Sidebar desktop ====== */
         .sidebar-desktop {
             width: 250px; 
             background-color: var(--color-secundario-oscuro); 
@@ -55,36 +47,19 @@
             overflow-y: auto; 
             border-right: 1px solid rgba(255,255,255,0.05); 
         }
-        .sidebar-desktop .sidebar-logo {
-            text-align: center;
-            padding: 0 15px 20px;
-        }
-        .sidebar-desktop .sidebar-logo img {
-            max-width: 100%; 
-            height: auto; 
-            max-height: 100px; /* Ajuste para que el logo sea más grande */
-            display: block; 
-            margin: 0 auto; 
-            object-fit: contain; 
-        }
-        .sidebar-desktop .sidebar-nav .nav-item {
-            margin-bottom: 5px;
-        }
+        .sidebar-desktop .sidebar-logo { text-align:center; padding:0 15px 20px; }
+        .sidebar-desktop .sidebar-logo img { max-width:100%; height:auto; max-height:100px; display:block; margin:0 auto; object-fit:contain; }
+        .sidebar-desktop .sidebar-nav .nav-item { margin-bottom:5px; }
         .sidebar-desktop .sidebar-nav .nav-link {
             color: var(--color-yo-blanco);
             padding: 15px 20px;
             font-size: 1.1rem;
             font-weight: 500;
-            transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
-            display: flex; 
-            align-items: center;
-            border-radius: 8px;
-            margin: 0 10px; 
+            transition: background-color .2s, color .2s;
+            display:flex; align-items:center;
+            border-radius: 8px; margin:0 10px;
         }
-        .sidebar-desktop .sidebar-nav .nav-link i {
-            margin-right: 10px;
-            font-size: 1.3rem;
-        }
+        .sidebar-desktop .sidebar-nav .nav-link i { margin-right:10px; font-size:1.3rem; }
         .sidebar-desktop .sidebar-nav .nav-link:hover,
         .sidebar-desktop .sidebar-nav .nav-link.active { 
             background-color: var(--color-yo-azul-claro); 
@@ -92,311 +67,118 @@
             box-shadow: 0 2px 5px var(--color-sombra-suave);
         }
 
-        /* NAVEGACIÓN SUPERIOR PARA MÓVILES */
-        .navbar-mobile {
-            display: none; /* Oculto por defecto en desktop */
-            background-color: var(--color-yo-azul) !important; 
-            box-shadow: 0 2px 8px var(--color-sombra-media);
-            border-bottom: 4px solid var(--color-yo-blanco);
-            padding: 0.7rem 1rem;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            z-index: 1030; 
-        }
-        .navbar-mobile .navbar-brand img {
-            max-height: 45px; /* Logo más pequeño en la navbar móvil */
-            width: auto;
-        }
-        .navbar-mobile .nav-link {
-            color: var(--color-yo-blanco) !important;
-            font-weight: 600;
-        }
+        /* ====== (ELIMINADA) Navbar móvil superior ======
+           Mantenemos la clase por compatibilidad pero oculta siempre */
+        .navbar-mobile { display:none !important; }
 
-
-        /* CONTENIDO PRINCIPAL */
-        .main-content-wrapper { 
-            flex-grow: 1; 
-            background-color: var(--color-principal-oscuro); 
-            /* Padding base que se ajustará por media queries */
-            padding: 20px; 
-        }
+        /* ====== Contenido principal ====== */
+        .main-content-wrapper { flex-grow:1; background-color:var(--color-principal-oscuro); padding:20px; }
         .main-content {
-            background-color: var(--color-yo-blanco); 
+            background-color: var(--color-yo-blanco);
             border-radius: 15px; 
             padding: 30px;
             box-shadow: 0 5px 20px var(--color-sombra-media);
-            min-height: calc(100vh - 40px); /* Altura mínima para desktop */
-            color: var(--color-yo-texto-oscuro); 
+            min-height: calc(100vh - 40px);
+            color: var(--color-yo-texto-oscuro);
         }
 
-        /* Mensajes de Django (Alertas) */
-        .messages { margin-top: 0; margin-bottom: 20px; }
-        .alert { border-radius: 10px; font-weight: 500; padding: 1.2rem 1.5rem; }
-        .alert-success { background-color: #d1ecf1; border-color: #bee5eb; color: var(--color-yo-azul); } 
-        .alert-info { background-color: #e0f7fa; border-color: #b2ebf2; color: var(--color-yo-azul); } 
-        .alert-warning { background-color: #ffecb3; border-color: #ffe082; color: #cc9900; } 
-        .alert-danger { background-color: #ffcdd2; border-color: #ef9a9a; color: #d32f2f; } 
+        /* Mensajes */
+        .messages { margin: 0 0 20px 0; }
+        .alert { border-radius:10px; font-weight:500; padding:1.2rem 1.5rem; }
+        .alert-success { background:#d1ecf1; border-color:#bee5eb; color:var(--color-yo-azul); } 
+        .alert-info    { background:#e0f7fa; border-color:#b2ebf2; color:var(--color-yo-azul); } 
+        .alert-warning { background:#ffecb3; border-color:#ffe082; color:#cc9900; } 
+        .alert-danger  { background:#ffcdd2; border-color:#ef9a9a; color:#d32f2f; } 
 
-        /* Títulos de sección (dentro del main-content) */
-        .section-title { 
-            color: var(--color-yo-azul); 
-            font-size: 2.5rem; 
-            font-weight: bold;
-            margin-top: 2rem; 
-            margin-bottom: 2rem; 
-            text-align: center;
-            line-height: 1.2;
+        .section-title { color:var(--color-yo-azul); font-size:2.5rem; font-weight:700; margin:2rem 0; text-align:center; line-height:1.2; }
+
+        .btn-primary{ background:var(--color-yo-azul-claro); border-color:var(--color-yo-azul-claro); font-weight:700; color:#fff; }
+        .btn-primary:hover{ background:var(--color-yo-azul); border-color:var(--color-yo-azul); transform:translateY(-2px); box-shadow:0 4px 8px var(--color-sombra-suave); }
+        .btn-success{ background:var(--color-yo-azul); border-color:var(--color-yo-azul); font-weight:700; color:#fff; }
+        .btn-success:hover{ background:var(--color-yo-azul-oscuro-hover); border-color:var(--color-yo-azul-oscuro-hover); transform:translateY(-2px); box-shadow:0 4px 8px var(--color-sombra-suave); }
+        .btn-secondary{ background:#fff; border-color:#fff; color:var(--color-yo-azul); font-weight:700; }
+        .btn-secondary:hover{ background:var(--color-yo-gris-borde); border-color:var(--color-yo-gris-borde); color:var(--color-yo-azul-oscuro-hover); transform:translateY(-2px); box-shadow:0 4px 8px var(--color-sombra-suave); }
+
+        .card{ border:1px solid var(--color-yo-gris-borde); border-radius:15px; box-shadow:0 6px 12px var(--color-sombra-suave); transition:transform .3s, box-shadow .3s; background:#fff; overflow:hidden; }
+        .card:hover{ transform:translateY(-8px); box-shadow:0 12px 24px var(--color-sombra-media); }
+        .card-title{ color:var(--color-yo-azul); font-weight:700; font-size:1.35rem; }
+        .card-text.text-muted{ color:var(--color-yo-gris-texto) !important; font-size:.95rem; }
+        .card-img-top{ border-radius:15px 15px 0 0; }
+
+        .display-4 { color:var(--color-yo-azul); font-weight:bold; }
+        .lead .fw-bold { color:var(--color-yo-azul); }
+        h3 { color:var(--color-yo-azul); }
+
+        table.table th{ color:#fff; background:var(--color-yo-azul); }
+        table.table tfoot th, table.table tfoot td { font-size:1.6rem; color:var(--color-yo-azul); font-weight:700; }
+
+        .placeholder-image{
+            border:2px dashed var(--color-yo-gris-borde) !important;
+            color: var(--color-yo-gris-texto);
+            background: var(--color-yo-fondo-claro);
+            min-height:200px; font-weight:700; display:flex; align-items:center; justify-content:center; text-align:center; border-radius:15px 15px 0 0;
         }
 
-        /* Botones, tarjetas, etc. usarán las mismas variables de color que ya definimos */
-        .btn-primary { background-color: var(--color-yo-azul-claro); border-color: var(--color-yo-azul-claro); font-weight: bold; color: var(--color-yo-blanco); transition: all 0.2s ease-in-out; }
-        .btn-primary:hover { background-color: var(--color-yo-azul); border-color: var(--color-yo-azul); transform: translateY(-2px); box-shadow: 0 4px 8px var(--color-sombra-suave); }
-        .btn-success { background-color: var(--color-yo-azul); border-color: var(--color-yo-azul); font-weight: bold; color: var(--color-yo-blanco); transition: all 0.2s ease-in-out; }
-        .btn-success:hover { background-color: var(--color-yo-azul-oscuro-hover); border-color: var(--color-yo-azul-oscuro-hover); transform: translateY(-2px); box-shadow: 0 4px 8px var(--color-sombra-suave); }
-        .btn-secondary { background-color: var(--color-yo-blanco); border-color: var(--color-yo-blanco); color: var(--color-yo-azul); font-weight: bold; transition: all 0.2s ease-in-out; }
-        .btn-secondary:hover { background-color: var(--color-yo-gris-borde); border-color: var(--color-yo-gris-borde); color: var(--color-yo-azul-oscuro-hover); transform: translateY(-2px); box-shadow: 0 4px 8px var(--color-sombra-suave); }
-        .btn-outline-danger { color: var(--color-yo-gris-texto); border-color: var(--color-yo-gris-texto); transition: all 0.2s ease-in-out; }
-        .btn-outline-danger:hover { background-color: #dc3545; color: var(--color-yo-blanco); border-color: #dc3545; box-shadow: 0 4px 8px var(--color-sombra-suave); }
-
-        .card { border: 1px solid var(--color-yo-gris-borde); border-radius: 15px; box-shadow: 0 6px 12px var(--color-sombra-suave); transition: transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out; background-color: var(--color-yo-blanco); overflow: hidden; }
-        .card:hover { transform: translateY(-8px); box-shadow: 0 12px 24px var(--color-sombra-media); }
-        .card-title { color: var(--color-yo-azul); font-weight: bold; font-size: 1.35rem; }
-        .card-text.text-muted { color: var(--color-yo-gris-texto) !important; font-size: 0.95rem; }
-        .card-img-top { border-radius: 15px 15px 0 0; }
-
-        .display-4 { color: var(--color-yo-azul); font-weight: bold; }
-        .lead .fw-bold { color: var(--color-yo-azul); }
-        h3 { color: var(--color-yo-azul); }
-
-        table.table th { color: var(--color-yo-blanco); background-color: var(--color-yo-azul); }
-        table.table tfoot th, table.table tfoot td { font-size: 1.6rem; color: var(--color-yo-azul); font-weight: bold; }
-        table.table tfoot strong { color: var(--color-yo-azul); }
-        .alert-info .alert-link { color: var(--color-yo-azul); font-weight: bold; }
-        .alert-info .alert-link:hover { color: var(--color-yo-azul-oscuro-hover); }
-
-        .placeholder-image {
-            border: 2px dashed var(--color-yo-gris-borde) !important;
-            color: var(--color-yo-gris-texto); 
-            background-color: var(--color-yo-fondo-claro);
-            min-height: 200px; 
-            font-weight: bold;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            border-radius: 15px 15px 0 0; 
-        }
-        .placeholder-image span {
-            font-size: 0.9rem;
-        }
-
-        /* SECCIÓN HERO (PRINCIPAL) */
+        /* ====== HERO ====== */
         .hero-section-new {
-            background-color: var(--color-yo-azul); 
-            color: var(--color-yo-blanco);
-            padding: 3rem 1.5rem; 
-            border-radius: 20px; 
-            box-shadow: 0 10px 25px var(--color-sombra-fuerte); 
-            text-align: center;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
+            background-color: var(--color-yo-azul);
+            color:#fff; padding:3rem 1.5rem; border-radius:20px; box-shadow:0 10px 25px var(--color-sombra-fuerte);
+            text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center;
         }
-        .hero-section-new h1 {
-            font-size: 3rem; 
-            font-weight: 900;
-            margin-bottom: 0.8rem;
-            line-height: 1.2;
-            text-shadow: 2px 2px 6px rgba(0,0,0,0.4);
-        }
-        .hero-section-new p {
-            font-size: 1.3rem;
-            margin-bottom: 1.5rem;
-            max-width: 600px;
-            text-shadow: 1px 1px 3px rgba(0,0,0,0.3);
-        }
-        .hero-section-new .btn {
-            font-size: 1.1rem;
-            padding: 0.6rem 1.5rem;
-        }
-        .hero-section-new .hero-image-container-new {
-            margin-top: 2rem;
-            width: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        .hero-section-new .hero-image-container-new img {
-            max-width: 300px; 
-            height: auto;
-            object-fit: contain;
-            border-radius: 10px; 
-            box-shadow: 0 5px 10px var(--color-sombra-suave);
-        }
+        .hero-section-new h1 { font-size:3rem; font-weight:900; margin-bottom:.8rem; line-height:1.2; text-shadow:2px 2px 6px rgba(0,0,0,.4); }
+        .hero-section-new p { font-size:1.3rem; margin-bottom:1.5rem; max-width:600px; text-shadow:1px 1px 3px rgba(0,0,0,.3); }
+        .hero-section-new .hero-image-container-new{ margin-top:2rem; width:100%; display:flex; justify-content:center; }
+        .hero-section-new .hero-image-container-new img{ max-width:300px; height:auto; object-fit:contain; border-radius:10px; box-shadow:0 5px 10px var(--color-sombra-suave); }
 
-
-        /* Media Queries para Responsive Design */
-        @media (min-width: 992px) { /* Estilos de Desktop (se aplican a partir de 992px) */
-            body {
-                padding-top: 0; 
-            }
-            .page-wrapper {
-                flex-direction: row; 
-            }
-            .sidebar-desktop {
-                display: block; 
-            }
-            .navbar-mobile {
-                display: none; 
-            }
-            .main-content-wrapper {
-                margin-left: 250px; 
-                padding: 20px;
-            }
-            .main-content {
-                min-height: calc(100vh - 40px); 
-            }
+        /* ====== MOBILE: bottom tabbar ====== */
+        .mobile-tabbar{
+            position:fixed; left:0; right:0; bottom:0;
+            display:none; gap:.25rem;
+            background: rgba(255,255,255,.8);
+            backdrop-filter: blur(10px);
+            border-top: 1px solid rgba(7,54,83,.12);
+            box-shadow: 0 -6px 20px rgba(0,0,0,.15);
+            z-index:1030;
+            padding:.2rem .4rem;
         }
+        .mobile-tabbar a.tab-item{
+            flex:1; text-align:center; text-decoration:none;
+            color: var(--color-yo-azul);
+            font-weight:600; font-size:.86rem;
+            padding:.35rem .25rem .5rem;
+            border-radius:12px;
+            display:flex; flex-direction:column; align-items:center; justify-content:center;
+        }
+        .mobile-tabbar a.tab-item .bi{ font-size:1.3rem; line-height:1; margin-bottom:.1rem; }
+        .mobile-tabbar a.tab-item.active{ color: var(--color-yo-azul-claro); background: rgba(0,123,255,.08); }
 
-        @media (max-width: 991.98px) { /* Estilos para Mobile (hasta 991.98px) */
-            body {
-                padding-top: 75px; /* Espacio para la navbar móvil fija */
-            }
-            .page-wrapper {
-                flex-direction: column; 
-            }
-            .sidebar-desktop {
-                display: none; 
-            }
-            .navbar-mobile {
-                display: flex; /* Muestra la navbar móvil */
-                justify-content: space-between;
-                align-items: center;
-            }
-            .navbar-mobile .container-fluid {
-                padding-left: 0.5rem;
-                padding-right: 0.5rem;
-            }
-            .main-content-wrapper {
-                margin-left: 0; 
-                padding: 15px; 
-            }
-            .main-content {
-                padding: 20px;
-                min-height: auto; 
-            }
-            .hero-section-new {
-                padding: 2rem 1rem; 
-            }
-            .hero-section-new h1 {
-                font-size: 2rem;
-            }
-            .hero-section-new p {
-                font-size: 1rem;
-            }
-            .hero-section-new .hero-image-container-new img {
-                max-width: 150px; 
-            }
-            .section-title {
-                font-size: 1.8rem;
-                margin-top: 1.5rem;
-                margin-bottom: 1.5rem;
-            }
-            .card .card-title {
-                font-size: 1.1rem;
-            }
-            .card .card-text.text-muted {
-                font-size: 0.85rem;
-            }
-            .btn-primary, .btn-secondary, .btn-success {
-                font-size: 0.9rem;
-                padding: 0.5rem 1rem;
-            }
+        /* ====== Responsive ====== */
+        @media (min-width: 992px){
+            .page-wrapper{ flex-direction:row; }
+            .sidebar-desktop{ display:block; }
+            .main-content-wrapper{ margin-left:250px; padding:20px; }
+            .main-content{ min-height: calc(100vh - 40px); }
+        }
+        @media (max-width: 991.98px){
+            body{ padding-top:0; padding-bottom:64px; } /* espacio para tabbar inferior */
+            .page-wrapper{ flex-direction:column; }
+            .sidebar-desktop{ display:none; }
+            .main-content-wrapper{ margin-left:0; padding:15px; }
+            .main-content{ padding:20px; min-height:auto; }
+            .hero-section-new{ padding:2rem 1rem; }
+            .hero-section-new h1{ font-size:2rem; }
+            .hero-section-new p{ font-size:1rem; }
+            .hero-section-new .hero-image-container-new img{ max-width:150px; }
+            .section-title{ font-size:1.8rem; margin:1.5rem 0; }
+            .mobile-tabbar{ display:flex; }
         }
     </style>
   </head>
   <body>
-    {% load static %} 
-
-    {# NAVEGACIÓN SUPERIOR PARA MÓVILES #}
-    <nav class="navbar navbar-expand-md navbar-dark navbar-mobile">
-        <div class="container-fluid">
-          <a class="navbar-brand" href="{% url 'index' %}">
-              <img src="{% static 'images/logo_yo_heladeria_blanco.png' %}" alt="Yo Heladerías Alto del Solar">
-          </a>
-          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapseMobile">
-            <span class="navbar-toggler-icon"></span>
-          </button>
-          <div class="collapse navbar-collapse" id="navbarCollapseMobile">
-            <ul class="navbar-nav ms-auto mb-2 mb-md-0">
-              <li class="nav-item">
-                <a class="nav-link active" aria-current="page" href="{% url 'index' %}">
-                    <i class="bi bi-house-door-fill"></i> Inicio
-                </a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link" href="{% url 'ver_carrito' %}">
-                    <i class="bi bi-cart-fill"></i> Carrito
-                </a>
-              </li>
-              {# --- INICIO: ENLACES DE AUTENTICACIÓN MÓVIL --- #}
-              {% if user.is_authenticated %}
-              <li class="nav-item">
-                <a class="nav-link" href="{% url 'perfil_cliente' %}">
-                    <i class="bi bi-person-fill"></i> Mi Perfil ({{ user.username }})
-                </a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link" href="{% url 'historial_pedidos_cliente' %}"> {# <-- NUEVA LÍNEA #}
-                    <i class="bi bi-clock-history"></i> Historial de Pedidos
-                </a>
-              </li>
-              {# --- NUEVA LÍNEA PARA CANJEAR PUNTOS MÓVIL --- #}
-              <li class="nav-item">
-                <a class="nav-link" href="{% url 'canjear_puntos' %}">
-                    <i class="bi bi-gift-fill"></i> Canjear Puntos
-                </a>
-              </li>
-              {# --- FIN: NUEVA LÍNEA PARA CANJEAR PUNTOS MÓVIL --- #}
-              <li class="nav-item">
-                <a class="nav-link" href="{% url 'logout_cliente' %}">
-                    <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
-                </a>
-              </li>
-              {% else %}
-              <li class="nav-item">
-                <a class="nav-link" href="{% url 'login' %}">
-                    <i class="bi bi-box-arrow-in-right"></i> Iniciar Sesión
-                </a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link" href="{% url 'register_cliente' %}">
-                    <i class="bi bi-person-plus-fill"></i> Registrarse
-                </a>
-              </li>
-              {% endif %}
-              {# --- FIN: ENLACES DE AUTENTICACIÓN MÓVIL --- #}
-              <li class="nav-item">
-                <a class="nav-link" href="#">
-                    <i class="bi bi-star-fill"></i> Sorteos
-                </a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link" href="#">
-                    <i class="bi bi-info-circle-fill"></i> Contacto
-                </a>
-              </li>
-            </ul>
-          </div>
-        </div>
-    </nav>
-
+    {% load static %}
 
     <div class="page-wrapper">
-        {# BARRA LATERAL IZQUIERDA (SOLO DESKTOP) #}
+        <!-- ===== Sidebar (solo desktop) ===== -->
         <aside class="sidebar-desktop">
             <div class="sidebar-logo">
                 <a href="{% url 'index' %}">
@@ -406,18 +188,18 @@
             <nav class="sidebar-nav">
                 <ul class="nav flex-column">
                     <li class="nav-item">
-                        <a class="nav-link active" aria-current="page" href="{% url 'index' %}">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'index' %}active{% endif %}" href="{% url 'index' %}">
                             <i class="bi bi-house-door-fill"></i> Inicio
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'ver_carrito' %}">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'ver_carrito' %}active{% endif %}" href="{% url 'ver_carrito' %}">
                             <i class="bi bi-cart-fill"></i> Carrito
                         </a>
                     </li>
-                    {# MENÚ DE CATEGORÍAS PARA DESKTOP #}
+
                     {% if categorias %}
-                        <li class="nav-item nav-category-title">Categorías</li>
+                        <li class="nav-item nav-category-title px-3 mt-2 text-white-50">Categorías</li>
                         {% for categoria in categorias %}
                         <li class="nav-item">
                             <a class="nav-link" href="{% url 'productos_por_categoria' categoria.id %}">
@@ -426,28 +208,24 @@
                         </li>
                         {% endfor %}
                     {% endif %}
-                    
-                    {# SECCIONES ADICIONALES #}
-                    <li class="nav-item nav-category-title">Más Opciones</li> 
-                    {# --- INICIO: ENLACES DE AUTENTICACIÓN DESKTOP --- #}
+
+                    <li class="nav-item nav-category-title px-3 mt-2 text-white-50">Más Opciones</li>
                     {% if user.is_authenticated %}
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'perfil_cliente' %}">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'perfil_cliente' %}active{% endif %}" href="{% url 'perfil_cliente' %}">
                             <i class="bi bi-person-fill"></i> Mi Perfil ({{ user.username }})
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'historial_pedidos_cliente' %}">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'historial_pedidos_cliente' %}active{% endif %}" href="{% url 'historial_pedidos_cliente' %}">
                             <i class="bi bi-clock-history"></i> Historial de Pedidos
                         </a>
                     </li>
-                    {# --- NUEVA LÍNEA PARA CANJEAR PUNTOS DESKTOP --- #}
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'canjear_puntos' %}">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'canjear_puntos' %}active{% endif %}" href="{% url 'canjear_puntos' %}">
                             <i class="bi bi-gift-fill"></i> Canjear Puntos
                         </a>
                     </li>
-                    {# --- FIN: NUEVA LÍNEA PARA CANJEAR PUNTOS DESKTOP --- #}
                     <li class="nav-item">
                         <a class="nav-link" href="{% url 'logout_cliente' %}">
                             <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
@@ -455,32 +233,28 @@
                     </li>
                     {% else %}
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'login' %}">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'login' %}active{% endif %}" href="{% url 'login' %}">
                             <i class="bi bi-box-arrow-in-right"></i> Iniciar Sesión
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'register_cliente' %}">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'register_cliente' %}active{% endif %}" href="{% url 'register_cliente' %}">
                             <i class="bi bi-person-plus-fill"></i> Registrarse
                         </a>
                     </li>
                     {% endif %}
-                    {# --- FIN: ENLACES DE AUTENTICACIÓN DESKTOP --- #}
+
                     <li class="nav-item">
-                        <a class="nav-link" href="#">
-                            <i class="bi bi-star-fill"></i> Sorteos
-                        </a>
+                        <a class="nav-link" href="#"><i class="bi bi-star-fill"></i> Sorteos</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#">
-                            <i class="bi bi-info-circle-fill"></i> Contacto
-                        </a>
+                        <a class="nav-link" href="#"><i class="bi bi-info-circle-fill"></i> Contacto</a>
                     </li>
                 </ul>
             </nav>
         </aside>
 
-        {# CONTENIDO PRINCIPAL #}
+        <!-- ===== Contenido principal ===== -->
         <div class="main-content-wrapper">
             <div class="main-content">
                 {% if messages %}
@@ -494,11 +268,34 @@
                     </div>
                 {% endif %}
 
-                {% block content %}
-                {% endblock %}
+                {% block content %}{% endblock %}
             </div>
         </div>
     </div>
+
+    <!-- ===== Bottom Tab Bar (Móvil) ===== -->
+    {% with url_name=request.resolver_match.url_name %}
+    <nav class="mobile-tabbar" aria-label="Navegación inferior">
+      <a class="tab-item {% if url_name == 'index' %}active{% endif %}" href="{% url 'index' %}">
+        <i class="bi bi-house-door"></i><span>Inicio</span>
+      </a>
+      <a class="tab-item" href="/#nuestro-catalogo">
+        <i class="bi bi-list-ul"></i><span>Catálogo</span>
+      </a>
+      <a class="tab-item {% if url_name == 'ver_carrito' %}active{% endif %}" href="{% url 'ver_carrito' %}">
+        <i class="bi bi-cart3"></i><span>Carrito</span>
+      </a>
+      {% if user.is_authenticated %}
+        <a class="tab-item {% if url_name == 'perfil_cliente' %}active{% endif %}" href="{% url 'perfil_cliente' %}">
+          <i class="bi bi-person"></i><span>Perfil</span>
+        </a>
+      {% else %}
+        <a class="tab-item {% if url_name == 'login' %}active{% endif %}" href="{% url 'login' %}">
+          <i class="bi bi-box-arrow-in-right"></i><span>Ingresar</span>
+        </a>
+      {% endif %}
+    </nav>
+    {% endwith %}
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
   </body>

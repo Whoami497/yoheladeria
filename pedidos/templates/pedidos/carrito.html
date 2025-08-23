@@ -43,6 +43,19 @@
                     {% endif %}
                   </div>
 
+                  <!-- ===== Nota por ítem (se guarda sola) ===== -->
+                  <div class="mt-2">
+                    <label class="form-label small mb-1">Nota para este ítem (opcional)</label>
+                    <textarea
+                      class="form-control form-control-sm js-note"
+                      rows="2"
+                      maxlength="280"
+                      placeholder="Ej: un poco más de Crema del Cielo / poca crema / sin maní etc."
+                      data-key="{{ item.key }}"
+                    >{{ item.nota|default:'' }}</textarea>
+                    <small class="note-status text-muted d-block mt-1">&nbsp;</small>
+                  </div>
+
                   <div class="mt-2 d-flex justify-content-end">
                     <a href="{% url 'eliminar_del_carrito' item.key %}" class="btn btn-sm btn-outline-danger">
                       <i class="bi bi-trash"></i> Eliminar
@@ -150,9 +163,10 @@
   </div>
 </div>
 
-<!-- ===================== JS: cálculo visual envío/total ===================== -->
+<!-- ===================== JS: cálculo visual envío/total + notas ===================== -->
 <script>
 (function(){
+  // ---- totales/ envío visual
   const fmt = (n) => '$' + Number(n).toFixed(2);
   const subtotal = parseFloat('{{ total|floatformat:2 }}') || 0;
 
@@ -170,14 +184,64 @@
     totalEl.textContent  = fmt(subtotal + envio);
     subEl.textContent    = fmt(subtotal);
 
-    // Guardamos la selección para que llegue al backend como referencia
     const label = envioSel.options[envioSel.selectedIndex].text;
     envioLabelHidden.value = label;
     envioCostHidden.value  = String(envio);
   }
+  if (envioSel) {
+    envioSel.addEventListener('change', recalc);
+    recalc();
+  }
 
-  envioSel.addEventListener('change', recalc);
-  recalc();
+  // ---- Notas por ítem (AJAX con debounce)
+  function getCookie(name){
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+  }
+  const csrftoken = getCookie('csrftoken');
+  const endpoint = "{% url 'carrito_set_nota' %}";
+
+  function debounce(fn, wait){
+    let t;
+    return function(...args){
+      clearTimeout(t);
+      t = setTimeout(()=>fn.apply(this,args), wait);
+    };
+  }
+
+  async function saveNote(el){
+    const key = el.dataset.key;
+    const nota = el.value.trim();
+    const status = el.parentElement.querySelector('.note-status');
+    try{
+      status.textContent = 'Guardando…';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': csrftoken,
+          'X-Requested-With': 'XMLHttpRequest',
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: `key=${encodeURIComponent(key)}&nota=${encodeURIComponent(nota)}`
+      });
+      const data = await res.json();
+      if(data.ok){
+        status.textContent = 'Guardado ✓';
+        setTimeout(()=>{ if(status.textContent==='Guardado ✓') status.textContent = ''; }, 1200);
+      }else{
+        status.textContent = 'Error al guardar';
+      }
+    }catch(e){
+      status.textContent = 'Error de red';
+    }
+  }
+
+  const debounced = debounce(saveNote, 600);
+  document.querySelectorAll('.js-note').forEach((ta)=>{
+    ta.addEventListener('input', ()=>debounced(ta));
+    ta.addEventListener('change', ()=>saveNote(ta)); // por si sale rápido del campo
+  });
 })();
 </script>
 
@@ -193,6 +257,8 @@
     background:#f3f6fa; border:1px dashed #c9d4e5; border-radius:12px;
     width:84px; height:84px; font-size:.8rem;
   }
+  .js-note{ resize:vertical; min-height:52px; }
+  .note-status{ font-size:.8rem; }
   .summary{ position:sticky; top:.75rem; }
   @media (min-width: 992px){
     .summary{ position:sticky; top:1rem; }

@@ -304,7 +304,8 @@ def ver_carrito(request):
                 'opcion_id': item.get('opcion_id'),
                 'opcion_nombre': item.get('opcion_nombre'),
                 'imagen_mostrada': item.get('imagen_mostrada'),
-                'subtotal': item_subtotal
+                'subtotal': item_subtotal,
+                'nota': item.get('nota'),  # <-- NUEVO: mostrar en carrito
             })
         except Exception as e:
             print(f"Error procesando ítem en carrito: {e} - Item: {item}")
@@ -366,6 +367,7 @@ def ver_carrito(request):
                     'opcion_nombre': opcion_obj_pedido.nombre_opcion if opcion_obj_pedido else None,
                     'cantidad': item_data['cantidad'],
                     'sabores_nombres': [s.nombre for s in sabores_seleccionados],
+                    'nota': item_data.get('nota'),  # <-- NUEVO: enviar a cocina/panel
                 })
 
             except (Producto.DoesNotExist, OpcionProducto.DoesNotExist) as e:
@@ -417,7 +419,7 @@ def ver_carrito(request):
                         'cliente_telefono': nuevo_pedido.cliente_telefono,
                         'metodo_pago': nuevo_pedido.metodo_pago,
                         'total_pedido': str(nuevo_pedido.total_pedido),
-                        'detalles': detalles_para_notificacion,
+                        'detalles': detalles_para_notificacion,  # incluye 'nota'
                     }
                 }
             )
@@ -436,6 +438,7 @@ def ver_carrito(request):
     return render(request, 'pedidos/carrito.html', contexto)
 
 
+
 def eliminar_del_carrito(request, item_key):
     if 'carrito' in request.session:
         carrito = request.session['carrito']
@@ -447,6 +450,29 @@ def eliminar_del_carrito(request, item_key):
         else:
             messages.warning(request, 'El producto que intentaste eliminar ya no está en tu carrito.')
     return redirect('ver_carrito')
+
+@require_POST
+def carrito_set_nota(request):
+    """
+    Guarda/borra una 'nota' por ítem del carrito (en sesión).
+    Espera: key (clave del item), nota (texto).
+    """
+    key = request.POST.get('key', '')
+    nota = (request.POST.get('nota') or '').strip()
+    cart = request.session.get('carrito', {})
+
+    if key not in cart:
+        return JsonResponse({'ok': False, 'error': 'item_inexistente'}, status=404)
+
+    if nota:
+        cart[key]['nota'] = nota
+    else:
+        cart[key].pop('nota', None)
+
+    request.session['carrito'] = cart
+    request.session.modified = True
+    return JsonResponse({'ok': True})
+
 
 
 def productos_por_categoria(request, categoria_id):

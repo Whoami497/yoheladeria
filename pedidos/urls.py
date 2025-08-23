@@ -45,4 +45,5 @@ urlpatterns = [
 
     # --- Cambiar estado desde panel ---
     path('panel-alertas/estado/<int:pedido_id>/', views.panel_alertas_set_estado, name='panel_alertas_set_estado'),
-]
+]# pedidos/urls.py
+path('carrito/nota/', views.carrito_set_nota, name='carrito_set_nota'),
