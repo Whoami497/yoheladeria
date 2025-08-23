@@ -12,6 +12,7 @@ urlpatterns = [
     # --- Carrito / pedidos del cliente ---
     path('carrito/', views.ver_carrito, name='ver_carrito'),
     path('carrito/eliminar/<str:item_key>/', views.eliminar_del_carrito, name='eliminar_del_carrito'),
+    path('carrito/nota/', views.carrito_set_nota, name='carrito_set_nota'),   # ✅ ahora está bien dentro
     path('pedido_exitoso/', views.pedido_exitoso, name='pedido_exitoso'),
 
     # --- Autenticación y perfil de clientes ---
@@ -25,8 +26,8 @@ urlpatterns = [
 
     # --- Panel de alertas (tienda) ---
     path('panel-alertas/', views.panel_alertas, name='panel_alertas'),
-    path('panel-alertas/data/', views.panel_alertas_data, name='panel_alertas_data'),      # JSON para rehidratación
-    path('panel-alertas/board/', views.panel_alertas, name='panel_alertas_board'),        # alias/tablero -> usa la misma view
+    path('panel-alertas/data/', views.panel_alertas_data, name='panel_alertas_data'),
+    path('panel-alertas/board/', views.panel_alertas, name='panel_alertas_board'),
     path('panel-alertas/anteriores/', views.panel_alertas_anteriores, name='panel_alertas_anteriores'),
 
     # Confirmación de pedido (tienda)
@@ -45,5 +46,4 @@ urlpatterns = [
 
     # --- Cambiar estado desde panel ---
     path('panel-alertas/estado/<int:pedido_id>/', views.panel_alertas_set_estado, name='panel_alertas_set_estado'),
-]# pedidos/urls.py
-path('carrito/nota/', views.carrito_set_nota, name='carrito_set_nota'),
+]
