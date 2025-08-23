@@ -11,6 +11,7 @@ urlpatterns = [
     # --- Carrito / pedidos del cliente ---
     path('carrito/', views.ver_carrito, name='ver_carrito'),
     path('carrito/eliminar/<str:item_key>/', views.eliminar_del_carrito, name='eliminar_del_carrito'),
+    path('carrito/nota/', views.carrito_set_nota, name='carrito_set_nota'),
     path('pedido_exitoso/', views.pedido_exitoso, name='pedido_exitoso'),
 
     # --- Autenticación y perfil de clientes ---
@@ -29,34 +30,22 @@ urlpatterns = [
     path('panel-alertas/anteriores/', views.panel_alertas_anteriores, name='panel_alertas_anteriores'),
     path('panel-alertas/estado/<int:pedido_id>/', views.panel_alertas_set_estado, name='panel_alertas_set_estado'),
 
-    # --- Confirmación de pedido (tienda) ---
+    # Confirmación de pedido (tienda)
     path('confirmar-pedido/<int:pedido_id>/', views.confirmar_pedido, name='confirmar_pedido'),
 
-    # --- Cadetes ---
+    # --- Panel de cadetes ---
     path('cadete/login/', views.login_cadete, name='login_cadete'),
     path('cadete/panel/', views.panel_cadete, name='panel_cadete'),
     path('cadete/logout/', views.logout_cadete, name='logout_cadete'),
-    path('save-subscription/', views.save_subscription, name='save_subscription'),
     path('cadete/aceptar-pedido/<int:pedido_id>/', views.aceptar_pedido, name='aceptar_pedido'),
-
-    # NUEVO: Acciones rápidas del cadete
-    path('cadete/disponible/', views.cadete_toggle_disponible, name='cadete_toggle_disponible'),
+    path('cadete/toggle-disponible/', views.cadete_toggle_disponible, name='cadete_toggle_disponible'),
     path('cadete/estado/<int:pedido_id>/', views.cadete_set_estado, name='cadete_set_estado'),
-# --- Cadetes extra ---
-path('cadete/feed/', views.cadete_feed, name='cadete_feed'),               # JSON: pedidos disponibles
-path('cadete/historial/', views.cadete_historial, name='cadete_historial'),# Historial del cadete
-path('cadete/estado/<int:pedido_id>/', views.cadete_set_estado, name='cadete_set_estado'),  # ya la tenías, por si faltaba
+    path('cadete/feed/', views.cadete_feed, name='cadete_feed'),
+    path('cadete/historial/', views.cadete_historial, name='cadete_historial'),
+    path('save-subscription/', views.save_subscription, name='save_subscription'),
+    path('cadete/push-test/', views.cadete_push_test, name='cadete_push_test'),
 
     # --- Mercado Pago ---
     path('pagos/mp/webhook/', views.mp_webhook_view, name='mp_webhook'),
     path('pagos/mp/success/', views.mp_success, name='mp_success'),
-    # pedidos/urls.py
-from django.urls import path
-from . import views
-
-urlpatterns = [
-    # ...tus rutas...
-    path('sw.js', views.service_worker, name='service_worker'),  # <-- NUEVO
-]
-
 ]
