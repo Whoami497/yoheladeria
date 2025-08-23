@@ -9,11 +9,11 @@
 
     <style>
         /* ====== Paleta / base ====== */
-        body { 
-            padding-top: 0; 
+        body {
+            padding-top: 0;
             background-color: #1a1a1a;
             color: #e0e0e0;
-            font-family: 'Arial', sans-serif; 
+            font-family: 'Arial', sans-serif;
         }
         :root {
             --color-principal-oscuro: #1a1a1a;
@@ -38,14 +38,14 @@
 
         /* ====== Sidebar desktop ====== */
         .sidebar-desktop {
-            width: 250px; 
-            background-color: var(--color-secundario-oscuro); 
+            width: 250px;
+            background-color: var(--color-secundario-oscuro);
             box-shadow: 2px 0 10px var(--color-sombra-suave);
-            padding-top: 20px; 
-            position: fixed; 
-            height: 100%; 
-            overflow-y: auto; 
-            border-right: 1px solid rgba(255,255,255,0.05); 
+            padding-top: 20px;
+            position: fixed;
+            height: 100%;
+            overflow-y: auto;
+            border-right: 1px solid rgba(255,255,255,0.05);
         }
         .sidebar-desktop .sidebar-logo { text-align:center; padding:0 15px 20px; }
         .sidebar-desktop .sidebar-logo img { max-width:100%; height:auto; max-height:100px; display:block; margin:0 auto; object-fit:contain; }
@@ -61,21 +61,20 @@
         }
         .sidebar-desktop .sidebar-nav .nav-link i { margin-right:10px; font-size:1.3rem; }
         .sidebar-desktop .sidebar-nav .nav-link:hover,
-        .sidebar-desktop .sidebar-nav .nav-link.active { 
-            background-color: var(--color-yo-azul-claro); 
+        .sidebar-desktop .sidebar-nav .nav-link.active {
+            background-color: var(--color-yo-azul-claro);
             color: var(--color-yo-blanco) !important;
             box-shadow: 0 2px 5px var(--color-sombra-suave);
         }
 
-        /* ====== (ELIMINADA) Navbar móvil superior ======
-           Mantenemos la clase por compatibilidad pero oculta siempre */
+        /* (sin navbar superior móvil) */
         .navbar-mobile { display:none !important; }
 
         /* ====== Contenido principal ====== */
         .main-content-wrapper { flex-grow:1; background-color:var(--color-principal-oscuro); padding:20px; }
         .main-content {
             background-color: var(--color-yo-blanco);
-            border-radius: 15px; 
+            border-radius: 15px;
             padding: 30px;
             box-shadow: 0 5px 20px var(--color-sombra-media);
             min-height: calc(100vh - 40px);
@@ -85,10 +84,10 @@
         /* Mensajes */
         .messages { margin: 0 0 20px 0; }
         .alert { border-radius:10px; font-weight:500; padding:1.2rem 1.5rem; }
-        .alert-success { background:#d1ecf1; border-color:#bee5eb; color:var(--color-yo-azul); } 
-        .alert-info    { background:#e0f7fa; border-color:#b2ebf2; color:var(--color-yo-azul); } 
-        .alert-warning { background:#ffecb3; border-color:#ffe082; color:#cc9900; } 
-        .alert-danger  { background:#ffcdd2; border-color:#ef9a9a; color:#d32f2f; } 
+        .alert-success { background:#d1ecf1; border-color:#bee5eb; color:var(--color-yo-azul); }
+        .alert-info    { background:#e0f7fa; border-color:#b2ebf2; color:var(--color-yo-azul); }
+        .alert-warning { background:#ffecb3; border-color:#ffe082; color:#cc9900; }
+        .alert-danger  { background:#ffcdd2; border-color:#ef9a9a; color:#d32f2f; }
 
         .section-title { color:var(--color-yo-azul); font-size:2.5rem; font-weight:700; margin:2rem 0; text-align:center; line-height:1.2; }
 
@@ -130,27 +129,46 @@
         .hero-section-new .hero-image-container-new{ margin-top:2rem; width:100%; display:flex; justify-content:center; }
         .hero-section-new .hero-image-container-new img{ max-width:300px; height:auto; object-fit:contain; border-radius:10px; box-shadow:0 5px 10px var(--color-sombra-suave); }
 
-        /* ====== MOBILE: bottom tabbar ====== */
-        .mobile-tabbar{
-            position:fixed; left:0; right:0; bottom:0;
-            display:none; gap:.25rem;
-            background: rgba(255,255,255,.8);
-            backdrop-filter: blur(10px);
-            border-top: 1px solid rgba(7,54,83,.12);
-            box-shadow: 0 -6px 20px rgba(0,0,0,.15);
-            z-index:1030;
-            padding:.2rem .4rem;
+        /* ===== Bottom Nav (móvil) ===== */
+        .mobile-bottom-nav{
+          position:fixed; left:0; right:0; bottom:0; z-index:1030;
+          height:58px; background: rgba(10,10,10,.75); backdrop-filter: blur(8px);
+          border-top: 1px solid rgba(255,255,255,.08);
+          display:flex; align-items:center; justify-content:space-around;
+          gap:.25rem; padding:0 .35rem;
         }
-        .mobile-tabbar a.tab-item{
-            flex:1; text-align:center; text-decoration:none;
-            color: var(--color-yo-azul);
-            font-weight:600; font-size:.86rem;
-            padding:.35rem .25rem .5rem;
-            border-radius:12px;
-            display:flex; flex-direction:column; align-items:center; justify-content:center;
+        .mbn-item{
+          appearance:none; background:none; border:0; color:#cfe6ff;
+          text-decoration:none; display:flex; flex-direction:column;
+          align-items:center; justify-content:center; gap:2px;
+          flex:1; height:100%; border-radius:12px;
+          font-size:.78rem; font-weight:600;
         }
-        .mobile-tabbar a.tab-item .bi{ font-size:1.3rem; line-height:1; margin-bottom:.1rem; }
-        .mobile-tabbar a.tab-item.active{ color: var(--color-yo-azul-claro); background: rgba(0,123,255,.08); }
+        .mbn-item i{ font-size:1.25rem; line-height:1; }
+        .mbn-item.active{ color: var(--color-yo-azul-claro); background: rgba(0,123,255,.08); }
+        .mbn-more{ cursor:pointer; }
+
+        /* ===== Sheet de “Más” ===== */
+        .sheet-overlay{
+          position:fixed; inset:0; background:rgba(0,0,0,.35);
+          opacity:0; pointer-events:none; transition:.2s; z-index:1029;
+        }
+        .sheet-overlay.show{ opacity:1; pointer-events:auto; }
+
+        .mobile-sheet{
+          position:fixed; left:0; right:0; bottom:0; z-index:1031;
+          background:#fff; color:var(--color-yo-texto-oscuro);
+          border-top-left-radius:18px; border-top-right-radius:18px;
+          box-shadow: 0 -8px 24px rgba(0,0,0,.25);
+          transform: translateY(110%); transition: transform .25s ease;
+          padding:12px 12px 16px;
+        }
+        .mobile-sheet.open{ transform: translateY(0); }
+        .sheet-handle{
+          width:42px; height:4px; background:#d8e2ef; border-radius:999px;
+          margin:6px auto 10px;
+        }
+        .sheet-title{ color: var(--color-yo-azul); }
 
         /* ====== Responsive ====== */
         @media (min-width: 992px){
@@ -158,9 +176,10 @@
             .sidebar-desktop{ display:block; }
             .main-content-wrapper{ margin-left:250px; padding:20px; }
             .main-content{ min-height: calc(100vh - 40px); }
+            .mobile-bottom-nav, .sheet-overlay, .mobile-sheet{ display:none; }
         }
         @media (max-width: 991.98px){
-            body{ padding-top:0; padding-bottom:64px; } /* espacio para tabbar inferior */
+            body{ padding-top:0; padding-bottom:70px; } /* espacio para la bottom-nav */
             .page-wrapper{ flex-direction:column; }
             .sidebar-desktop{ display:none; }
             .main-content-wrapper{ margin-left:0; padding:15px; }
@@ -170,7 +189,6 @@
             .hero-section-new p{ font-size:1rem; }
             .hero-section-new .hero-image-container-new img{ max-width:150px; }
             .section-title{ font-size:1.8rem; margin:1.5rem 0; }
-            .mobile-tabbar{ display:flex; }
         }
     </style>
   </head>
@@ -273,30 +291,91 @@
         </div>
     </div>
 
-    <!-- ===== Bottom Tab Bar (Móvil) ===== -->
+    <!-- ===== Bottom Nav + Sheet (Móvil) ===== -->
     {% with url_name=request.resolver_match.url_name %}
-    <nav class="mobile-tabbar" aria-label="Navegación inferior">
-      <a class="tab-item {% if url_name == 'index' %}active{% endif %}" href="{% url 'index' %}">
-        <i class="bi bi-house-door"></i><span>Inicio</span>
+    <nav class="mobile-bottom-nav" aria-label="Navegación inferior">
+      <a class="mbn-item" href="{% url 'index' %}#nuestro-catalogo">
+        <i class="bi bi-collection"></i>
+        <span>Catálogo</span>
       </a>
-      <a class="tab-item" href="/#nuestro-catalogo">
-        <i class="bi bi-list-ul"></i><span>Catálogo</span>
+
+      <a class="mbn-item {% if url_name == 'ver_carrito' %}active{% endif %}" href="{% url 'ver_carrito' %}">
+        <i class="bi bi-cart3"></i>
+        <span>Carrito</span>
       </a>
-      <a class="tab-item {% if url_name == 'ver_carrito' %}active{% endif %}" href="{% url 'ver_carrito' %}">
-        <i class="bi bi-cart3"></i><span>Carrito</span>
-      </a>
+
       {% if user.is_authenticated %}
-        <a class="tab-item {% if url_name == 'perfil_cliente' %}active{% endif %}" href="{% url 'perfil_cliente' %}">
-          <i class="bi bi-person"></i><span>Perfil</span>
+        <a class="mbn-item {% if url_name == 'perfil_cliente' %}active{% endif %}" href="{% url 'perfil_cliente' %}">
+          <i class="bi bi-person-circle"></i>
+          <span>Perfil</span>
         </a>
       {% else %}
-        <a class="tab-item {% if url_name == 'login' %}active{% endif %}" href="{% url 'login' %}">
-          <i class="bi bi-box-arrow-in-right"></i><span>Ingresar</span>
+        <a class="mbn-item {% if url_name == 'login' %}active{% endif %}" href="{% url 'login' %}">
+          <i class="bi bi-box-arrow-in-right"></i>
+          <span>Ingresar</span>
         </a>
       {% endif %}
+
+      <button type="button" class="mbn-item mbn-more" id="btnMore">
+        <i class="bi bi-three-dots"></i>
+        <span>Más</span>
+      </button>
     </nav>
     {% endwith %}
 
+    <!-- Overlay + Sheet -->
+    <div id="sheetOverlay" class="sheet-overlay"></div>
+    <div id="moreSheet" class="mobile-sheet" aria-hidden="true">
+      <div class="sheet-handle"></div>
+      <h6 class="sheet-title mb-3">Más opciones</h6>
+      <div class="list-group list-group-flush">
+        <a class="list-group-item list-group-item-action" href="{% url 'index' %}">
+          <i class="bi bi-house-door me-2"></i> Inicio
+        </a>
+
+        {% if user.is_authenticated %}
+          <a class="list-group-item list-group-item-action" href="{% url 'historial_pedidos_cliente' %}">
+            <i class="bi bi-clock-history me-2"></i> Historial de pedidos
+          </a>
+          <a class="list-group-item list-group-item-action" href="{% url 'canjear_puntos' %}">
+            <i class="bi bi-gift me-2"></i> Canjear puntos
+          </a>
+          <a class="list-group-item list-group-item-action" href="{% url 'logout_cliente' %}">
+            <i class="bi bi-box-arrow-right me-2"></i> Cerrar sesión
+          </a>
+        {% else %}
+          <a class="list-group-item list-group-item-action" href="{% url 'register_cliente' %}">
+            <i class="bi bi-person-add me-2"></i> Registrarse
+          </a>
+          <a class="list-group-item list-group-item-action" href="{% url 'login' %}">
+            <i class="bi bi-box-arrow-in-right me-2"></i> Iniciar sesión
+          </a>
+        {% endif %}
+
+        <a class="list-group-item list-group-item-action" href="#">
+          <i class="bi bi-stars me-2"></i> Sorteos
+        </a>
+        <a class="list-group-item list-group-item-action" href="#">
+          <i class="bi bi-info-circle me-2"></i> Contacto
+        </a>
+      </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+
+    <script>
+      (function(){
+        const btn = document.getElementById('btnMore');
+        const sheet = document.getElementById('moreSheet');
+        const overlay = document.getElementById('sheetOverlay');
+
+        function openSheet(){ sheet.classList.add('open'); overlay.classList.add('show'); sheet.setAttribute('aria-hidden','false'); }
+        function closeSheet(){ sheet.classList.remove('open'); overlay.classList.remove('show'); sheet.setAttribute('aria-hidden','true'); }
+
+        btn?.addEventListener('click', openSheet);
+        overlay?.addEventListener('click', closeSheet);
+        window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeSheet(); });
+      })();
+    </script>
   </body>
 </html>
