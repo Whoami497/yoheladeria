@@ -6,146 +6,154 @@
 
   <h1 class="display-6 mb-3">Tu Carrito</h1>
 
-  {# =========================
-     ÍTEMS EN TARJETAS (mobile-first)
-     ========================= #}
-  <div id="cart-list">
-    {% for item in carrito_items %}
-      <div class="card cart-item mb-3 shadow-sm">
-        <div class="card-body p-3">
-          <div class="d-flex align-items-start gap-3">
-            <div class="thumb-wrap">
-              {% if item.imagen_mostrada %}
-                <img class="thumb" src="{% static item.imagen_mostrada %}" alt="{{ item.producto_nombre }}">
-              {% else %}
-                <div class="thumb thumb-placeholder">IMG</div>
-              {% endif %}
-            </div>
+  <!-- Layout: izquierda items / derecha resumen+form en desktop -->
+  <div class="row g-4">
 
-            <div class="flex-grow-1">
-              <div class="d-flex justify-content-between align-items-start">
-                <h6 class="mb-1">{{ item.producto_nombre }}</h6>
-                <div class="text-end">
-                  <div class="fw-semibold">${{ item.subtotal|floatformat:2 }}</div>
-                  <div class="text-muted small">x{{ item.cantidad }} · ${{ item.precio_unidad|floatformat:2 }}</div>
+    <!-- ===================== ÍTEMS (mobile-first) ===================== -->
+    <div class="col-lg-8">
+      <div id="cart-list">
+        {% for item in carrito_items %}
+          <div class="card cart-item mb-3 shadow-sm">
+            <div class="card-body p-3">
+              <div class="d-flex align-items-start gap-3">
+                <div class="thumb-wrap">
+                  {% if item.imagen_mostrada %}
+                    <img class="thumb" src="{% static item.imagen_mostrada %}" alt="{{ item.producto_nombre }}">
+                  {% else %}
+                    <div class="thumb thumb-placeholder">IMG</div>
+                  {% endif %}
                 </div>
-              </div>
 
-              <div class="small text-muted">
-                {% if item.opcion_nombre %}<span class="me-1">Opción: {{ item.opcion_nombre }}</span>·{% endif %}
-                Sabores:
-                {% if item.sabores_nombres %}
-                  {{ item.sabores_nombres|join:", " }}
-                {% else %}
-                  N/A
-                {% endif %}
-              </div>
+                <div class="flex-grow-1">
+                  <div class="d-flex justify-content-between align-items-start">
+                    <h6 class="mb-1">{{ item.producto_nombre }}</h6>
+                    <div class="text-end">
+                      <div class="fw-semibold">${{ item.subtotal|floatformat:2 }}</div>
+                      <div class="text-muted small">x{{ item.cantidad }} · ${{ item.precio_unidad|floatformat:2 }}</div>
+                    </div>
+                  </div>
 
-              <div class="mt-2 d-flex justify-content-end">
-                <a href="{% url 'eliminar_del_carrito' item.key %}" class="btn btn-sm btn-outline-danger">
-                  <i class="bi bi-trash"></i> Eliminar
-                </a>
+                  <div class="small text-muted">
+                    {% if item.opcion_nombre %}<span class="me-1">Opción: {{ item.opcion_nombre }}</span>·{% endif %}
+                    Sabores:
+                    {% if item.sabores_nombres %}
+                      {{ item.sabores_nombres|join:", " }}
+                    {% else %}
+                      N/A
+                    {% endif %}
+                  </div>
+
+                  <div class="mt-2 d-flex justify-content-end">
+                    <a href="{% url 'eliminar_del_carrito' item.key %}" class="btn btn-sm btn-outline-danger">
+                      <i class="bi bi-trash"></i> Eliminar
+                    </a>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </div>
-    {% empty %}
-      <div class="alert alert-info">Tu carrito está vacío.</div>
-    {% endfor %}
-  </div>
-
-  {# =========================
-     RESUMEN STICKY (subtotal + envío estimado + total visual)
-     ========================= #}
-  <div class="card summary shadow-sm mb-4">
-    <div class="card-body p-3">
-      <div class="d-flex justify-content-between mb-2">
-        <span class="text-muted">Subtotal</span>
-        <strong id="subtotal-amount">${{ total|floatformat:2 }}</strong>
-      </div>
-
-      <div class="d-flex align-items-center justify-content-between mb-2">
-        <div class="me-2">
-          <div class="text-muted">Envío (estimado)</div>
-          <select id="envio" class="form-select form-select-sm mt-1" style="min-width:220px">
-            <option value="0">Retiro en local — $0</option>
-            <option value="1500">Zona cercana — $1.500</option>
-            <option value="2500">Zona media — $2.500</option>
-            <option value="3500">Zona lejana — $3.500</option>
-          </select>
-        </div>
-        <div class="text-end">
-          <div class="small text-muted">Costo de envío</div>
-          <div class="fw-semibold" id="envio-amount">$0.00</div>
-        </div>
-      </div>
-
-      <hr class="my-2">
-
-      <div class="d-flex justify-content-between">
-        <span class="fs-5">Total estimado</span>
-        <span class="fs-5 fw-bold" id="total-final">$0.00</span>
-      </div>
-
-      <div class="small text-muted mt-1">
-        *La estimación de envío es informativa; el total del pedido en el sistema aún no incluye envío.
+        {% empty %}
+          <div class="alert alert-info">Tu carrito está vacío.</div>
+        {% endfor %}
       </div>
     </div>
-  </div>
 
-  {# =========================
-     FORMULARIO DATOS Y PAGO
-     ========================= #}
-  <div class="card shadow-sm">
-    <div class="card-body p-3">
-      <h5 class="mb-3">Datos de Envío y Contacto</h5>
-      <form method="post">
-        {% csrf_token %}
+    <!-- ===================== SIDEBAR: RESUMEN + FORM ===================== -->
+    <div class="col-lg-4">
 
-        <div class="mb-3">
-          <label class="form-label">Nombre Completo:</label>
-          <input type="text" class="form-control" name="cliente_nombre" value="{{ request.user.get_full_name|default:request.user.username }}" required>
+      <!-- Resumen -->
+      <div class="card summary shadow-sm mb-3">
+        <div class="card-body p-3">
+          <div class="d-flex justify-content-between mb-2">
+            <span class="text-muted">Subtotal</span>
+            <strong id="subtotal-amount">${{ total|floatformat:2 }}</strong>
+          </div>
+
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <div class="me-2">
+              <div class="text-muted">Envío (estimado)</div>
+              <select id="envio" class="form-select form-select-sm mt-1" style="min-width:220px">
+                <option value="0">Retiro en local — $0</option>
+                <option value="1500">Zona cercana — $1.500</option>
+                <option value="2500">Zona media — $2.500</option>
+                <option value="3500">Zona lejana — $3.500</option>
+              </select>
+            </div>
+            <div class="text-end">
+              <div class="small text-muted">Costo de envío</div>
+              <div class="fw-semibold" id="envio-amount">$0.00</div>
+            </div>
+          </div>
+
+          <hr class="my-2">
+
+          <div class="d-flex justify-content-between">
+            <span class="fs-6 fw-semibold">Total estimado</span>
+            <span class="fs-5 fw-bold" id="total-final">$0.00</span>
+          </div>
+
+          <div class="small text-muted mt-1">
+            *El envío se muestra a modo informativo y puede ajustarse según dirección/horario.
+          </div>
         </div>
-
-        <div class="mb-3">
-          <label class="form-label">Dirección de Envío:</label>
-          <input type="text" class="form-control" name="cliente_direccion" placeholder="Calle, número, referencia">
-        </div>
-
-        <div class="mb-3">
-          <label class="form-label">Teléfono:</label>
-          <input type="text" class="form-control" name="cliente_telefono" placeholder="Ej: 3834 123456">
-        </div>
-
-        <h5 class="mt-4 mb-3">Método de Pago</h5>
-        <div class="mb-3">
-          <label class="form-label">Selecciona el método de pago:</label>
-          <select class="form-select" name="metodo_pago" required>
-            <option value="EFECTIVO">Efectivo</option>
-            <option value="MERCADOPAGO">Mercado Pago</option>
-          </select>
-        </div>
-
-        <button type="submit" class="btn btn-primary w-100 py-2">
-          Finalizar Pedido
-        </button>
-      </form>
-
-      <div class="text-center mt-3">
-        <a href="{% url 'index' %}" class="btn btn-link">← Volver al inicio</a>
       </div>
+
+      <!-- Formulario -->
+      <div class="card shadow-sm">
+        <div class="card-body p-3">
+          <h5 class="mb-3">Datos de Envío y Contacto</h5>
+
+          <form method="post">
+            {% csrf_token %}
+
+            <!-- Estos campos se completan con la selección de envío (sólo informativos para cocina) -->
+            <input type="hidden" name="envio_visual_opcion" id="envio-visual-opcion" value="Retiro en local — $0">
+            <input type="hidden" name="envio_visual_costo" id="envio-visual-costo" value="0">
+
+            <div class="mb-3">
+              <label class="form-label">Nombre Completo:</label>
+              <input type="text" class="form-control" name="cliente_nombre"
+                     value="{{ request.user.get_full_name|default:request.user.username }}" required>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Dirección de Envío:</label>
+              <input type="text" class="form-control" name="cliente_direccion" placeholder="Calle, número, referencia">
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Teléfono:</label>
+              <input type="text" class="form-control" name="cliente_telefono" placeholder="Ej: 3834 123456">
+            </div>
+
+            <h5 class="mt-3 mb-2">Método de Pago</h5>
+            <div class="mb-3">
+              <label class="form-label">Selecciona el método de pago:</label>
+              <select class="form-select" name="metodo_pago" required>
+                <option value="EFECTIVO">Efectivo</option>
+                <option value="MERCADOPAGO">Mercado Pago</option>
+              </select>
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100 py-2">
+              Finalizar Pedido
+            </button>
+          </form>
+
+          <div class="text-center mt-3">
+            <a href="{% url 'index' %}" class="btn btn-link">← Volver al inicio</a>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
-
 </div>
 
-{# =========================
-   JS: cálculo visual envío/total
-   ========================= #}
+<!-- ===================== JS: cálculo visual envío/total ===================== -->
 <script>
 (function(){
-  const fmt = (n) => '$' + n.toFixed(2);
+  const fmt = (n) => '$' + Number(n).toFixed(2);
   const subtotal = parseFloat('{{ total|floatformat:2 }}') || 0;
 
   const envioSel = document.getElementById('envio');
@@ -153,11 +161,19 @@
   const totalEl  = document.getElementById('total-final');
   const subEl    = document.getElementById('subtotal-amount');
 
+  const envioLabelHidden = document.getElementById('envio-visual-opcion');
+  const envioCostHidden  = document.getElementById('envio-visual-costo');
+
   function recalc(){
     const envio = parseFloat(envioSel.value || '0') || 0;
     envioEl.textContent  = fmt(envio);
     totalEl.textContent  = fmt(subtotal + envio);
     subEl.textContent    = fmt(subtotal);
+
+    // Guardamos la selección para que llegue al backend como referencia
+    const label = envioSel.options[envioSel.selectedIndex].text;
+    envioLabelHidden.value = label;
+    envioCostHidden.value  = String(envio);
   }
 
   envioSel.addEventListener('change', recalc);
@@ -174,12 +190,12 @@
   }
   .thumb-placeholder{
     display:flex; align-items:center; justify-content:center; color:#999;
-    background: #f3f6fa; border:1px dashed #c9d4e5; border-radius:12px;
+    background:#f3f6fa; border:1px dashed #c9d4e5; border-radius:12px;
     width:84px; height:84px; font-size:.8rem;
   }
-  .summary{ position: sticky; top: .75rem; margin-top: .5rem; }
+  .summary{ position:sticky; top:.75rem; }
   @media (min-width: 992px){
-    .summary{ position: static; }
+    .summary{ position:sticky; top:1rem; }
   }
 </style>
 {% endblock %}
