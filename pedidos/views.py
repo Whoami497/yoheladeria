@@ -1230,3 +1230,59 @@ def service_worker(request):
     resp = render(request, 'pedidos/sw.js', {})
     resp["Content-Type"] = "application/javascript"
     return resp
+# --- Test: enviar un push al cadete logueado ---
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import redirect
+from django.contrib import messages
+import json
+
+@login_required
+def cadete_push_test(request):
+    """
+    Envía una notificación push de prueba al cadete actual.
+    Requiere que el cadete haya hecho 'Activar notificaciones' (tenga subscription_info)
+    y que en settings esté configurado WEBPUSH_SETTINGS con VAPID_PRIVATE_KEY.
+    """
+    # Debe ser cadete
+    if not hasattr(request.user, 'cadeteprofile'):
+        messages.error(request, "Solo disponible para cuentas de cadete.")
+        return redirect('index')
+
+    sub = request.user.cadeteprofile.subscription_info
+    if not sub:
+        messages.error(request, "Todavía no activaste las notificaciones en este dispositivo.")
+        return redirect('panel_cadete')
+
+    # Import local para evitar fallos si el paquete no está instalado en build
+    try:
+        from pywebpush import webpush
+    except Exception as e:
+        messages.error(request, f"No está disponible el envío de push (pywebpush): {e}")
+        return redirect('panel_cadete')
+
+    vapid = getattr(settings, 'WEBPUSH_SETTINGS', {}) or {}
+    priv = vapid.get('VAPID_PRIVATE_KEY')
+    admin = vapid.get('VAPID_ADMIN_EMAIL') or 'admin@example.com'
+
+    if not priv:
+        messages.error(request, "Falta VAPID_PRIVATE_KEY en settings.")
+        return redirect('panel_cadete')
+
+    payload = {
+        "title": "🔔 Prueba de notificación",
+        "body": "Si ves esto, las push están funcionando ✅",
+        "url": request.build_absolute_uri(reverse('panel_cadete')),
+    }
+
+    try:
+        webpush(
+            subscription_info=sub,
+            data=json.dumps(payload),
+            vapid_private_key=priv,
+            vapid_claims={"sub": f"mailto:{admin}"}
+        )
+        messages.success(request, "Notificación de prueba enviada a este dispositivo.")
+    except Exception as e:
+        messages.error(request, f"No se pudo enviar el push: {e}")
+
+    return redirect('panel_cadete')

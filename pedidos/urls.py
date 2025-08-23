@@ -48,4 +48,7 @@ urlpatterns = [
     # --- Mercado Pago ---
     path('pagos/mp/webhook/', views.mp_webhook_view, name='mp_webhook'),
     path('pagos/mp/success/', views.mp_success, name='mp_success'),
+
+    path('sw.js', views.service_worker, name='service_worker'),
+
 ]

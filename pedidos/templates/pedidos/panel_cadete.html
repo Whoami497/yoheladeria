@@ -219,7 +219,7 @@
         return;
       }
 
-      const reg = await navigator.serviceWorker.register("{% static 'js/cadete-sw.js' %}");
+      const reg = await navigator.serviceWorker.register("{% url 'service_worker' %}");
       const perm = await Notification.requestPermission();
       if (perm !== 'granted'){
         setPushStatus('permiso denegado', 'err');
