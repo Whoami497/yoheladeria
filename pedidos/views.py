@@ -1049,19 +1049,30 @@ def cadete_set_estado(request, pedido_id):
     """
     Permite al cadete avanzar estado de su pedido:
     EN_CAMINO -> ENTREGADO.
+    Devuelve JSON si es AJAX, o redirige al panel si no lo es (para evitar la pantalla negra).
     """
     if not hasattr(request.user, 'cadeteprofile'):
-        return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
+        # Si no es AJAX, redirigimos con mensaje; si es AJAX, JSON 403.
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
+        messages.error(request, "Acción no permitida. No tenés perfil de cadete.")
+        return redirect('panel_cadete')
 
     pedido = get_object_or_404(Pedido, id=pedido_id)
 
     # Debe ser el cadete asignado
     if pedido.cadete_asignado != request.user.cadeteprofile:
-        return JsonResponse({'ok': False, 'error': 'no_autorizado'}, status=403)
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({'ok': False, 'error': 'no_autorizado'}, status=403)
+        messages.error(request, "No estás asignado a este pedido.")
+        return redirect('panel_cadete')
 
     estado = (request.POST.get('estado') or '').upper()
     if estado not in {'EN_CAMINO', 'ENTREGADO'}:
-        return JsonResponse({'ok': False, 'error': 'estado_invalido'}, status=400)
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({'ok': False, 'error': 'estado_invalido'}, status=400)
+        messages.error(request, "Estado inválido.")
+        return redirect('panel_cadete')
 
     pedido.estado = estado
     pedido.save(update_fields=['estado'])
@@ -1081,7 +1092,13 @@ def cadete_set_estado(request, pedido_id):
     # Notificar al panel para refrescar
     _notify_panel_update(pedido)
 
-    return JsonResponse({'ok': True, 'estado': pedido.estado, 'pedido_id': pedido.id})
+    # Respuesta según tipo de request
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+        return JsonResponse({'ok': True, 'estado': pedido.estado, 'pedido_id': pedido.id})
+    else:
+        messages.success(request, f"Pedido #{pedido.id} → {pedido.estado}.")
+        return redirect('panel_cadete')
+
 
 
 @login_required

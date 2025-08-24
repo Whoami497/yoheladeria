@@ -271,56 +271,82 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 
     <!-- ===== JS: toggle disponibilidad cadete (desktop + móvil) ===== -->
-    <script>
-      (function(){
-        function getCookie(name){
-          const v = `; ${document.cookie}`.split(`; ${name}=`); 
-          if (v.length === 2) return v.pop().split(';').shift();
+<script>
+  (function(){
+    function getCookie(name){
+      const v = `; ${document.cookie}`.split(`; ${name}=`); 
+      if (v.length === 2) return v.pop().split(';').shift();
+    }
+    const csrftoken = getCookie('csrftoken');
+
+    async function setDisponible(on){
+      const fd = new FormData();
+      fd.append('disponible', on ? '1' : '0');
+      const res = await fetch("{% url 'cadete_toggle_disponible' %}", {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrftoken},
+        body: fd
+      }).catch(()=>null);
+      if(!res) return;
+
+      const j = await res.json().catch(()=>({}));
+      const val = !!(j && j.disponible);
+
+      const btnM = document.getElementById('btn-cadete-dispo');
+      const btnD = document.getElementById('btn-cadete-dispo-desktop');
+
+      if (btnM){
+        btnM.dataset.on = val ? '1':'0';
+        btnM.classList.toggle('active', val);
+        btnM.querySelector('span').textContent = val ? 'Disponible' : 'No disp.';
+      }
+      if (btnD){
+        btnD.dataset.on = val ? '1':'0';
+        btnD.classList.toggle('btn-success', val);
+        btnD.classList.toggle('btn-secondary', !val);
+        btnD.querySelector('span').textContent = val ? 'Disponible' : 'Activar disponible';
+      }
+    }
+
+    function bindBtn(el){
+      if(!el) return;
+      el.addEventListener('click', function(ev){
+        ev.preventDefault();
+        const turningOn = this.dataset.on !== '1';
+        if (!turningOn){
+          if(!confirm('¿Querés desactivar tu disponibilidad?')) return;
         }
-        const csrftoken = getCookie('csrftoken');
+        setDisponible(turningOn);
+      });
+    }
 
-        async function setDisponible(on){
-          const fd = new FormData();
-          fd.append('disponible', on ? '1' : '0');
-          const res = await fetch("{% url 'cadete_toggle_disponible' %}", {
-            method: 'POST',
-            headers: {'X-CSRFToken': csrftoken},
-            body: fd
-          }).catch(()=>null);
-          if(!res) return;
+    // Estado inicial desde servidor (profile o sesión)
+    function initState(){
+      const initial = "{{ request.user.is_authenticated and request.user.cadeteprofile|default_if_none:'' and request.user.cadeteprofile.disponible|yesno:'1,0' }}";
+      const fallback = "{{ request.session.cadete_disponible|default_if_none:'' }}";
+      const val = (initial === '1') || (fallback === 'True');
 
-          const j = await res.json().catch(()=>({}));
-          const val = !!(j && j.disponible);
+      const btnM = document.getElementById('btn-cadete-dispo');
+      const btnD = document.getElementById('btn-cadete-dispo-desktop');
+      if (btnM){
+        btnM.dataset.on = val ? '1':'0';
+        btnM.classList.toggle('active', val);
+        const span = btnM.querySelector('span'); if (span) span.textContent = val ? 'Disponible' : 'No disp.';
+      }
+      if (btnD){
+        btnD.dataset.on = val ? '1':'0';
+        btnD.classList.toggle('btn-success', val);
+        btnD.classList.toggle('btn-secondary', !val);
+        const span = btnD.querySelector('span'); if (span) span.textContent = val ? 'Disponible' : 'Activar disponible';
+      }
+    }
 
-          const btnM = document.getElementById('btn-cadete-dispo');
-          const btnD = document.getElementById('btn-cadete-dispo-desktop');
+    bindBtn(document.getElementById('btn-cadete-dispo'));
+    bindBtn(document.getElementById('btn-cadete-dispo-desktop'));
+    initState();
+  })();
+</script>
 
-          if (btnM){
-            btnM.dataset.on = val ? '1':'0';
-            btnM.classList.toggle('active', val);
-            btnM.querySelector('span').textContent = val ? 'Disponible' : 'No disp.';
-          }
-          if (btnD){
-            btnD.dataset.on = val ? '1':'0';
-            btnD.classList.toggle('btn-success', val);
-            btnD.classList.toggle('btn-secondary', !val);
-            btnD.querySelector('span').textContent = val ? 'Disponible' : 'Activar disponible';
-          }
-        }
-
-        function bindBtn(el){
-          if(!el) return;
-          el.addEventListener('click', function(ev){
-            ev.preventDefault();
-            const on = (this.dataset.on === '1');
-            setDisponible(!on);
-          });
-        }
-
-        bindBtn(document.getElementById('btn-cadete-dispo'));
-        bindBtn(document.getElementById('btn-cadete-dispo-desktop'));
-      })();
-    </script>
 
     <!-- (Opcional) Detector de overflow: usar agregando ?debug-overflow=1 a la URL -->
     <script>

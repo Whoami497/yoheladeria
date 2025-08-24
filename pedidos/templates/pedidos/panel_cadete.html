@@ -8,11 +8,13 @@
   {% if pedidos_en_curso %}
     <div class="alert alert-info">Tenés pedidos en curso.</div>
     {% for p in pedidos_en_curso %}
-      <div class="card mb-3">
+      <div class="card mb-3" id="pedido-{{ p.id }}">
         <div class="card-body">
           <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
             <div>
-              <h6 class="mb-1">#{{ p.id }} <span class="badge bg-secondary">{{ p.estado }}</span></h6>
+              <h6 class="mb-1">
+                #{{ p.id }} <span class="badge bg-secondary js-badge">{{ p.estado }}</span>
+              </h6>
               <div class="small text-muted">
                 {{ p.cliente_nombre|default:"" }} · {{ p.cliente_telefono|default:"" }} · {{ p.cliente_direccion|default:"" }}
               </div>
@@ -26,12 +28,12 @@
               <div class="fw-bold">Total: ${{ p.total_pedido|default_if_none:"0.00" }}</div>
             </div>
             <div class="text-end">
-              <form action="{% url 'cadete_set_estado' p.id %}" method="post" class="d-inline">
+              <form action="{% url 'cadete_set_estado' p.id %}" method="post" class="d-inline js-state-form">
                 {% csrf_token %}
                 <input type="hidden" name="estado" value="EN_CAMINO">
                 <button class="btn btn-outline-primary btn-sm" {% if p.estado != 'ASIGNADO' %}disabled{% endif %}>Pasar a EN CAMINO</button>
               </form>
-              <form action="{% url 'cadete_set_estado' p.id %}" method="post" class="d-inline">
+              <form action="{% url 'cadete_set_estado' p.id %}" method="post" class="d-inline js-state-form">
                 {% csrf_token %}
                 <input type="hidden" name="estado" value="ENTREGADO">
                 <button class="btn btn-success btn-sm">Marcar ENTREGADO</button>
@@ -63,8 +65,20 @@
   }
   const csrftoken = getCookie('csrftoken');
 
+  // === Sonido al llegar nuevos pedidos al feed (si "Disponible" está ON)
+  const ORDER_SOUND_URL = "{% static 'pedidos/sounds/new-order.mp3' %}";
+  function playSound(){ try{ new Audio(ORDER_SOUND_URL).play().catch(()=>{});}catch(e){} }
+
+  // Estado “Disponible” leído desde el botón global de la barra inferior (base.html)
+  function disponibleON(){
+    const btn = document.getElementById('btn-cadete-dispo');
+    return btn && btn.dataset.on === '1';
+  }
+
+  // === FEED dinámico ===
   const FEED_URL = "{% url 'cadete_feed' %}";
   const feedList = document.getElementById('feed-list');
+  const knownIds = new Set();
 
   function buildAcceptCard(o){
     const li = document.createElement('div');
@@ -104,7 +118,12 @@
         feedList.innerHTML = '<div class="text-muted">No hay pedidos disponibles por ahora.</div>';
         return;
       }
-      j.pedidos.forEach(p => feedList.appendChild(buildAcceptCard(p)));
+      const nuevos = [];
+      j.pedidos.forEach(p => {
+        if(!knownIds.has(p.id)){ nuevos.push(p.id); knownIds.add(p.id); }
+        feedList.appendChild(buildAcceptCard(p));
+      });
+      if (nuevos.length && disponibleON()) playSound();
     }catch(e){
       console.error(e);
       feedList.innerHTML = '<div class="text-danger">No se pudo cargar el feed.</div>';
@@ -114,5 +133,58 @@
   document.getElementById('btn-refresh').addEventListener('click', loadFeed);
   loadFeed();
   setInterval(loadFeed, 12000);
+
+  // === Cambios de estado EN_CAMINO / ENTREGADO vía AJAX (sin salir de la página)
+  function badgeClass(estado){
+    const e = (estado || '').toUpperCase();
+    if (e === 'EN_CAMINO') return 'bg-warning text-dark';
+    if (e === 'ENTREGADO') return 'bg-success';
+    return 'bg-secondary';
+  }
+
+  document.addEventListener('submit', async (ev)=>{
+    const form = ev.target.closest('.js-state-form');
+    if(!form) return;
+    ev.preventDefault();
+
+    const btn = form.querySelector('button');
+    const url = form.getAttribute('action');
+    const fd = new FormData(form);
+
+    btn.disabled = true;
+    const btnHtml = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Enviando…';
+
+    try{
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrftoken, 'X-Requested-With': 'XMLHttpRequest'},
+        body: fd
+      });
+      const j = await res.json().catch(()=>null);
+      if (j && j.ok){
+        const card = form.closest('.card');
+        const badge = card.querySelector('.js-badge');
+        if (badge){
+          badge.className = 'badge js-badge ' + badgeClass(j.estado);
+          badge.textContent = j.estado;
+        }
+        // Si entregó, refrescamos para sacar el pedido de “en curso”
+        if (j.estado === 'ENTREGADO') {
+          location.reload();
+          return;
+        }
+      } else {
+        // Fallback: recargar
+        location.reload();
+      }
+    }catch(e){
+      console.error(e);
+      location.reload();
+    }finally{
+      btn.disabled = false;
+      btn.innerHTML = btnHtml;
+    }
+  });
 </script>
 {% endblock %}
