@@ -776,7 +776,12 @@ def panel_alertas_anteriores(request):
 
     filas = []
     for p in pedidos:
-        cad = p.cadete_asignado.user.get_full_name() if getattr(p, 'cadete_asignado', None) else '—'
+        # ✅ nombre completo del cadete con fallback a username
+        cad = '—'
+        if getattr(p, 'cadete_asignado', None):
+            cad_user = p.cadete_asignado.user
+            cad = cad_user.get_full_name() or cad_user.username
+
         filas.append(
             f"<tr><td>#{p.id}</td><td>{p.fecha_pedido:%Y-%m-%d %H:%M}</td>"
             f"<td>{p.estado}</td><td>{p.cliente_nombre or 'N/A'}</td>"
