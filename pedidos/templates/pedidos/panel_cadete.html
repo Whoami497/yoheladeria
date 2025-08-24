@@ -2,335 +2,169 @@
 {% load static %}
 
 {% block content %}
-<div class="container my-5">
-  <h2 class="section-title text-center mb-1">Panel del Cadete</h2>
-  <p class="text-center text-muted mb-4">Aceptá pedidos disponibles y actualizá el estado de tus entregas.</p>
+<div class="container my-4">
+  <h2 class="text-center mb-3">Panel del Cadete</h2>
+  <p class="text-muted text-center">Aceptá pedidos disponibles y actualizá el estado de tus entregas.</p>
   <hr>
 
-  <!-- ===== DISPONIBILIDAD ===== -->
-  <div class="d-flex flex-wrap align-items-center justify-content-between mb-4 gap-2">
-    <div class="d-flex align-items-center gap-2">
-      <span class="badge" id="disp-badge">Estado: —</span>
-      <span class="text-muted" id="disp-help">Cargando disponibilidad…</span>
-    </div>
-    <div class="btn-group">
-      <button class="btn btn-outline-success" id="btn-disp-on">🔛 Ponerme Disponible</button>
-      <button class="btn btn-outline-secondary" id="btn-disp-off">🔴 Ponerme No disponible</button>
-    </div>
+  <!-- Estado / disponibilidad -->
+  <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+    <span id="avail-badge" class="badge bg-secondary">Estado: —</span>
+    <button id="toggle-available" class="btn btn-success">
+      Ponerme Disponible
+    </button>
+    <small id="avail-help" class="text-muted">Vas a recibir ofertas nuevas automáticamente.</small>
   </div>
 
-  <!-- ===== MIS PEDIDOS EN CURSO ===== -->
-  <h5 class="mb-3">Mis pedidos en curso</h5>
-  <div id="my-orders">
-    {% if pedidos_en_curso %}
-      {% for p in pedidos_en_curso %}
-        <div class="card shadow-sm mb-3" data-order-id="{{ p.id }}">
-          <div class="card-body">
-            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
-              <div>
-                <div class="d-flex align-items-center gap-2">
-                  <span class="fw-bold">#{{ p.id }}</span>
-                  <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
-                </div>
-                <div class="small text-muted mt-1">
-                  Cliente: <span class="fw-semibold">{{ p.cliente_nombre|default:"N/A" }}</span>
-                  · {{ p.cliente_telefono|default:"—" }} · {{ p.cliente_direccion|default:"—" }}
-                </div>
-              </div>
-              <div class="btn-group">
-                {% if p.estado == 'ASIGNADO' %}
-                  <button class="btn btn-outline-primary btn-cadete-state"
-                          data-url="{% url 'cadete_set_estado' p.id %}" data-state="EN_CAMINO">
-                    🚴‍♂️ Voy en camino
-                  </button>
-                {% endif %}
-                {% if p.estado == 'EN_CAMINO' or p.estado == 'ASIGNADO' %}
-                  <button class="btn btn-success btn-cadete-state"
-                          data-url="{% url 'cadete_set_estado' p.id %}" data-state="ENTREGADO">
-                    ✅ Marcar Entregado
-                  </button>
-                {% endif %}
-              </div>
+  <!-- Mis pedidos en curso -->
+  <h5 class="mt-4">Mis pedidos en curso</h5>
+  {% if pedidos_en_curso %}
+    {% for p in pedidos_en_curso %}
+      <div class="card mb-2">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+              <span class="fw-bold">#{{ p.id }}</span>
+              <span class="badge bg-primary">{{ p.estado }}</span>
+              <div class="text-muted small">{{ p.cliente_nombre }} — {{ p.cliente_direccion|default:"" }}</div>
+              <div class="text-muted small">Total aprox: ${{ p.total_pedido|default_if_none:"0.00" }}</div>
             </div>
-
-            <details class="mt-2">
-              <summary class="cursor-pointer">Ver productos</summary>
-              <ul class="mb-0 small mt-2">
-                {% for d in p.detalles.all %}
-                  <li>
-                    {{ d.producto.nombre }}{% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %} (x{{ d.cantidad }})
-                    <br><span class="text-muted">Sabores:
-                      {% with sab=d.sabores.all %}{% if sab %}{{ sab|join:", " }}{% else %}Sin especificar{% endif %}{% endwith %}
-                    </span>
-                  </li>
-                {% endfor %}
-              </ul>
-            </details>
+            <div>
+              <form method="post" action="{% url 'cadete_set_estado' p.id %}" class="d-inline">
+                {% csrf_token %}
+                <input type="hidden" name="estado" value="EN_CAMINO">
+                <button class="btn btn-outline-warning me-1">Marcar EN CAMINO</button>
+              </form>
+              <form method="post" action="{% url 'cadete_set_estado' p.id %}" class="d-inline">
+                {% csrf_token %}
+                <input type="hidden" name="estado" value="ENTREGADO">
+                <button class="btn btn-success">Marcar ENTREGADO</button>
+              </form>
+            </div>
           </div>
         </div>
-      {% endfor %}
-    {% else %}
-      <div class="alert alert-light border">No tenés pedidos en curso.</div>
-    {% endif %}
-  </div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <div class="alert alert-light border">No tenés pedidos en curso.</div>
+  {% endif %}
 
-  <!-- ===== PEDIDOS DISPONIBLES ===== -->
-  <h5 class="mt-4 mb-3">Pedidos disponibles</h5>
+  <!-- Pedidos disponibles -->
+  <h5 class="mt-4">Pedidos disponibles</h5>
   <div id="feed-list">
-    <div class="alert alert-light border">Cargando ofertas…</div>
+    <div class="text-muted">Cargando…</div>
   </div>
 
-  <div class="text-center mt-4">
-    <a class="btn btn-link" href="{% url 'cadete_historial' %}">Ver mi historial</a>
+  <div class="text-center my-4">
+    <a href="{% url 'cadete_historial' %}">Ver mi historial</a>
   </div>
 </div>
 
 <script>
-  // ======= CONFIG URLs =======
-  const FEED_URL = "{% url 'cadete_feed' %}";
-  const TOGGLE_URL = "{% url 'cadete_toggle_disponible' %}";
-  const SAVE_SUB_URL = "{% url 'save_subscription' %}";
-  const ACCEPT_URL_TMPL = "{% url 'aceptar_pedido' 0 %}";      // Reemplazamos el 0 por el ID
-  const SETSTATE_URL_TMPL = "{% url 'cadete_set_estado' 0 %}";  // Reemplazamos el 0 por el ID
-  const VAPID_PUBLIC_KEY = "{{ vapid_public_key|default:'' }}";
+  // ===== Helpers =====
+  function getCookie(name){const value=`; ${document.cookie}`;const parts=value.split(`; ${name}=`);if(parts.length===2) return parts.pop().split(';').shift();}
+  const csrftoken=getCookie('csrftoken');
 
-  // ======= CSRF =======
-  function getCookie(name){
-    const value=`; ${document.cookie}`;
-    const parts=value.split(`; ${name}=`);
-    if(parts.length===2) return parts.pop().split(';').shift();
-  }
-  const csrftoken = getCookie('csrftoken');
+  const availBadge = document.getElementById('avail-badge');
+  const toggleBtn  = document.getElementById('toggle-available');
+  const feedList   = document.getElementById('feed-list');
 
-  // ======= Helpers =======
-  function urlFor(template, id){
-    // Reemplaza la última /0/ del template por /{id}/
-    return template.replace(/\/0\/?$/, `/${id}/`);
-  }
-  function estadoBadgeClass(e){ return `bg-status-${(e||'').toLowerCase()}` }
+  let disponible = false;
 
-  function setDispUI({available, busy}){
-    const badge = document.getElementById('disp-badge');
-    const help  = document.getElementById('disp-help');
-    if(busy){
-      badge.className = 'badge bg-warning text-dark';
-      badge.textContent = 'Estado: Con pedido en curso';
-      help.textContent  = 'Para aceptar otro, primero finalizá el actual.';
-      return;
-    }
-    if(available){
-      badge.className = 'badge bg-success';
-      badge.textContent = 'Estado: Disponible';
-      help.textContent  = 'Vas a recibir ofertas nuevas automáticamente.';
-    }else{
-      badge.className = 'badge bg-secondary';
-      badge.textContent = 'Estado: No disponible';
-      help.textContent  = 'No recibirás ofertas hasta que te pongas Disponible.';
-    }
+  function setAvailUI(val){
+    disponible = !!val;
+    availBadge.className = 'badge ' + (disponible ? 'bg-success' : 'bg-secondary');
+    availBadge.textContent = 'Estado: ' + (disponible ? 'Disponible' : 'No disponible');
+    toggleBtn.className = 'btn ' + (disponible ? 'btn-outline-danger' : 'btn-success');
+    toggleBtn.textContent = disponible ? 'Ponerme NO disponible' : 'Ponerme Disponible';
   }
 
-  // ======= Render de feed =======
-  const feedList = document.getElementById('feed-list');
-
-  function emptyFeed(text='No hay pedidos disponibles ahora.'){
-    feedList.innerHTML = `<div class="alert alert-light border">${text}</div>`;
-  }
-
-  function renderOfferCard(order){
-    const li = document.createElement('div');
-    li.className = 'card shadow-sm mb-3';
-    li.innerHTML = `
-      <div class="card-body">
-        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
-          <div>
-            <div class="d-flex align-items-center gap-2">
-              <span class="fw-bold">#${order.id}</span>
-              <span class="badge ${estadoBadgeClass('EN_PREPARACION')}">EN_PREPARACION</span>
-            </div>
-            <div class="small text-muted mt-1">
-              Cliente: <span class="fw-semibold">${order.cliente_nombre || 'N/A'}</span>
-              · ${order.cliente_telefono || '—'} · ${order.cliente_direccion || '—'}
-            </div>
-            <div class="small text-muted">Total aprox: $${parseFloat(order.total||0).toFixed(2)}</div>
-          </div>
-          <button class="btn btn-primary btn-accept" data-id="${order.id}">✅ Aceptar pedido</button>
-        </div>
-
-        <details class="mt-2">
-          <summary class="cursor-pointer">Ver productos</summary>
-          <ul class="mb-0 small mt-2">
-            ${(order.detalles||[]).map(d=>{
-              const name = d.opcion ? `${d.producto} - ${d.opcion}` : d.producto;
-              const sabores = (d.sabores && d.sabores.length) ? d.sabores.join(', ') : 'Sin especificar';
-              return `<li>${name} (x${d.cant})<br><span class="text-muted">Sabores: ${sabores}</span></li>`
-            }).join('')}
-          </ul>
-        </details>
-      </div>
-    `;
-    return li;
-  }
-
-  function renderFeed(list){
-    if(!list || !list.length){ emptyFeed(); return; }
-    feedList.innerHTML = '';
-    list.forEach(o => feedList.appendChild(renderOfferCard(o)));
-  }
-
-  // ======= Cargar feed =======
-  async function loadFeed(){
+  async function fetchFeed(){
     try{
-      const res = await fetch(FEED_URL, {headers: {'X-Requested-With': 'XMLHttpRequest'}});
-      if(!res.ok){ emptyFeed('No se pudo cargar el feed.'); return; }
+      const res = await fetch("{% url 'cadete_feed' %}", {headers:{'X-Requested-With':'XMLHttpRequest'}});
       const data = await res.json();
-      // disponible=false cuando tenés pedido en curso o cuando te pusiste no disponible
-      setDispUI({available: !!data.disponible, busy: !data.disponible && (data.pedidos||[]).length===0 ? false : false});
-      renderFeed(data.pedidos || []);
+      setAvailUI(!!data.disponible);
+
+      const pedidos = data.pedidos || [];
+      if(!pedidos.length){
+        feedList.innerHTML = '<div class="alert alert-light border">No hay pedidos disponibles.</div>';
+        return;
+      }
+      feedList.innerHTML = pedidos.map(p => {
+        const dir = (p.cliente_direccion||'').trim();
+        const tel = (p.cliente_telefono||'').trim();
+        const detalleHtml = (p.detalles||[]).map(d=>{
+          const opt = d.opcion ? ` - ${d.opcion}` : '';
+          const sab = (d.sabores&&d.sabores.length) ? d.sabores.join(', ') : 'Sin especificar';
+          return `<li>${d.producto}${opt} (x${d.cant})<br><span class="text-muted small">Sabores: ${sab}</span></li>`;
+        }).join('');
+        return `
+          <div class="card mb-2" id="offer-${p.id}">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                  <span class="fw-bold">#${p.id}</span>
+                  <span class="badge bg-info text-dark">EN_PREPARACION</span>
+                  <div class="text-muted small">Cliente: <span class="fw-semibold">${p.cliente_nombre||''}</span> · ${tel||'—'} · ${dir||'—'}</div>
+                  <div class="text-muted small">Total aprox: $${parseFloat(p.total||0).toFixed(2)}</div>
+                  <details class="mt-2"><summary>Ver productos</summary><ul class="small mt-2 mb-0">${detalleHtml}</ul></details>
+                </div>
+                <div>
+                  <button class="btn btn-primary btn-accept" data-id="${p.id}">✅ Aceptar pedido</button>
+                </div>
+              </div>
+            </div>
+          </div>`;
+      }).join('');
     }catch(e){
-      emptyFeed('Error de conexión.');
+      feedList.innerHTML = '<div class="alert alert-warning">No se pudo cargar el feed.</div>';
     }
   }
 
-  // ======= Aceptar pedido =======
-  document.addEventListener('click', async (ev)=>{
-    const btn = ev.target.closest('.btn-accept');
-    if(!btn) return;
-    const id = btn.dataset.id;
-    const url = urlFor(ACCEPT_URL_TMPL, id);
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Aceptando…';
+  // Toggle único
+  toggleBtn.addEventListener('click', async ()=>{
     try{
-      const res = await fetch(url, {
-        method:'POST',
-        headers: {'X-CSRFToken': csrftoken, 'X-Requested-With':'XMLHttpRequest'}
+      const form = new URLSearchParams();
+      form.append('disponible', disponible ? '0' : '1');
+      const res = await fetch("{% url 'cadete_toggle_disponible' %}", {
+        method: 'POST',
+        headers: {'X-CSRFToken':csrftoken, 'X-Requested-With':'XMLHttpRequest', 'Content-Type':'application/x-www-form-urlencoded'},
+        body: form.toString()
       });
-      // Si OK por AJAX -> recargar para ver el pedido en "Mis pedidos"
-      if(res.ok){ location.reload(); return; }
-      // fallback navegación
-      location.href = url;
-    }catch(e){ location.href = url; }
-  });
-
-  // ======= Cambiar estado de MI pedido =======
-  document.addEventListener('click', async (ev)=>{
-    const btn = ev.target.closest('.btn-cadete-state');
-    if(!btn) return;
-    const url = btn.dataset.url;
-    const state = btn.dataset.state;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Guardando…';
-    try{
-      const res = await fetch(url, {
-        method:'POST',
-        headers:{
-          'X-CSRFToken': csrftoken,
-          'X-Requested-With':'XMLHttpRequest',
-          'Content-Type':'application/x-www-form-urlencoded'
-        },
-        body: `estado=${encodeURIComponent(state)}`
-      });
-      if(res.ok){
-        const data = await res.json().catch(()=>({}));
-        if(data.ok){
-          // Si se marcó ENTREGADO, lo sacamos de la lista.
-          if(state === 'ENTREGADO'){
-            const card = btn.closest('[data-order-id]');
-            if(card) card.remove();
-            if(!document.querySelector('#my-orders [data-order-id]')){
-              document.getElementById('my-orders').innerHTML = '<div class="alert alert-light border">No tenés pedidos en curso.</div>';
-            }
-            // al entregar, quedás NO disponible (política del backend)
-            setDispUI({available:false, busy:false});
-          }else{
-            // Solo actualizar badge
-            const badge = btn.closest('.card-body').querySelector('.badge');
-            if(badge){ badge.className='badge '+estadoBadgeClass(state); badge.textContent=state; }
-          }
-          btn.disabled = false;
-          btn.textContent = (state==='EN_CAMINO') ? '🚴‍♂️ Voy en camino' : '✅ Marcar Entregado';
-          return;
-        }
-      }
-      // Si no fue JSON o vino HTML -> fallback
-      location.href = url;
-    }catch(e){ location.href = url; }
-  });
-
-  // ======= Toggle disponibilidad =======
-  async function setDisponible(val){
-    try{
-      const res = await fetch(TOGGLE_URL, {
-        method:'POST',
-        headers:{
-          'X-CSRFToken': csrftoken,
-          'X-Requested-With':'XMLHttpRequest',
-          'Content-Type':'application/x-www-form-urlencoded'
-        },
-        body:`disponible=${val?1:0}`
-      });
-      const data = await res.json().catch(()=>({}));
+      const data = await res.json();
       if(data.ok){
-        setDispUI({available: !!data.disponible, busy: false});
-        if(val) loadFeed(); else emptyFeed('Estás no disponible.');
-      }else if(data.error === 'ocupado'){
-        alert('Tenés un pedido en curso. Entregalo antes de aceptar otro.');
-        setDispUI({available:false, busy:true});
+        setAvailUI(data.disponible);
+        // si quedó no disponible, vaciamos feed
+        if(!data.disponible) feedList.innerHTML = '<div class="alert alert-light border">No hay pedidos disponibles.</div>';
+        else fetchFeed();
+      }else if(data.error==='ocupado'){
+        alert('Primero tenés que finalizar tu pedido en curso.');
+      }else{
+        alert('No se pudo actualizar la disponibilidad.');
       }
-    }catch(e){ /* ignore */ }
-  }
+    }catch(e){ alert('Error de red.'); }
+  });
 
-  document.getElementById('btn-disp-on').addEventListener('click', ()=>setDisponible(true));
-  document.getElementById('btn-disp-off').addEventListener('click',()=>setDisponible(false));
-
-  // ======= Push (opcional) =======
-  async function subscribePush(){
-    if(!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-    if(!VAPID_PUBLIC_KEY) return;
-
+  // Aceptar pedido
+  document.addEventListener('click', async (ev)=>{
+    const btn = ev.target.closest('.btn-accept'); if(!btn) return;
+    btn.disabled = true; btn.textContent = 'Aceptando…';
+    const id = btn.dataset.id;
     try{
-      const reg = await navigator.serviceWorker.register('/sw.js'); // scope raíz
-      const perm = await Notification.requestPermission();
-      if(perm !== 'granted') return;
-
-      function urlBase64ToUint8Array(base64String){
-        const padding = '='.repeat((4 - base64String.length % 4) % 4);
-        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-        const rawData = atob(base64);
-        const outputArray = new Uint8Array(rawData.length);
-        for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
-        return outputArray;
+      const res = await fetch(`/aceptar-pedido/${id}/`, {method:'POST', headers:{'X-CSRFToken':csrftoken, 'X-Requested-With':'XMLHttpRequest'}});
+      if(res.ok){
+        document.getElementById(`offer-${id}`)?.remove();
+        fetchFeed();
+        setAvailUI(false); // al aceptar, el backend deja el cadete NO disponible
+      }else{
+        location.href = `/aceptar-pedido/${id}/`;
       }
+    }catch(e){ location.href = `/aceptar-pedido/${id}/`; }
+  });
 
-      let sub = await reg.pushManager.getSubscription();
-      if(!sub){
-        sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-        });
-      }
-      await fetch(SAVE_SUB_URL, {
-        method:'POST',
-        headers:{'Content-Type':'application/json','X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'},
-        body: JSON.stringify(sub)
-      });
-    }catch(e){ /* silencio */ }
-  }
-
-  // ======= Init =======
-  (async function init(){
-    await loadFeed();
-    // refresco periódico del feed (si estás disponible)
-    setInterval(loadFeed, 12000);
-    subscribePush();
-  })();
+  // init
+  fetchFeed();
+  // refresco liviano cada 20s sólo si sigue disponible
+  setInterval(()=>{ if(disponible) fetchFeed(); }, 20000);
 </script>
-
-<style>
-  .bg-status-recibido{background:#0d6efd !important}
-  .bg-status-en_preparacion{background:#0dcaf0 !important}
-  .bg-status-asignado{background:#6f42c1 !important}
-  .bg-status-en_camino{background:#ffc107 !important; color:#212529 !important}
-  .bg-status-entregado{background:#198754 !important}
-  .bg-status-cancelado{background:#dc3545 !important}
-</style>
 {% endblock %}

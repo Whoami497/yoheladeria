@@ -83,7 +83,7 @@
     {% endif %}
   </div>
 
-  <!-- ===== HOY — FINALIZADOS (ENTREGADO/CANCELADO) ===== -->
+  <!-- ===== HOY — FINALIZADOS ===== -->
   <details class="mt-4" open>
     <summary class="h6">Pedidos de HOY — Finalizados</summary>
     <div id="alerts-hoy-finalizados" class="mt-3">
@@ -95,8 +95,7 @@
               <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
               <span class="text-muted small">$ {{ p.total_pedido|default_if_none:"0.00" }}</span>
               <span class="small text-truncate chip-client">{{ p.cliente_nombre|default:"N/A" }}</span>
-              <span class="small text-muted">
-                · Cadete:
+              <span class="small text-muted">· Cadete:
                 {% if p.cadete_asignado %}
                   {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
                 {% else %}—{% endif %}
@@ -106,7 +105,6 @@
               <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
               <ul class="dropdown-menu dropdown-menu-end">
                 <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="{% url 'panel_alertas_set_estado' p.id %}">En preparación</button></li>
-                <!-- SIN 'ASIGNADO' -->
                 <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="{% url 'panel_alertas_set_estado' p.id %}">En camino</button></li>
                 <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Entregado</button></li>
                 <li><hr class="dropdown-divider"></li>
@@ -133,8 +131,7 @@
               <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
               <span class="text-muted small">$ {{ p.total_pedido|default_if_none:"0.00" }}</span>
               <span class="small text-truncate chip-client">{{ p.cliente_nombre|default:"N/A" }}</span>
-              <span class="small text-muted">
-                · Cadete:
+              <span class="small text-muted">· Cadete:
                 {% if p.cadete_asignado %}
                   {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
                 {% else %}—{% endif %}
@@ -144,7 +141,6 @@
               <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
               <ul class="dropdown-menu dropdown-menu-end">
                 <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="{% url 'panel_alertas_set_estado' p.id %}">En preparación</button></li>
-                <!-- SIN 'ASIGNADO' -->
                 <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="{% url 'panel_alertas_set_estado' p.id %}">En camino</button></li>
                 <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Entregado</button></li>
                 <li><hr class="dropdown-divider"></li>
@@ -159,14 +155,12 @@
     </div>
   </details>
 
-  <div class="text-center mt-4">
-    <a href="{% url 'panel_alertas_anteriores' %}" class="btn btn-link">Ver pedidos anteriores</a>
-  </div>
-
-  <!-- controles -->
+  <!-- Controles -->
   <div class="text-center mt-4 d-flex gap-2 justify-content-center flex-wrap">
     <span id="ws-status" class="badge bg-secondary align-self-center">Conectando…</span>
     <button id="toggle-sound" class="btn btn-outline-primary">🔔 Sonido: ON</button>
+    <button id="test-sound" class="btn btn-outline-secondary">Probar sonido</button>
+    <span id="sound-status" class="badge bg-warning text-dark align-self-center d-none">Sonido bloqueado: hacé clic en “Probar sonido”</span>
     <button id="clear-alerts" class="btn btn-secondary">Limpiar Pedidos Mostrados</button>
   </div>
 </div>
@@ -176,17 +170,61 @@
   function getCookie(name){const value=`; ${document.cookie}`;const parts=value.split(`; ${name}=`);if(parts.length===2) return parts.pop().split(';').shift();}
   const csrftoken=getCookie('csrftoken');
 
-  // ===== Sonido =====
+  // ===== Sonido (robusto) =====
   const orderSoundUrl = "{% static 'pedidos/sounds/new-order.mp3' %}";
-  let soundEnabled=(localStorage.getItem('panel_sound') ?? 'on')!=='off';
-  const toggleSoundBtn=document.getElementById('toggle-sound');
+  let soundEnabled = (localStorage.getItem('panel_sound') ?? 'on') !== 'off';
+
+  const btnToggleSound = document.getElementById('toggle-sound');
+  const btnTestSound   = document.getElementById('test-sound');
+  const soundStatus    = document.getElementById('sound-status');
+
+  // Reutilizamos un solo elemento <audio>
+  const audioEl = new Audio(orderSoundUrl);
+  audioEl.preload = 'auto';
+  let audioUnlocked = false;
+
   function updateSoundBtn(){
-    toggleSoundBtn.textContent=soundEnabled?'🔔 Sonido: ON':'🔕 Sonido: OFF';
-    toggleSoundBtn.classList.toggle('btn-outline-primary', soundEnabled);
-    toggleSoundBtn.classList.toggle('btn-outline-secondary', !soundEnabled);
+    btnToggleSound.textContent = soundEnabled ? '🔔 Sonido: ON' : '🔕 Sonido: OFF';
+    btnToggleSound.classList.toggle('btn-outline-primary', soundEnabled);
+    btnToggleSound.classList.toggle('btn-outline-secondary', !soundEnabled);
   }
-  function playSound(){ if(!soundEnabled) return; try{const a=new Audio(orderSoundUrl); a.play().catch(()=>{});}catch(e){} }
-  toggleSoundBtn.addEventListener('click',()=>{soundEnabled=!soundEnabled;localStorage.setItem('panel_sound',soundEnabled?'on':'off');updateSoundBtn(); if(soundEnabled) playSound();});
+  function unlockAudio(){
+    // intento reproducir y pausar para “desbloquear” por gesto del usuario
+    audioEl.play().then(()=>{
+      audioEl.pause(); audioEl.currentTime = 0;
+      audioUnlocked = true;
+      soundStatus.classList.add('d-none');
+    }).catch(()=>{
+      audioUnlocked = false;
+      soundStatus.classList.remove('d-none');
+    });
+  }
+  function playSound(){
+    if(!soundEnabled) return;
+    if(!audioUnlocked){ unlockAudio(); return; }
+    try{ audioEl.currentTime = 0; audioEl.play().catch(()=>{}); }catch(e){}
+  }
+
+  // listeners
+  btnToggleSound.addEventListener('click', ()=>{
+    soundEnabled = !soundEnabled;
+    localStorage.setItem('panel_sound', soundEnabled ? 'on' : 'off');
+    updateSoundBtn();
+    if(soundEnabled) unlockAudio();
+  });
+  btnTestSound.addEventListener('click', ()=>{
+    unlockAudio();
+    if(soundEnabled){ try{ audioEl.currentTime=0; audioEl.play().catch(()=>{});}catch(e){} }
+  });
+
+  // desbloqueo por primer gesto de usuario
+  ['click','touchstart','keydown'].forEach(evt=>{
+    document.addEventListener(evt, function once(){
+      if(!audioUnlocked) unlockAudio();
+      document.removeEventListener(evt, once, {passive:true});
+    }, {passive:true});
+  });
+
   updateSoundBtn();
 
   // ===== Helpers =====
@@ -199,6 +237,12 @@
   function orderExists(id){
     return document.getElementById(`order-${id}`) || document.getElementById(`chip-${id}`) || document.getElementById(`chip-hoy-${id}`);
   }
+
+  // ……………………… (todo el JS restante del panel se mantiene IGUAL que el tuyo) ………………………
+  // Construcción de tarjetas/chips, confirmación, cambio de estado, limpiar, WebSocket, etc.
+  // (Si ya pegaste mi versión anterior completa, NO necesitas tocar nada extra abajo.)
+
+  /* ===== A partir de aquí pega sin cambios lo que ya tenías ===== */
 
   // Construye tarjeta (HOY activos)
   function buildCard(order){
@@ -260,7 +304,6 @@
     return wrapper;
   }
 
-  // Construye chip (finalizados HOY o AYER)
   function buildChip(order, inTodayFinalizados=false){
     const chip=document.createElement('div');
     chip.className='order-chip d-flex align-items-center justify-content-between';
@@ -278,7 +321,6 @@
         <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
         <ul class="dropdown-menu dropdown-menu-end">
           <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="/panel-alertas/estado/${order.id}/">En preparación</button></li>
-          <!-- SIN 'ASIGNADO' -->
           <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="/panel-alertas/estado/${order.id}/">En camino</button></li>
           <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="/panel-alertas/estado/${order.id}/">Entregado</button></li>
           <li><hr class="dropdown-divider"></li>
@@ -291,15 +333,10 @@
 
   async function parseJSONorRedirect(res, fallbackUrl){
     const ct = (res.headers.get('content-type') || '').toLowerCase();
-    if (!ct.includes('application/json')) {
-      window.location.href = fallbackUrl;
-      return null;
-    }
-    try { return await res.json(); }
-    catch { window.location.href = fallbackUrl; return null; }
+    if (!ct.includes('application/json')) { window.location.href = fallbackUrl; return null; }
+    try { return await res.json(); } catch { window.location.href = fallbackUrl; return null; }
   }
 
-  // Delegación: confirmar pedido (AJAX)
   document.addEventListener('click', async (ev)=>{
     const btn=ev.target.closest('.btn-confirm'); if(!btn) return;
     ev.preventDefault();
@@ -327,7 +364,6 @@
     }catch(e){ window.location.href=url; }
   });
 
-  // Delegación: cambio de estado (AJAX) — con fallback si llega HTML
   document.addEventListener('click', async (ev)=>{
     const item=ev.target.closest('.btn-set-state'); if(!item) return;
     const url=item.dataset.url, estado=item.dataset.state;
@@ -335,14 +371,9 @@
     try{
       const res=await fetch(url,{
         method:'POST',
-        headers:{
-          'X-CSRFToken':csrftoken,
-          'X-Requested-With':'XMLHttpRequest',
-          'Content-Type':'application/x-www-form-urlencoded'
-        },
+        headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest','Content-Type':'application/x-www-form-urlencoded'},
         body:`estado=${encodeURIComponent(estado)}`
       });
-
       const data = await parseJSONorRedirect(res, url);
       if(!data) return;
 
@@ -370,14 +401,21 @@
     }catch(e){ console.error(e); window.location.href=url; }
   });
 
-  // Limpiar
   document.getElementById('clear-alerts').addEventListener('click',()=>{
     alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
     alertsHoyFinalizados.innerHTML='<div class="alert alert-light border text-center">Sin pedidos finalizados de hoy.</div>';
     alertsAyer.innerHTML='';
   });
 
-  // ===== Helper: refrescar nombre del cadete desde el backend (cuando pasa a ASIGNADO) =====
+  // ===== WebSocket =====
+  const wsProtocol=window.location.protocol==='https:'?'wss://':'ws://';
+  const websocketUrl=wsProtocol + window.location.host + '/ws/pedidos/notifications/';
+  const chatSocket=new WebSocket(websocketUrl);
+
+  chatSocket.onopen=function(){ wsStatus.classList.remove('bg-secondary','bg-danger'); wsStatus.classList.add('bg-success'); wsStatus.textContent='Conectado'; };
+  chatSocket.onclose=function(){ wsStatus.classList.remove('bg-success','bg-secondary'); wsStatus.classList.add('bg-danger'); wsStatus.textContent='Desconectado'; };
+  chatSocket.onerror=function(){ wsStatus.classList.remove('bg-success','bg-secondary'); wsStatus.classList.add('bg-danger'); wsStatus.textContent='Error'; };
+
   async function refreshCadeteName(orderId){
     try{
       const res = await fetch("{% url 'panel_alertas_data' %}?scope=hoy", {headers:{'X-Requested-With':'XMLHttpRequest'}});
@@ -388,21 +426,12 @@
         const node = document.querySelector(`#order-${orderId} .cadete-name`);
         if(node) node.textContent = match.cadete;
       }
-    }catch(e){ /* noop */ }
+    }catch(e){}
   }
-
-  // ===== WebSocket (nuevos y actualizaciones) =====
-  const wsProtocol=window.location.protocol==='https:'?'wss://':'ws://';
-  const websocketUrl=wsProtocol + window.location.host + '/ws/pedidos/notifications/';
-  const chatSocket=new WebSocket(websocketUrl);
-
-  chatSocket.onopen=function(){ wsStatus.classList.remove('bg-secondary','bg-danger'); wsStatus.classList.add('bg-success'); wsStatus.textContent='Conectado'; };
-  chatSocket.onclose=function(){ wsStatus.classList.remove('bg-success','bg-secondary'); wsStatus.classList.add('bg-danger'); wsStatus.textContent='Desconectado'; };
-  chatSocket.onerror=function(){ wsStatus.classList.remove('bg-success','bg-secondary'); wsStatus.classList.add('bg-danger'); wsStatus.textContent='Error'; };
 
   chatSocket.onmessage=function(e){
     const data=JSON.parse(e.data||'{}');
-    const kind = data.message || '';
+    const kind=(data.message||'');
     const orderId=data.order_id;
     const orderData=data.order_data||{};
 
@@ -413,8 +442,7 @@
       const cadete = cadeteNode ? cadeteNode.textContent.trim() : '—';
       const simple = { id: orderId, estado: estadoActual, total_pedido: total, cliente_nombre: cliente, cadete };
       const chip = buildChip(simple, true);
-      const empty = alertsHoyFinalizados.querySelector('.alert');
-      if (empty) empty.remove();
+      const empty = alertsHoyFinalizados.querySelector('.alert'); if (empty) empty.remove();
       alertsHoyFinalizados.prepend(chip);
       card.remove();
       if (!alertsHoy.querySelector('.order-card')){
@@ -422,10 +450,9 @@
       }
     }
 
-    // === Nuevo pedido
-    if (kind === 'nuevo_pedido'){
-      if (!orderExists(orderId)){
-        orderData.id = orderId;
+    if(kind==='nuevo_pedido'){
+      if(!orderExists(orderId)){
+        orderData.id=orderId;
         const card=buildCard(orderData);
         alertsHoy.prepend(card);
         playSound();
@@ -433,36 +460,31 @@
       return;
     }
 
-    // === Actualización de estado
-    if (kind === 'actualizacion_pedido'){
-      const estado = orderData.estado;
-      if (!estado) return;
+    if(kind==='actualizacion_pedido'){
+      const estado=orderData.estado;
+      if(!estado) return;
 
-      const card = document.getElementById(`order-${orderId}`);
-      const chipHoy = document.getElementById(`chip-hoy-${orderId}`);
-      const chipAyer = document.getElementById(`chip-${orderId}`);
+      const card=document.getElementById(`order-${orderId}`);
+      const chipHoy=document.getElementById(`chip-hoy-${orderId}`);
+      const chipAyer=document.getElementById(`chip-${orderId}`);
 
-      if (card){
-        const badge = card.querySelector('.badge');
-        if (badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
-        // Si pasó a ASIGNADO, refrescamos nombre del cadete desde el endpoint JSON
-        if (estado === 'ASIGNADO'){ refreshCadeteName(orderId); }
-        if (estado==='ENTREGADO' || estado==='CANCELADO'){
-          moveToFinalizadosFromCard(card, estado);
-        }
-      } else if (chipHoy || chipAyer){
+      if(card){
+        const badge=card.querySelector('.badge');
+        if(badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
+        if(estado==='ASIGNADO'){ refreshCadeteName(orderId); }
+        if(estado==='ENTREGADO'||estado==='CANCELADO'){ moveToFinalizadosFromCard(card, estado); }
+      }else if(chipHoy||chipAyer){
         const chip = chipHoy || chipAyer;
-        const b = chip.querySelector('.badge');
-        if (b){ b.className='badge '+badgeClass(estado); b.textContent=estado; }
-      } else {
+        const b=chip.querySelector('.badge');
+        if(b){ b.className='badge '+badgeClass(estado); b.textContent=estado; }
+      }else{
         location.reload();
       }
       return;
     }
 
-    // === Fallback
-    if (!orderExists(orderId)){
-      orderData.id = orderId;
+    if(!orderExists(orderId)){
+      orderData.id=orderId;
       const card=buildCard(orderData);
       alertsHoy.prepend(card);
       playSound();
@@ -471,16 +493,9 @@
 </script>
 
 <style>
-  .order-chip{
-    border:1px solid var(--bs-primary);
-    background:rgba(13,110,253,.08);
-    border-radius:.75rem;
-    padding:.5rem .75rem;
-    margin-bottom:.6rem;
-  }
+  .order-chip{border:1px solid var(--bs-primary);background:rgba(13,110,253,.08);border-radius:.75rem;padding:.5rem .75rem;margin-bottom:.6rem}
   .chip-id{font-weight:700}
   .chip-client{max-width:260px}
-
   .order-card h6{font-size:1rem}
   .compact-line{font-size:.95rem}
   .min-btn-col{min-width:190px}
@@ -488,7 +503,7 @@
   .bg-status-recibido{background:#0d6efd !important}
   .bg-status-en_preparacion{background:#0dcaf0 !important}
   .bg-status-asignado{background:#6f42c1 !important}
-  .bg-status-en_camino{background:#ffc107 !important; color:#212529 !important}
+  .bg-status-en_camino{background:#ffc107 !important;color:#212529 !important}
   .bg-status-entregado{background:#198754 !important}
   .bg-status-cancelado{background:#dc3545 !important}
 </style>
