@@ -47,7 +47,7 @@ def pos_abrir_caja(request):
 
     try:
         inicial = Decimal(request.POST.get('saldo_inicial_efectivo', '0') or '0')
-    except:
+    except Exception:
         inicial = Decimal('0')
 
     Caja.objects.create(
@@ -62,6 +62,10 @@ def pos_abrir_caja(request):
 @login_required
 @transaction.atomic
 def pos_vender(request):
+    """
+    Ahora soporta múltiples ítems.
+    Corrige total duplicado calculando todo explícitamente acá.
+    """
     if request.method != 'POST':
         return HttpResponseForbidden('Método no permitido')
     caja = _caja_abierta()
@@ -69,15 +73,33 @@ def pos_vender(request):
         messages.error(request, 'Abrí una caja antes de vender.')
         return redirect('pos_panel')
 
-    producto_id = request.POST.get('producto_id')
-    cantidad = int(request.POST.get('cantidad', '1') or 1)
     medio_pago = request.POST.get('medio_pago') or 'EFECTIVO'
     tipo_comp = request.POST.get('tipo_comprobante') or 'COMANDA'
 
-    prod = get_object_or_404(ProductoPOS, pk=producto_id)
-    precio = prod.precio or Decimal('0')
-    desc = prod.nombre
+    # Arrays de productos/cantidades
+    ids = request.POST.getlist('item_producto')
+    cants = request.POST.getlist('item_cantidad')
 
+    # Filtramos filas vacías
+    lineas = []
+    for pid, cnt in zip(ids, cants):
+        pid = (pid or '').strip()
+        cnt = (cnt or '').strip()
+        if not pid:
+            continue
+        try:
+            q = int(cnt) if cnt else 1
+            if q < 1:
+                q = 1
+        except Exception:
+            q = 1
+        lineas.append((pid, q))
+
+    if not lineas:
+        messages.error(request, 'Elegí al menos un producto.')
+        return redirect('pos_panel')
+
+    # Creamos venta y cada ítem con cálculo explícito del subtotal
     venta = VentaPOS.objects.create(
         usuario=request.user,
         caja=caja,
@@ -86,27 +108,43 @@ def pos_vender(request):
         total=Decimal('0'),
         estado='COMPLETADA',
     )
-    VentaPOSItem.objects.create(
-        venta=venta,
-        producto=prod,
-        descripcion=desc,
-        cantidad=cantidad,
-        precio_unitario=precio,
-    )
-    venta.recomputar_total(save=True)
 
-    # Asentamos movimiento de caja por la venta (sirve para totales por medio)
+    total_venta = Decimal('0')
+
+    for pid, q in lineas:
+        prod = get_object_or_404(ProductoPOS, pk=pid)
+        precio = prod.precio or Decimal('0')
+        desc = prod.nombre
+
+        subtotal = (precio or Decimal('0')) * Decimal(q)
+        total_venta += subtotal
+
+        # Guardamos el ítem seteando el subtotal ya calculado
+        VentaPOSItem.objects.create(
+            venta=venta,
+            producto=prod,
+            descripcion=desc,
+            cantidad=q,
+            precio_unitario=precio,
+            subtotal=subtotal,  # <-- cálculo explícito para evitar efectos secundarios
+        )
+
+    # Guardamos el total UNA sola vez (evita cualquier duplicación)
+    venta.total = total_venta
+    venta.save(update_fields=['total'])
+
+    # Asentamos movimiento de caja por la venta (monto = total_venta exacto)
     MovimientoCaja.objects.create(
         caja=caja,
         tipo='VENTA',
         medio_pago=medio_pago,
-        monto=venta.total,
-        descripcion=f'VentaPOS #{venta.id} - {desc} x{cantidad}',
+        monto=total_venta,
+        descripcion=f'VentaPOS #{venta.id} ({len(lineas)} ítem/s)',
         venta=venta,
         usuario=request.user
     )
 
-    messages.success(request, f'Venta registrada: {desc} x{cantidad} (${venta.total}).')
+    messages.success(request, f'Venta registrada (${total_venta}).')
     return redirect('pos_panel')
 
 @user_passes_test(es_staff)
@@ -124,7 +162,7 @@ def pos_movimiento(request):
     medio = request.POST.get('medio_pago') or 'EFECTIVO'
     try:
         monto = Decimal(request.POST.get('monto', '0') or '0')
-    except:
+    except Exception:
         monto = Decimal('0')
     desc = request.POST.get('descripcion', '').strip()
 
@@ -159,7 +197,7 @@ def pos_cerrar_caja(request):
 
     try:
         contado = Decimal(request.POST.get('saldo_cierre_efectivo', '0') or '0')
-    except:
+    except Exception:
         contado = Decimal('0')
 
     caja.estado = 'CERRADA'
