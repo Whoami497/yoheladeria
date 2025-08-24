@@ -3,174 +3,116 @@
 
 {% block content %}
 <div class="container my-4">
-  <h2 class="mb-3">Panel del Cadete</h2>
+  <h2 class="mb-2">Panel del Cadete</h2>
 
-  <!-- Pedidos en curso del cadete -->
   {% if pedidos_en_curso %}
-    <div class="mb-4">
-      <h5>Tu pedido en curso</h5>
-      {% for p in pedidos_en_curso %}
-        <div class="card mb-2" id="curso-{{ p.id }}">
-          <div class="card-body d-flex justify-content-between align-items-start gap-3 flex-wrap">
-            <div class="flex-grow-1">
-              <div class="d-flex align-items-center gap-2">
-                <strong>#{{ p.id }}</strong>
-                <span class="badge bg-secondary">{{ p.estado }}</span>
+    <div class="alert alert-info">Tenés pedidos en curso.</div>
+    {% for p in pedidos_en_curso %}
+      <div class="card mb-3">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+              <h6 class="mb-1">#{{ p.id }} <span class="badge bg-secondary">{{ p.estado }}</span></h6>
+              <div class="small text-muted">
+                {{ p.cliente_nombre|default:"" }} · {{ p.cliente_telefono|default:"" }} · {{ p.cliente_direccion|default:"" }}
               </div>
-              <div class="small text-muted mt-1">
-                {{ p.cliente_nombre|default:"" }} · {{ p.cliente_direccion|default:"" }} · {{ p.cliente_telefono|default:"" }}
-              </div>
-              <ul class="mb-1 small mt-2">
+              <ul class="small mb-2 mt-2">
                 {% for d in p.detalles.all %}
                   <li>
                     {{ d.producto.nombre }}{% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %} (x{{ d.cantidad }})
-                    {% with sab=d.sabores.all %}
-                      {% if sab %}<br><span class="text-muted">Sabores: {{ sab|join:", " }}</span>{% endif %}
-                    {% endwith %}
                   </li>
                 {% endfor %}
               </ul>
-              <div class="fw-bold">Total: $ {{ p.total_pedido|default_if_none:"0.00" }}</div>
+              <div class="fw-bold">Total: ${{ p.total_pedido|default_if_none:"0.00" }}</div>
             </div>
             <div class="text-end">
-              {% if p.estado == 'ASIGNADO' %}
-                <button class="btn btn-primary btn-sm cadete-set" data-id="{{ p.id }}" data-next="EN_CAMINO">Marcar EN CAMINO</button>
-              {% elif p.estado == 'EN_CAMINO' %}
-                <button class="btn btn-success btn-sm cadete-set" data-id="{{ p.id }}" data-next="ENTREGADO">Marcar ENTREGADO</button>
-              {% else %}
-                <span class="text-muted small">Estado: {{ p.estado }}</span>
-              {% endif %}
+              <form action="{% url 'cadete_set_estado' p.id %}" method="post" class="d-inline">
+                {% csrf_token %}
+                <input type="hidden" name="estado" value="EN_CAMINO">
+                <button class="btn btn-outline-primary btn-sm" {% if p.estado != 'ASIGNADO' %}disabled{% endif %}>Pasar a EN CAMINO</button>
+              </form>
+              <form action="{% url 'cadete_set_estado' p.id %}" method="post" class="d-inline">
+                {% csrf_token %}
+                <input type="hidden" name="estado" value="ENTREGADO">
+                <button class="btn btn-success btn-sm">Marcar ENTREGADO</button>
+              </form>
             </div>
           </div>
         </div>
-      {% endfor %}
-    </div>
+      </div>
+    {% endfor %}
   {% else %}
     <div class="alert alert-info">No tenés pedidos en curso.</div>
   {% endif %}
 
-  <!-- Feed de pedidos disponibles (aparecen solo si la tienda los confirmó) -->
-  <div class="mb-2 d-flex align-items-center gap-2">
-    <h5 class="mb-0">Pedidos disponibles</h5>
-    <span class="text-muted small"> (se actualiza solo)</span>
+  <h5 class="mt-4">Pedidos disponibles <small class="text-muted">(se actualiza solo)</small></h5>
+  <div id="feed-list">
+    <div class="text-muted">Cargando…</div>
   </div>
-  <div id="cadete-feed"></div>
 
-  <div class="mt-4">
-    <button id="refresh-feed" class="btn btn-outline-secondary btn-sm">Actualizar ahora</button>
+  <div class="mt-3">
+    <button id="btn-refresh" class="btn btn-sm btn-outline-secondary">Actualizar ahora</button>
   </div>
 </div>
 
 <script>
-(function(){
-  // ===== CSRF
-  function getCookie(name){const v=`; ${document.cookie}`.split(`; ${name}=`);if(v.length===2) return v.pop().split(';').shift();}
+  // === CSRF desde cookie para formularios creados por JS ===
+  function getCookie(name){
+    const v = `; ${document.cookie}`.split(`; ${name}=`); 
+    if (v.length === 2) return v.pop().split(';').shift();
+  }
   const csrftoken = getCookie('csrftoken');
 
-  const feedRoot = document.getElementById('cadete-feed');
-  const btnRefresh = document.getElementById('refresh-feed');
+  const FEED_URL = "{% url 'cadete_feed' %}";
+  const feedList = document.getElementById('feed-list');
+
+  function buildAcceptCard(o){
+    const li = document.createElement('div');
+    li.className = 'card mb-3';
+    li.innerHTML = `
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+          <div>
+            <h6 class="mb-1">#${o.id} <span class="badge bg-info text-dark">EN_PREPARACION</span></h6>
+            <div class="small text-muted">${o.cliente_nombre || ''} · ${o.cliente_telefono || ''} · ${o.cliente_direccion || ''}</div>
+            <ul class="small mb-2 mt-2">
+              ${(o.detalles||[]).map(d=>{
+                const name = d.opcion ? `${d.producto} - ${d.opcion}` : d.producto;
+                return `<li>${name} (x${d.cant})</li>`;
+              }).join('')}
+            </ul>
+            <div class="fw-bold">Total: $${o.total}</div>
+          </div>
+          <div class="text-end">
+            <form method="post" action="/cadete/aceptar-pedido/${o.id}/">
+              <input type="hidden" name="csrfmiddlewaretoken" value="${csrftoken}">
+              <button class="btn btn-primary">Aceptar pedido</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    `;
+    return li;
+  }
 
   async function loadFeed(){
     try{
-      const res = await fetch("{% url 'cadete_feed' %}", {headers:{'X-Requested-With':'XMLHttpRequest'}});
-      const j = await res.json().catch(()=>({}));
-      const items = (j && j.ok && Array.isArray(j.pedidos)) ? j.pedidos : [];
-      if(!items.length){
-        feedRoot.innerHTML = '<div class="alert alert-light border">No hay pedidos disponibles por ahora.</div>';
+      const res = await fetch(FEED_URL, {headers:{'X-Requested-With':'XMLHttpRequest'}});
+      const j = await res.json().catch(()=>({ok:false,pedidos:[]}));
+      feedList.innerHTML = '';
+      if(!j.ok || !j.pedidos || !j.pedidos.length){
+        feedList.innerHTML = '<div class="text-muted">No hay pedidos disponibles por ahora.</div>';
         return;
       }
-      feedRoot.innerHTML = items.map(p=>{
-        const det = (p.detalles||[]).map(d=>`
-          <li>${d.product}${d.opcion?` - ${d.opcion}`:''} (x${d.cant})${(d.sabores&&d.sabores.length)?`<br><span class="text-muted">Sabores: ${d.sabores.join(', ')}</span>`:''}</li>
-        `.replace('product','producto')).join('');
-
-        return `
-          <div class="card mb-2" data-id="${p.id}">
-            <div class="card-body d-flex justify-content-between align-items-start gap-3 flex-wrap">
-              <div class="flex-grow-1">
-                <div class="d-flex align-items-center gap-2">
-                  <strong>#${p.id}</strong>
-                  <span class="badge bg-info text-dark">EN_PREPARACION</span>
-                </div>
-                <div class="small text-muted mt-1">${p.cliente_nombre||''} · ${p.cliente_direccion||''} · ${p.cliente_telefono||''}</div>
-                <ul class="mb-1 small mt-2">${det}</ul>
-                <div class="fw-bold">Total: $ ${p.total}</div>
-              </div>
-              <div class="text-end">
-                <button class="btn btn-primary btn-sm btn-aceptar" data-id="${p.id}">Aceptar pedido</button>
-              </div>
-            </div>
-          </div>`;
-      }).join('');
+      j.pedidos.forEach(p => feedList.appendChild(buildAcceptCard(p)));
     }catch(e){
-      feedRoot.innerHTML = '<div class="alert alert-danger">Error cargando el feed.</div>';
+      console.error(e);
+      feedList.innerHTML = '<div class="text-danger">No se pudo cargar el feed.</div>';
     }
   }
 
-  // aceptar pedido (delegación)
-  document.addEventListener('click', async (ev)=>{
-    const btn = ev.target.closest('.btn-aceptar'); if(!btn) return;
-    ev.preventDefault();
-    const id = btn.dataset.id;
-    btn.disabled = true; btn.textContent = 'Aceptando...';
-    try{
-      const res = await fetch(`/aceptar-pedido/${id}/`, {
-        method:'POST',
-        headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'}
-      });
-      if(res.ok){
-        await loadFeed();
-        // recargamos para refrescar “Tu pedido en curso”
-        location.reload();
-      }else{
-        location.href = `/aceptar-pedido/${id}/`;
-      }
-    }catch(e){
-      location.href = `/aceptar-pedido/${id}/`;
-    }
-  });
-
-  // cambiar estado del pedido en curso (ASIGNADO -> EN_CAMINO -> ENTREGADO)
-  document.addEventListener('click', async (ev)=>{
-    const btn = ev.target.closest('.cadete-set'); if(!btn) return;
-    ev.preventDefault();
-    const id = btn.dataset.id;
-    const next = btn.dataset.next;
-    btn.disabled = true; const old = btn.textContent; btn.textContent = 'Guardando...';
-    try{
-      const res = await fetch(`/cadete/pedido/${id}/estado/`, {
-        method:'POST',
-        headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest','Content-Type':'application/x-www-form-urlencoded'},
-        body: `estado=${encodeURIComponent(next)}`
-      });
-      const j = await res.json().catch(()=>({}));
-      if(res.ok && j.ok){
-        // si se entregó, recargamos todo (vuelve disponible)
-        if(next === 'ENTREGADO'){ location.reload(); return; }
-        // si pasó a EN_CAMINO, actualizamos badge y botón
-        const card = document.getElementById(`curso-${id}`);
-        const badge = card && card.querySelector('.badge');
-        if(badge){ badge.textContent = next; }
-        btn.textContent = 'Marcar ENTREGADO';
-        btn.dataset.next = 'ENTREGADO';
-        btn.classList.remove('btn-primary'); btn.classList.add('btn-success');
-        btn.disabled = false;
-      }else{
-        btn.textContent = old; btn.disabled = false;
-      }
-    }catch(e){
-      btn.textContent = old; btn.disabled = false;
-    }
-  });
-
-  // primera carga + polling suave
+  document.getElementById('btn-refresh').addEventListener('click', loadFeed);
   loadFeed();
-  setInterval(loadFeed, 8000);
-  btnRefresh.addEventListener('click', loadFeed);
-})();
+  setInterval(loadFeed, 12000);
 </script>
-
-<style>
-.badge{font-weight:600}
-</style>
 {% endblock %}
