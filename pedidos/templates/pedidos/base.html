@@ -195,26 +195,33 @@
         </nav>
       {% else %}
         <!-- Barra para CLIENTE -->
-        <nav class="mobile-tabbar" aria-label="Navegación cliente">
-          <a class="mbn-item" data-bs-toggle="modal" data-bs-target="#moreModal">
-            <i class="bi bi-three-dots"></i><span>Más</span>
-          </a>
-          <a class="mbn-item" href="/#nuestro-catalogo">
-            <i class="bi bi-list-ul"></i><span>Catálogo</span>
-          </a>
-          <a class="mbn-item {% if url_name == 'ver_carrito' %}active{% endif %}" href="{% url 'ver_carrito' %}">
-            <i class="bi bi-cart3"></i><span>Carrito</span>
-          </a>
-          {% if user.is_authenticated %}
-            <a class="mbn-item {% if url_name == 'perfil_cliente' %}active{% endif %}" href="{% url 'perfil_cliente' %}">
-              <i class="bi bi-person"></i><span>Perfil</span>
-            </a>
-          {% else %}
-            <a class="mbn-item {% if url_name == 'login' %}active{% endif %}" href="{% url 'login' %}">
-              <i class="bi bi-box-arrow-in-right"></i><span>Ingresar</span>
-            </a>
-          {% endif %}
-        </nav>
+<nav class="mobile-tabbar" aria-label="Navegación cliente">
+  <a class="mbn-item" data-bs-toggle="modal" data-bs-target="#moreModal">
+    <i class="bi bi-three-dots"></i><span>Más</span>
+  </a>
+  <a class="mbn-item" href="/#nuestro-catalogo">
+    <i class="bi bi-list-ul"></i><span>Catálogo</span>
+  </a>
+
+  <!-- NUEVO: Pedido en curso -->
+  <a class="mbn-item {% if url_name == 'pedido_en_curso' %}active{% endif %}" href="{% url 'pedido_en_curso' %}">
+    <i class="bi bi-geo-alt"></i><span>Pedido</span>
+  </a>
+
+  <a class="mbn-item {% if url_name == 'ver_carrito' %}active{% endif %}" href="{% url 'ver_carrito' %}">
+    <i class="bi bi-cart3"></i><span>Carrito</span>
+  </a>
+  {% if user.is_authenticated %}
+    <a class="mbn-item {% if url_name == 'perfil_cliente' %}active{% endif %}" href="{% url 'perfil_cliente' %}">
+      <i class="bi bi-person"></i><span>Perfil</span>
+    </a>
+  {% else %}
+    <a class="mbn-item {% if url_name == 'login' %}active{% endif %}" href="{% url 'login' %}">
+      <i class="bi bi-box-arrow-in-right"></i><span>Ingresar</span>
+    </a>
+  {% endif %}
+</nav>
+
 
         <!-- Modal “Más” (móvil) -->
         <div class="modal fade" id="moreModal" tabindex="-1" aria-hidden="true">

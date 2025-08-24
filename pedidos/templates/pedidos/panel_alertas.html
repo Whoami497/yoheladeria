@@ -172,6 +172,7 @@
 </div>
 
 <script>
+
   // ===== CSRF =====
   function getCookie(name){const value=`; ${document.cookie}`;const parts=value.split(`; ${name}=`);if(parts.length===2) return parts.pop().split(';').shift();}
   const csrftoken=getCookie('csrftoken');
@@ -289,6 +290,16 @@
     return chip;
   }
 
+  async function parseJSONorRedirect(res, fallbackUrl){
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  if (!ct.includes('application/json')) {
+    // probablemente devolvió HTML (login), redirigimos
+    window.location.href = fallbackUrl;
+    return null;
+  }
+  try { return await res.json(); }
+  catch { window.location.href = fallbackUrl; return null; }
+}
   // Delegación: confirmar pedido (AJAX)
   document.addEventListener('click', async (ev)=>{
     const btn=ev.target.closest('.btn-confirm'); if(!btn) return;
@@ -317,47 +328,49 @@
     }catch(e){ window.location.href=url; }
   });
 
-  // Delegación: cambio de estado (AJAX)
-  document.addEventListener('click', async (ev)=>{
-    const item=ev.target.closest('.btn-set-state'); if(!item) return;
-    const url=item.dataset.url, estado=item.dataset.state;
-    const root = ev.target.closest('.order-card, .order-chip');
-    try{
-      const res=await fetch(url,{
-        method:'POST',
-        headers:{
-          'X-CSRFToken':csrftoken,
-          'X-Requested-With':'XMLHttpRequest',
-          'Content-Type':'application/x-www-form-urlencoded'
-        },
-        body:`estado=${encodeURIComponent(estado)}`
-      });
-      const data = await res.json();
-      if(data.ok){
-        const badge = root.querySelector('.badge');
-        if(badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
+  // Delegación: cambio de estado (AJAX) — con fallback si llega HTML
+document.addEventListener('click', async (ev)=>{
+  const item=ev.target.closest('.btn-set-state'); if(!item) return;
+  const url=item.dataset.url, estado=item.dataset.state;
+  const root = ev.target.closest('.order-card, .order-chip');
+  try{
+    const res=await fetch(url,{
+      method:'POST',
+      headers:{
+        'X-CSRFToken':csrftoken,
+        'X-Requested-With':'XMLHttpRequest',
+        'Content-Type':'application/x-www-form-urlencoded'
+      },
+      body:`estado=${encodeURIComponent(estado)}`
+    });
 
-        if((estado==='ENTREGADO' || estado==='CANCELADO') && root.classList.contains('order-card')){
-          const id = root.dataset.orderId;
-          const total = root.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
-          const cliente = root.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
-          const cadeteNode = root.querySelector('.small .fw-semibold');
-          const cadete = (data.cadete) || (cadeteNode ? cadeteNode.textContent.trim() : '—');
+    const data = await parseJSONorRedirect(res, url);
+    if(!data) return;
 
-          const order = { id, estado, total_pedido: total, cliente_nombre: cliente, cadete };
-          const chip = buildChip(order, true);
-          const empty = alertsHoyFinalizados.querySelector('.alert');
-          if(empty) empty.remove();
-          alertsHoyFinalizados.prepend(chip);
-
-          root.remove();
-          if(!alertsHoy.querySelector('.order-card')){
-            alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
-          }
+    if(data.ok){
+      const badge = root.querySelector('.badge');
+      if(badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
+      if((estado==='ENTREGADO'||estado==='CANCELADO') && root.classList.contains('order-card')){
+        const id = root.dataset.orderId;
+        const total = root.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
+        const cliente = root.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
+        const cadeteNode = root.querySelector('.small .fw-semibold');
+        const cadete = (data.cadete) || (cadeteNode ? cadeteNode.textContent.trim() : '—');
+        const order = { id, estado, total_pedido: total, cliente_nombre: cliente, cadete };
+        const chip = buildChip(order, true);
+        const empty = alertsHoyFinalizados.querySelector('.alert'); if(empty) empty.remove();
+        alertsHoyFinalizados.prepend(chip);
+        root.remove();
+        if(!alertsHoy.querySelector('.order-card')){
+          alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
         }
       }
-    }catch(e){ console.error(e); }
-  });
+    } else if (data.error === 'no_permiso'){
+      alert('No tenés permiso para cambiar este estado desde aquí.');
+    }
+  }catch(e){ console.error(e); window.location.href=url; }
+});
+
 
   // Limpiar
   document.getElementById('clear-alerts').addEventListener('click',()=>{

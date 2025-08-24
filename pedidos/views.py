@@ -650,6 +650,26 @@ def logout_cliente(request):
     logout(request)
     messages.info(request, "Has cerrado sesión exitosamente.")
     return redirect('index')
+@login_required
+def pedido_en_curso(request):
+    """
+    Muestra el/los pedidos activos del usuario:
+    - Cliente: sus pedidos que NO estén ENTREGADO/CANCELADO.
+    - Cadete: pedidos ASIGNADO/EN_CAMINO donde él es el cadete.
+    """
+    pedidos = []
+    if hasattr(request.user, 'cadeteprofile'):
+        pedidos = (Pedido.objects
+                   .filter(cadete_asignado=request.user.cadeteprofile,
+                           estado__in=['ASIGNADO', 'EN_CAMINO'])
+                   .order_by('-fecha_pedido'))
+    else:
+        pedidos = (Pedido.objects
+                   .filter(user=request.user)
+                   .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
+                   .order_by('-fecha_pedido'))
+
+    return render(request, 'pedidos/pedido_en_curso.html', {'pedidos': pedidos})
 
 
 # =========================
@@ -771,30 +791,46 @@ def panel_alertas_anteriores(request):
     return HttpResponse(html)
 
 
-@staff_member_required
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import redirect
+
 @require_POST
+@login_required
 def panel_alertas_set_estado(request, pedido_id):
     """
-    Cambiar estado vía AJAX desde el panel.
+    Cambia el estado de un pedido.
+    - STAFF: puede poner cualquier estado.
+    - CADETE: sólo puede cambiar su propio pedido a EN_CAMINO o ENTREGADO.
+    Respuestas JSON limpias (403 si no tiene permiso).
     """
     pedido = get_object_or_404(Pedido, id=pedido_id)
     estado = (request.POST.get('estado') or '').upper()
     validos = {'RECIBIDO', 'EN_PREPARACION', 'ASIGNADO', 'EN_CAMINO', 'ENTREGADO', 'CANCELADO'}
     if estado not in validos:
-        return JsonResponse({'ok': False, 'error': 'Estado inválido'}, status=400)
+        return JsonResponse({'ok': False, 'error': 'estado_invalido'}, status=400)
 
+    es_staff = bool(request.user.is_staff)
+    es_cadete = hasattr(request.user, 'cadeteprofile')
+
+    # ¿Tiene permiso?
+    permitido = False
+    if es_staff:
+        permitido = True
+    elif es_cadete:
+        # El cadete sólo su propio pedido, y sólo a EN_CAMINO o ENTREGADO
+        if pedido.cadete_asignado_id == request.user.cadeteprofile.id and estado in {'EN_CAMINO', 'ENTREGADO'}:
+            permitido = True
+
+    if not permitido:
+        # Si fue llamada por fetch(), devolvemos JSON 403.
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({'ok': False, 'error': 'no_permiso'}, status=403)
+        # Si llega por navegación normal:
+        return redirect('login')
+
+    # Guardar
     pedido.estado = estado
     pedido.save(update_fields=['estado'])
-
-    # Si se marca ENTREGADO desde tienda, liberar cadete
-    if estado == 'ENTREGADO' and getattr(pedido, 'cadete_asignado', None):
-        cp = pedido.cadete_asignado
-        if hasattr(cp, 'disponible'):
-            try:
-                cp.disponible = True
-                cp.save(update_fields=['disponible'])
-            except Exception:
-                pass
 
     # Notificar a panel para refrescar
     _notify_panel_update(pedido)
@@ -804,6 +840,7 @@ def panel_alertas_set_estado(request, pedido_id):
         cadete_nombre = pedido.cadete_asignado.user.get_full_name() or pedido.cadete_asignado.user.username
 
     return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': pedido.estado, 'cadete': cadete_nombre})
+
 
 
 # =========================

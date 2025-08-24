@@ -1,0 +1,56 @@
+{% extends 'pedidos/base.html' %}
+{% block content %}
+<div class="my-3">
+  <h2 class="mb-3">Pedido en curso</h2>
+
+  {% if pedidos %}
+    {% for p in pedidos %}
+      <div class="card mb-3 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <h5 class="card-title mb-0">#{{ p.id }}</h5>
+            <span class="badge 
+              {% if p.estado == 'RECIBIDO' %}bg-primary
+              {% elif p.estado == 'EN_PREPARACION' %}bg-info
+              {% elif p.estado == 'ASIGNADO' %}bg-purple
+              {% elif p.estado == 'EN_CAMINO' %}bg-warning text-dark
+              {% elif p.estado == 'ENTREGADO' %}bg-success
+              {% elif p.estado == 'CANCELADO' %}bg-danger
+              {% endif %}">{{ p.estado }}</span>
+          </div>
+          <div class="text-muted small mb-2">
+            {{ p.cliente_nombre }} · {{ p.cliente_direccion|default:"" }} · {{ p.cliente_telefono|default:"" }}
+          </div>
+
+          {% if p.cadete_asignado %}
+            <div class="mb-2"><strong>Cadete:</strong> {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}</div>
+          {% endif %}
+
+          <ul class="small mb-2">
+            {% for d in p.detalles.all %}
+              <li>
+                {{ d.producto.nombre }}{% if d.opcion_seleccionada %} – {{ d.opcion_seleccionada.nombre_opcion }}{% endif %}
+                (x{{ d.cantidad }})
+                {% with sab=d.sabores.all %}
+                  {% if sab %}<br><span class="text-muted">Sabores: {{ sab|join:", " }}</span>{% endif %}
+                {% endwith %}
+              </li>
+            {% endfor %}
+          </ul>
+
+          <div class="d-flex justify-content-between">
+            <span class="fw-semibold">Total: ${{ p.total_pedido|default_if_none:"0.00" }}</span>
+            <a class="btn btn-outline-primary btn-sm" href="{% url 'historial_pedidos_cliente' %}">Ver historial</a>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <div class="alert alert-info">No tenés pedidos en curso en este momento.</div>
+  {% endif %}
+</div>
+
+<style>
+.badge.bg-purple{background:#6f42c1}
+</style>
+{% endblock %}

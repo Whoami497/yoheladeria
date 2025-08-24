@@ -51,4 +51,6 @@ urlpatterns = [
 
     path('sw.js', views.service_worker, name='service_worker'),
 
-]
+
+path('pedido/en-curso/', views.pedido_en_curso, name='pedido_en_curso'),
+] 
