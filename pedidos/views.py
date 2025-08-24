@@ -675,6 +675,7 @@ def pedido_en_curso(request):
 # =========================
 # === PANEL DE ALERTAS TIENDA (HOY/AYER/ANTERIORES)
 # =========================
+@staff_member_required
 def panel_alertas(request):
     """
     Muestra HOY (activos), AYER (plegable) y ENTREGADOS de hoy (plegable al final).
@@ -706,7 +707,7 @@ def panel_alertas(request):
     }
     return render(request, 'pedidos/panel_alertas.html', ctx)
 
-
+@staff_member_required
 def panel_alertas_data(request):
     """
     JSON para rehidratar/pollear el panel.
@@ -758,7 +759,7 @@ def panel_alertas_data(request):
 
     return JsonResponse({'pedidos': [serialize(p) for p in qs]})
 
-
+@staff_member_required
 def panel_alertas_anteriores(request):
     """
     Listado simple (HTML directo) de pedidos anteriores a AYER.
@@ -846,6 +847,7 @@ def panel_alertas_set_estado(request, pedido_id):
 # =========================
 # === TIENDA / CADETES
 # =========================
+
 @staff_member_required
 def confirmar_pedido(request, pedido_id):
     pedido = get_object_or_404(Pedido, id=pedido_id)
@@ -1141,20 +1143,27 @@ def cadete_feed(request):
 
 
 
+# pedidos/views.py
 @login_required
 def cadete_historial(request):
     """
-    Últimos 50 pedidos ENTREGADOS/CANCELADOS del cadete.
+    Muestra SOLO pedidos ENTREGADOS/CANCELADOS del cadete logueado.
+    Nunca mezcla pedidos de otros cadetes.
     """
     if not hasattr(request.user, 'cadeteprofile'):
         return redirect('index')
 
-    pedidos = (Pedido.objects
-               .filter(cadete_asignado=request.user.cadeteprofile,
-                       estado__in=['ENTREGADO', 'CANCELADO'])
-               .order_by('-fecha_pedido')[:50])
+    cp = request.user.cadeteprofile
+
+    pedidos = (
+        Pedido.objects
+        .filter(cadete_asignado=cp, estado__in=['ENTREGADO', 'CANCELADO'])
+        .select_related('cadete_asignado__user')
+        .order_by('-fecha_pedido')[:50]
+    )
 
     return render(request, 'pedidos/cadete_historial.html', {'pedidos': pedidos})
+
 
 
 # =========================

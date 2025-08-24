@@ -1,17 +1,22 @@
 {% extends 'pedidos/base.html' %}
 {% block content %}
-<div class="container">
-  <h1 class="mb-3">Historial de Entregas</h1>
+<div class="container my-4">
+  <h2 class="mb-3">Mi historial de entregas</h2>
+
   {% if pedidos %}
     <div class="list-group">
       {% for p in pedidos %}
         <div class="list-group-item">
           <div class="d-flex justify-content-between">
             <div>
-              <div class="fw-semibold">#{{ p.id }} — {{ p.cliente_direccion }}</div>
-              <div class="small text-muted">{{ p.fecha_pedido|date:"d/m H:i" }} · {{ p.estado }}</div>
+              <strong>#{{ p.id }}</strong>
+              <span class="badge {% if p.estado == 'ENTREGADO' %}bg-success{% else %}bg-secondary{% endif %}">
+                {{ p.estado }}
+              </span><br>
+              <small>{{ p.fecha_pedido|date:'Y-m-d H:i' }}</small><br>
+              <small>Cliente: {{ p.cliente_nombre|default:'N/A' }}</small><br>
+              <small>Total: ${{ p.total_pedido|default_if_none:"0.00" }}</small>
             </div>
-            <div class="fw-bold">${{ p.total_pedido|default:"0" }}</div>
           </div>
         </div>
       {% endfor %}
