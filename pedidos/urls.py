@@ -1,7 +1,7 @@
 # pedidos/urls.py
 from django.urls import path
 from . import views
-
+from . import views_pos  # <--- NUEVO
 urlpatterns = [
     # --- Tienda / catálogo ---
     path('', views.index, name='index'),
@@ -53,4 +53,9 @@ urlpatterns = [
 
 
 path('pedido/en-curso/', views.pedido_en_curso, name='pedido_en_curso'),
+path('pos/', views_pos.pos_panel, name='pos_panel'),
+    path('pos/abrir/', views_pos.pos_abrir_caja, name='pos_abrir_caja'),
+    path('pos/vender/', views_pos.pos_vender, name='pos_vender'),
+    path('pos/movimiento/', views_pos.pos_movimiento, name='pos_movimiento'),
+    path('pos/cerrar/', views_pos.pos_cerrar_caja, name='pos_cerrar_caja'),
 ] 

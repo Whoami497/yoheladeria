@@ -1,0 +1,218 @@
+{% extends 'pedidos/base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container my-4">
+  <h2 class="mb-3">POS / Caja</h2>
+  <p class="text-muted">Panel mínimo para probar Caja, Ventas y Movimientos.</p>
+  <hr>
+
+  <!-- Estado de caja -->
+  {% if caja %}
+    <div class="alert alert-success d-flex justify-content-between align-items-center">
+      <div>
+        <strong>Caja ABIERTA #{{ caja.id }}</strong> — Apertura: {{ caja.fecha_apertura|date:"d/m H:i" }} ({{ caja.usuario_apertura.username }})
+        <br>Saldo inicial efectivo: ${{ caja.saldo_inicial_efectivo }}
+        {% if saldo_teorico is not None %}
+          <br>Saldo efectivo teórico: <strong>${{ saldo_teorico }}</strong>
+        {% endif %}
+      </div>
+      <form method="post" action="{% url 'pos_cerrar_caja' %}" class="d-flex align-items-center gap-2">
+        {% csrf_token %}
+        <input type="number" step="0.01" class="form-control form-control-sm" name="saldo_cierre_efectivo" placeholder="Conteo EFECTIVO" required>
+        <button class="btn btn-danger btn-sm">Cerrar caja</button>
+      </form>
+    </div>
+  {% else %}
+    <div class="alert alert-warning d-flex justify-content-between align-items-center">
+      <div><strong>Sin caja abierta.</strong> Abrí una caja para comenzar a vender.</div>
+      <form method="post" action="{% url 'pos_abrir_caja' %}" class="d-flex align-items-center gap-2">
+        {% csrf_token %}
+        <input type="number" step="0.01" class="form-control form-control-sm" name="saldo_inicial_efectivo" placeholder="Saldo inicial EFECTIVO">
+        <button class="btn btn-primary btn-sm">Abrir caja</button>
+      </form>
+    </div>
+  {% endif %}
+
+  <div class="row g-3">
+    <!-- Form venta -->
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header">Registrar venta</div>
+        <div class="card-body">
+          {% if not caja %}
+            <div class="alert alert-info">Abrí una caja para poder vender.</div>
+          {% else %}
+            <form method="post" action="{% url 'pos_vender' %}" class="row g-2">
+              {% csrf_token %}
+              <div class="col-12">
+                <label class="form-label">Producto</label>
+                <select name="producto_id" class="form-select" required>
+                  <option value="" hidden>Elegir…</option>
+                  {% for pr in productos %}
+                    <option value="{{ pr.id }}">{{ pr.nombre }} — ${{ pr.precio }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-4">
+                <label class="form-label">Cantidad</label>
+                <input type="number" name="cantidad" class="form-control" value="1" min="1" required>
+              </div>
+              <div class="col-4">
+                <label class="form-label">Medio de pago</label>
+                <select name="medio_pago" class="form-select">
+                  <option value="EFECTIVO">Efectivo</option>
+                  <option value="QR_MP">QR / MercadoPago</option>
+                  <option value="TARJETA">Tarjeta</option>
+                  <option value="TRANSFERENCIA">Transferencia</option>
+                  <option value="OTRO">Otro</option>
+                </select>
+              </div>
+              <div class="col-4">
+                <label class="form-label">Comprobante</label>
+                <select name="tipo_comprobante" class="form-select">
+                  <option value="COMANDA">Comanda (sin fiscal)</option>
+                  <option value="BISTRO">Bistró (con factura)</option>
+                </select>
+              </div>
+              <div class="col-12">
+                <button class="btn btn-success">Cargar venta</button>
+              </div>
+            </form>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Form movimiento -->
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header">Movimiento de caja (Ingreso/Egreso/Ajuste/Retiro)</div>
+        <div class="card-body">
+          {% if not caja %}
+            <div class="alert alert-info">Abrí una caja para registrar movimientos.</div>
+          {% else %}
+            <form method="post" action="{% url 'pos_movimiento' %}" class="row g-2">
+              {% csrf_token %}
+              <div class="col-5">
+                <label class="form-label">Tipo</label>
+                <select name="tipo" class="form-select">
+                  <option value="INGRESO">INGRESO</option>
+                  <option value="EGRESO">EGRESO</option>
+                  <option value="AJUSTE">AJUSTE</option>
+                  <option value="RETIRO">RETIRO</option>
+                </select>
+              </div>
+              <div class="col-4">
+                <label class="form-label">Medio</label>
+                <select name="medio_pago" class="form-select">
+                  <option value="EFECTIVO">Efectivo</option>
+                  <option value="QR_MP">QR / MP</option>
+                  <option value="TARJETA">Tarjeta</option>
+                  <option value="TRANSFERENCIA">Transferencia</option>
+                  <option value="OTRO">Otro</option>
+                </select>
+              </div>
+              <div class="col-3">
+                <label class="form-label">Monto</label>
+                <input type="number" step="0.01" name="monto" class="form-control" placeholder="0.00" required>
+              </div>
+              <div class="col-12">
+                <label class="form-label">Descripción</label>
+                <input type="text" name="descripcion" class="form-control" placeholder="Detalle (opcional)">
+              </div>
+              <div class="col-12">
+                <button class="btn btn-outline-primary">Registrar movimiento</button>
+              </div>
+            </form>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Totales -->
+  <div class="row g-3 mt-3">
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header">Totales por medio de pago (VENTAS)</div>
+        <div class="card-body">
+          {% if caja %}
+            {% if totales_medio %}
+              <ul class="list-group">
+                {% for medio, tot in totales_medio.items %}
+                  <li class="list-group-item d-flex justify-content-between align-items-center">
+                    {{ medio }} <span class="badge text-bg-primary">${{ tot }}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <div class="text-muted">Sin ventas aún.</div>
+            {% endif %}
+          {% else %}
+            <div class="text-muted">Abrí una caja para ver totales.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header">Totales por tipo de movimiento</div>
+        <div class="card-body">
+          {% if caja %}
+            {% if totales_tipo %}
+              <ul class="list-group">
+                {% for tipo, tot in totales_tipo.items %}
+                  <li class="list-group-item d-flex justify-content-between align-items-center">
+                    {{ tipo }} <span class="badge text-bg-secondary">${{ tot }}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <div class="text-muted">Sin movimientos aún.</div>
+            {% endif %}
+          {% else %}
+            <div class="text-muted">Abrí una caja para ver totales.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Últimas ventas -->
+  <div class="card mt-3">
+    <div class="card-header">Últimas ventas</div>
+    <div class="card-body">
+      {% if ventas %}
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>#</th><th>Fecha</th><th>Caja</th><th>Usuario</th><th>Comp.</th><th>Medio</th><th>Total</th><th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for v in ventas %}
+                <tr>
+                  <td>{{ v.id }}</td>
+                  <td>{{ v.fecha|date:"d/m H:i" }}</td>
+                  <td>#{{ v.caja_id }}</td>
+                  <td>{{ v.usuario.username }}</td>
+                  <td>{{ v.tipo_comprobante }}</td>
+                  <td>{{ v.medio_pago }}</td>
+                  <td>${{ v.total }}</td>
+                  <td>{{ v.estado }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="text-muted">Sin ventas registradas.</div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+{% endblock %}
