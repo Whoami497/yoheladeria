@@ -7,50 +7,53 @@
   <p class="text-muted text-center">Aceptá pedidos disponibles y actualizá el estado de tus entregas.</p>
   <hr>
 
-  <!-- Estado / disponibilidad + sonido -->
+  <!-- Estado / sonido -->
   <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
-    <span id="avail-badge" class="badge bg-secondary">Estado: —</span>
-    <button id="toggle-available" class="btn btn-success">Ponerme Disponible</button>
+    <span id="avail-badge" class="badge bg-secondary">Estado: No disponible</span>
+    <span class="text-muted small">La disponibilidad se cambia desde el botón <strong>“Disponible”</strong> de la barra inferior.</span>
 
-    <div class="vr mx-2 d-none d-md-block"></div>
-
-    <button id="toggle-sound" class="btn btn-outline-primary">🔔 Sonido: ON</button>
-    <button id="test-sound" class="btn btn-outline-secondary">Probar sonido</button>
-    <span id="sound-status" class="badge bg-warning text-dark d-none">Sonido bloqueado: tocá “Probar sonido”</span>
+    <div class="ms-auto"></div>
+    <button id="enable-sound" class="btn btn-outline-primary">🔔 Habilitar sonido</button>
+    <span id="sound-warning" class="badge bg-warning text-dark d-none">Tocá “Habilitar sonido” para oír alertas</span>
   </div>
 
   <!-- Mis pedidos en curso -->
   <h5 class="mt-4">Mis pedidos en curso</h5>
-  {% if pedidos_en_curso %}
-    {% for p in pedidos_en_curso %}
-      <div class="card mb-2">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <div>
-              <span class="fw-bold">#{{ p.id }}</span>
-              <span class="badge bg-primary">{{ p.estado }}</span>
-              <div class="text-muted small">{{ p.cliente_nombre }} — {{ p.cliente_direccion|default:"" }}</div>
-              <div class="text-muted small">Total aprox: ${{ p.total_pedido|default_if_none:"0.00" }}</div>
-            </div>
-            <div>
-              <form method="post" action="{% url 'cadete_set_estado' p.id %}" class="d-inline">
-                {% csrf_token %}
-                <input type="hidden" name="estado" value="EN_CAMINO">
-                <button class="btn btn-outline-warning me-1">Marcar EN CAMINO</button>
-              </form>
-              <form method="post" action="{% url 'cadete_set_estado' p.id %}" class="d-inline">
-                {% csrf_token %}
-                <input type="hidden" name="estado" value="ENTREGADO">
-                <button class="btn btn-success">Marcar ENTREGADO</button>
-              </form>
+  <div id="en-curso">
+    {% if pedidos_en_curso %}
+      <div id="en-curso-list">
+        {% for p in pedidos_en_curso %}
+          <div class="card mb-2" data-order-id="{{ p.id }}">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                  <span class="fw-bold">#{{ p.id }}</span>
+                  <span class="badge bg-primary">{{ p.estado }}</span>
+                  <div class="text-muted small">{{ p.cliente_nombre }} — {{ p.cliente_direccion|default:"" }}</div>
+                  <div class="text-muted small">Total aprox: ${{ p.total_pedido|default_if_none:"0.00" }}</div>
+                </div>
+                <div>
+                  <form method="post" action="{% url 'cadete_set_estado' p.id %}" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="estado" value="EN_CAMINO">
+                    <button class="btn btn-outline-warning me-1">Marcar EN CAMINO</button>
+                  </form>
+                  <form method="post" action="{% url 'cadete_set_estado' p.id %}" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="estado" value="ENTREGADO">
+                    <button class="btn btn-success">Marcar ENTREGADO</button>
+                  </form>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        {% endfor %}
       </div>
-    {% endfor %}
-  {% else %}
-    <div class="alert alert-light border">No tenés pedidos en curso.</div>
-  {% endif %}
+    {% else %}
+      <div id="en-curso-empty" class="alert alert-light border">No tenés pedidos en curso.</div>
+      <div id="en-curso-list"></div>
+    {% endif %}
+  </div>
 
   <!-- Pedidos disponibles -->
   <h5 class="mt-4">Pedidos disponibles</h5>
@@ -68,161 +71,180 @@
   function getCookie(name){const value=`; ${document.cookie}`;const parts=value.split(`; ${name}=`);if(parts.length===2) return parts.pop().split(';').shift();}
   const csrftoken=getCookie('csrftoken');
 
-  // ===== Sonido (robusto) =====
+  // ===== Sonido (un botón para habilitar/probar) =====
   const orderSoundUrl = "{% static 'pedidos/sounds/new-order.mp3' %}";
-  const btnToggleSound = document.getElementById('toggle-sound');
-  const btnTestSound   = document.getElementById('test-sound');
-  const soundStatus    = document.getElementById('sound-status');
-  const audioEl = new Audio(orderSoundUrl);
-  audioEl.preload = 'auto';
-  let audioUnlocked = false;
-  let soundEnabled = (localStorage.getItem('cadete_sound') ?? 'on') !== 'off';
+  const enableBtn   = document.getElementById('enable-sound');
+  const soundWarn   = document.getElementById('sound-warning');
+  const audioEl     = new Audio(orderSoundUrl);
+  audioEl.preload   = 'auto';
 
-  function updateSoundBtn(){
-    btnToggleSound.textContent = soundEnabled ? '🔔 Sonido: ON' : '🔕 Sonido: OFF';
-    btnToggleSound.classList.toggle('btn-outline-primary', soundEnabled);
-    btnToggleSound.classList.toggle('btn-outline-secondary', !soundEnabled);
-  }
-  function unlockAudio(){
-    audioEl.play().then(()=>{ audioEl.pause(); audioEl.currentTime=0; audioUnlocked=true; soundStatus.classList.add('d-none'); })
-                  .catch(()=>{ audioUnlocked=false; soundStatus.classList.remove('d-none'); });
+  let soundEnabled  = localStorage.getItem('cadete_sound_enabled') === '1';
+  let audioReady    = false;
+
+  function tryUnlockAudio(){
+    audioEl.play().then(()=>{ audioEl.pause(); audioEl.currentTime=0; audioReady=true; enableBtn.classList.replace('btn-outline-primary','btn-outline-success'); enableBtn.textContent='🔔 Sonido habilitado'; soundWarn.classList.add('d-none'); })
+                  .catch(()=>{ audioReady=false; soundWarn.classList.remove('d-none'); });
   }
   function playSound(){
     if(!soundEnabled) return;
-    if(!audioUnlocked){ unlockAudio(); return; }
-    try{ audioEl.currentTime=0; audioEl.play().catch(()=>{}); }catch(e){}
+    if(!audioReady){ soundWarn.classList.remove('d-none'); return; }
+    try{ audioEl.currentTime=0; audioEl.play().catch(()=>{});}catch(e){}
   }
-  btnToggleSound.addEventListener('click', ()=>{
-    soundEnabled = !soundEnabled;
-    localStorage.setItem('cadete_sound', soundEnabled ? 'on' : 'off');
-    updateSoundBtn();
-    if(soundEnabled) unlockAudio();
+  enableBtn.addEventListener('click', ()=>{
+    soundEnabled = true;
+    localStorage.setItem('cadete_sound_enabled','1');
+    tryUnlockAudio();
   });
-  btnTestSound.addEventListener('click', ()=>{ unlockAudio(); if(soundEnabled){ try{ audioEl.currentTime=0; audioEl.play().catch(()=>{});}catch(e){} }});
-  ['click','touchstart','keydown'].forEach(evt=>{
-    document.addEventListener(evt, function once(){ if(!audioUnlocked) unlockAudio(); document.removeEventListener(evt, once, {passive:true}); }, {passive:true});
+  // hint para iOS/Android: primer gesto del usuario
+  ['touchstart','click','keydown'].forEach(evt=>{
+    document.addEventListener(evt, function once(){ if(soundEnabled && !audioReady) tryUnlockAudio(); document.removeEventListener(evt, once, {passive:true}); }, {passive:true});
   });
-  updateSoundBtn();
+  if(!soundEnabled){ soundWarn.classList.remove('d-none'); }
 
-  // ===== Disponibilidad / Feed =====
-  const availBadge = document.getElementById('avail-badge');
-  const toggleBtn  = document.getElementById('toggle-available');
-  const feedList   = document.getElementById('feed-list');
+  // ===== Disponibilidad (solo visualizar) & Feed =====
+  const availBadge   = document.getElementById('avail-badge');
+  const feedList     = document.getElementById('feed-list');
+  const enCursoList  = document.getElementById('en-curso-list');
+  const enCursoEmpty = document.getElementById('en-curso-empty');
 
   let disponible = false;
-  let lastOfferIds = new Set(); // para detectar ofertas nuevas y sonar
+  let lastOfferIds = new Set();
+  let initializedFeed = false;
 
   function setAvailUI(val){
     disponible = !!val;
     availBadge.className = 'badge ' + (disponible ? 'bg-success' : 'bg-secondary');
     availBadge.textContent = 'Estado: ' + (disponible ? 'Disponible' : 'No disponible');
-    toggleBtn.className = 'btn ' + (disponible ? 'btn-outline-danger' : 'btn-success');
-    toggleBtn.textContent = disponible ? 'Ponerme NO disponible' : 'Ponerme Disponible';
+  }
+
+  function buildEnCursoCard({id, estado, cliente, direccion, total}){
+    const div = document.createElement('div');
+    div.className = 'card mb-2';
+    div.dataset.orderId = id;
+    div.innerHTML = `
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <div>
+            <span class="fw-bold">#${id}</span>
+            <span class="badge bg-primary">${estado}</span>
+            <div class="text-muted small">${cliente||''} — ${direccion||''}</div>
+            <div class="text-muted small">Total aprox: $${parseFloat(total||0).toFixed(2)}</div>
+          </div>
+          <div>
+            <form method="post" action="/cadete/estado/${id}/" class="d-inline">
+              <input type="hidden" name="csrfmiddlewaretoken" value="${csrftoken}">
+              <input type="hidden" name="estado" value="EN_CAMINO">
+              <button class="btn btn-outline-warning me-1">Marcar EN CAMINO</button>
+            </form>
+            <form method="post" action="/cadete/estado/${id}/" class="d-inline">
+              <input type="hidden" name="csrfmiddlewaretoken" value="${csrftoken}">
+              <input type="hidden" name="estado" value="ENTREGADO">
+              <button class="btn btn-success">Marcar ENTREGADO</button>
+            </form>
+          </div>
+        </div>
+      </div>`;
+    return div;
   }
 
   async function fetchFeed(){
     try{
       const res = await fetch("{% url 'cadete_feed' %}", {headers:{'X-Requested-With':'XMLHttpRequest'}});
       const data = await res.json();
+
       setAvailUI(!!data.disponible);
 
       const pedidos = data.pedidos || [];
       if(!pedidos.length){
         feedList.innerHTML = '<div class="alert alert-light border">No hay pedidos disponibles.</div>';
-        lastOfferIds = new Set();
-        return;
-      }
-
-      // Render
-      feedList.innerHTML = pedidos.map(p => {
-        const dir = (p.cliente_direccion||'').trim();
-        const tel = (p.cliente_telefono||'').trim();
-        const detalleHtml = (p.detalles||[]).map(d=>{
-          const opt = d.opcion ? ` - ${d.opcion}` : '';
-          const sab = (d.sabores&&d.sabores.length) ? d.sabores.join(', ') : 'Sin especificar';
-          return `<li>${d.producto}${opt} (x${d.cant})<br><span class="text-muted small">Sabores: ${sab}</span></li>`;
-        }).join('');
-        return `
-          <div class="card mb-2" id="offer-${p.id}">
-            <div class="card-body">
-              <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <div>
-                  <span class="fw-bold">#${p.id}</span>
-                  <span class="badge bg-info text-dark">EN_PREPARACION</span>
-                  <div class="text-muted small">Cliente: <span class="fw-semibold">${p.cliente_nombre||''}</span> · ${tel||'—'} · ${dir||'—'}</div>
-                  <div class="text-muted small">Total aprox: $${parseFloat(p.total||0).toFixed(2)}</div>
-                  <details class="mt-2"><summary>Ver productos</summary><ul class="small mt-2 mb-0">${detalleHtml}</ul></details>
-                </div>
-                <div>
-                  <!-- RUTA CORRECTA: /cadete/aceptar-pedido/ID/ -->
-                  <button class="btn btn-primary btn-accept" data-url="/cadete/aceptar-pedido/${p.id}/">✅ Aceptar pedido</button>
+      }else{
+        feedList.innerHTML = pedidos.map(p=>{
+          const dir = (p.cliente_direccion||'').trim();
+          const tel = (p.cliente_telefono||'').trim();
+          const detalleHtml = (p.detalles||[]).map(d=>{
+            const opt = d.opcion ? ` - ${d.opcion}` : '';
+            const sab = (d.sabores&&d.sabores.length) ? d.sabores.join(', ') : 'Sin especificar';
+            return `<li>${d.producto}${opt} (x${d.cant})<br><span class="text-muted small">Sabores: ${sab}</span></li>`;
+          }).join('');
+          return `
+            <div class="card mb-2" id="offer-${p.id}">
+              <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                  <div>
+                    <span class="fw-bold">#${p.id}</span>
+                    <span class="badge bg-info text-dark">EN_PREPARACION</span>
+                    <div class="text-muted small">Cliente: <span class="fw-semibold">${p.cliente_nombre||''}</span> · ${tel||'—'} · ${dir||'—'}</div>
+                    <div class="text-muted small">Total aprox: $${parseFloat(p.total||0).toFixed(2)}</div>
+                    <details class="mt-2"><summary>Ver productos</summary><ul class="small mt-2 mb-0">${detalleHtml}</ul></details>
+                  </div>
+                  <div>
+                    <button class="btn btn-primary btn-accept"
+                            data-url="/cadete/aceptar-pedido/${p.id}/"
+                            data-id="${p.id}"
+                            data-cliente="${(p.cliente_nombre||'').replace(/"/g,'&quot;')}"
+                            data-dir="${(p.cliente_direccion||'').replace(/"/g,'&quot;')}"
+                            data-total="${p.total||0}">
+                      ✅ Aceptar pedido
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>`;
-      }).join('');
-
-      // Sonar si hay nuevas ofertas
-      const currentIds = new Set(pedidos.map(p => String(p.id)));
-      let hasNew = false;
-      if(lastOfferIds.size){ // no sonar en la primera carga
-        for(const id of currentIds){ if(!lastOfferIds.has(id)){ hasNew = true; break; } }
+            </div>`;
+        }).join('');
       }
+
+      // Sonar si hay nuevas ofertas (no en la primera carga)
+      const currentIds = new Set(pedidos.map(p => String(p.id)));
+      if(initializedFeed){
+        let hasNew = false;
+        for(const id of currentIds){ if(!lastOfferIds.has(id)){ hasNew = true; break; } }
+        if(disponible && hasNew){ playSound(); }
+      }
+      initializedFeed = true;
       lastOfferIds = currentIds;
-      if(disponible && hasNew) playSound();
+
     }catch(e){
       feedList.innerHTML = '<div class="alert alert-warning">No se pudo cargar el feed.</div>';
     }
   }
 
-  // Toggle único
-  toggleBtn.addEventListener('click', async ()=>{
-    try{
-      const form = new URLSearchParams();
-      form.append('disponible', disponible ? '0' : '1');
-      const res = await fetch("{% url 'cadete_toggle_disponible' %}", {
-        method: 'POST',
-        headers: {'X-CSRFToken':csrftoken, 'X-Requested-With':'XMLHttpRequest', 'Content-Type':'application/x-www-form-urlencoded'},
-        body: form.toString()
-      });
-      const data = await res.json();
-      if(data.ok){
-        setAvailUI(data.disponible);
-        if(!data.disponible){
-          feedList.innerHTML = '<div class="alert alert-light border">No hay pedidos disponibles.</div>';
-          lastOfferIds = new Set();
-        }else{
-          fetchFeed();
-        }
-      }else if(data.error==='ocupado'){
-        alert('Primero tenés que finalizar tu pedido en curso.');
-      }else{
-        alert('No se pudo actualizar la disponibilidad.');
-      }
-    }catch(e){ alert('Error de red.'); }
-  });
-
-  // Aceptar pedido (POST a /cadete/aceptar-pedido/ID/)
+  // Aceptar pedido (POST a /cadete/aceptar-pedido/ID/, y añadir a “en curso” sin refrescar)
   document.addEventListener('click', async (ev)=>{
     const btn = ev.target.closest('.btn-accept'); if(!btn) return;
     const url = btn.dataset.url;
+    const id = btn.dataset.id;
+    const cliente = btn.dataset.cliente || '';
+    const direccion = btn.dataset.dir || '';
+    const total = btn.dataset.total || '0';
+
     btn.disabled = true; btn.textContent = 'Aceptando…';
     try{
       const res = await fetch(url, {method:'POST', headers:{'X-CSRFToken':csrftoken, 'X-Requested-With':'XMLHttpRequest'}});
-      if(res.ok){
-        // al aceptar, backend pone disponible=false
-        setAvailUI(false);
-        feedList.innerHTML = '<div class="alert alert-light border">No hay pedidos disponibles.</div>';
-        lastOfferIds = new Set();
-      }else{
-        // fallback navegación normal si la vista no devolvió JSON
-        location.href = url;
+      const ct = (res.headers.get('content-type')||'').toLowerCase();
+
+      if(res.ok && ct.includes('application/json')){
+        const data = await res.json();
+        if(data.ok){
+          // añadir card a "en curso"
+          if(enCursoEmpty) enCursoEmpty.remove();
+          const card = buildEnCursoCard({id, estado: data.estado || 'ASIGNADO', cliente, direccion, total});
+          enCursoList.prepend(card);
+          // sacar oferta de la lista
+          const offer = document.getElementById(`offer-${id}`); if(offer) offer.remove();
+          // al aceptar, backend deja no disponible -> reflejar
+          setAvailUI(false);
+          return;
+        }
       }
-    }catch(e){ location.href = url; }
+      // fallback navegación normal
+      location.href = url;
+    }catch(e){
+      location.href = url;
+    }
   });
 
-  // init + refresco
+  // init + refresco periódico (rápido para que suene a tiempo)
   fetchFeed();
-  setInterval(()=>{ if(disponible) fetchFeed(); }, 20000);
+  setInterval(()=>{ fetchFeed(); }, 7000);
 </script>
 {% endblock %}
