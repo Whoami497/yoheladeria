@@ -7,13 +7,16 @@
   <p class="text-muted text-center">Aceptá pedidos disponibles y actualizá el estado de tus entregas.</p>
   <hr>
 
-  <!-- Estado / disponibilidad -->
-  <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+  <!-- Estado / disponibilidad + sonido -->
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
     <span id="avail-badge" class="badge bg-secondary">Estado: —</span>
-    <button id="toggle-available" class="btn btn-success">
-      Ponerme Disponible
-    </button>
-    <small id="avail-help" class="text-muted">Vas a recibir ofertas nuevas automáticamente.</small>
+    <button id="toggle-available" class="btn btn-success">Ponerme Disponible</button>
+
+    <div class="vr mx-2 d-none d-md-block"></div>
+
+    <button id="toggle-sound" class="btn btn-outline-primary">🔔 Sonido: ON</button>
+    <button id="test-sound" class="btn btn-outline-secondary">Probar sonido</button>
+    <span id="sound-status" class="badge bg-warning text-dark d-none">Sonido bloqueado: tocá “Probar sonido”</span>
   </div>
 
   <!-- Mis pedidos en curso -->
@@ -61,15 +64,53 @@
 </div>
 
 <script>
-  // ===== Helpers =====
+  // ===== CSRF =====
   function getCookie(name){const value=`; ${document.cookie}`;const parts=value.split(`; ${name}=`);if(parts.length===2) return parts.pop().split(';').shift();}
   const csrftoken=getCookie('csrftoken');
 
+  // ===== Sonido (robusto) =====
+  const orderSoundUrl = "{% static 'pedidos/sounds/new-order.mp3' %}";
+  const btnToggleSound = document.getElementById('toggle-sound');
+  const btnTestSound   = document.getElementById('test-sound');
+  const soundStatus    = document.getElementById('sound-status');
+  const audioEl = new Audio(orderSoundUrl);
+  audioEl.preload = 'auto';
+  let audioUnlocked = false;
+  let soundEnabled = (localStorage.getItem('cadete_sound') ?? 'on') !== 'off';
+
+  function updateSoundBtn(){
+    btnToggleSound.textContent = soundEnabled ? '🔔 Sonido: ON' : '🔕 Sonido: OFF';
+    btnToggleSound.classList.toggle('btn-outline-primary', soundEnabled);
+    btnToggleSound.classList.toggle('btn-outline-secondary', !soundEnabled);
+  }
+  function unlockAudio(){
+    audioEl.play().then(()=>{ audioEl.pause(); audioEl.currentTime=0; audioUnlocked=true; soundStatus.classList.add('d-none'); })
+                  .catch(()=>{ audioUnlocked=false; soundStatus.classList.remove('d-none'); });
+  }
+  function playSound(){
+    if(!soundEnabled) return;
+    if(!audioUnlocked){ unlockAudio(); return; }
+    try{ audioEl.currentTime=0; audioEl.play().catch(()=>{}); }catch(e){}
+  }
+  btnToggleSound.addEventListener('click', ()=>{
+    soundEnabled = !soundEnabled;
+    localStorage.setItem('cadete_sound', soundEnabled ? 'on' : 'off');
+    updateSoundBtn();
+    if(soundEnabled) unlockAudio();
+  });
+  btnTestSound.addEventListener('click', ()=>{ unlockAudio(); if(soundEnabled){ try{ audioEl.currentTime=0; audioEl.play().catch(()=>{});}catch(e){} }});
+  ['click','touchstart','keydown'].forEach(evt=>{
+    document.addEventListener(evt, function once(){ if(!audioUnlocked) unlockAudio(); document.removeEventListener(evt, once, {passive:true}); }, {passive:true});
+  });
+  updateSoundBtn();
+
+  // ===== Disponibilidad / Feed =====
   const availBadge = document.getElementById('avail-badge');
   const toggleBtn  = document.getElementById('toggle-available');
   const feedList   = document.getElementById('feed-list');
 
   let disponible = false;
+  let lastOfferIds = new Set(); // para detectar ofertas nuevas y sonar
 
   function setAvailUI(val){
     disponible = !!val;
@@ -88,8 +129,11 @@
       const pedidos = data.pedidos || [];
       if(!pedidos.length){
         feedList.innerHTML = '<div class="alert alert-light border">No hay pedidos disponibles.</div>';
+        lastOfferIds = new Set();
         return;
       }
+
+      // Render
       feedList.innerHTML = pedidos.map(p => {
         const dir = (p.cliente_direccion||'').trim();
         const tel = (p.cliente_telefono||'').trim();
@@ -110,12 +154,22 @@
                   <details class="mt-2"><summary>Ver productos</summary><ul class="small mt-2 mb-0">${detalleHtml}</ul></details>
                 </div>
                 <div>
-                  <button class="btn btn-primary btn-accept" data-id="${p.id}">✅ Aceptar pedido</button>
+                  <!-- RUTA CORRECTA: /cadete/aceptar-pedido/ID/ -->
+                  <button class="btn btn-primary btn-accept" data-url="/cadete/aceptar-pedido/${p.id}/">✅ Aceptar pedido</button>
                 </div>
               </div>
             </div>
           </div>`;
       }).join('');
+
+      // Sonar si hay nuevas ofertas
+      const currentIds = new Set(pedidos.map(p => String(p.id)));
+      let hasNew = false;
+      if(lastOfferIds.size){ // no sonar en la primera carga
+        for(const id of currentIds){ if(!lastOfferIds.has(id)){ hasNew = true; break; } }
+      }
+      lastOfferIds = currentIds;
+      if(disponible && hasNew) playSound();
     }catch(e){
       feedList.innerHTML = '<div class="alert alert-warning">No se pudo cargar el feed.</div>';
     }
@@ -134,9 +188,12 @@
       const data = await res.json();
       if(data.ok){
         setAvailUI(data.disponible);
-        // si quedó no disponible, vaciamos feed
-        if(!data.disponible) feedList.innerHTML = '<div class="alert alert-light border">No hay pedidos disponibles.</div>';
-        else fetchFeed();
+        if(!data.disponible){
+          feedList.innerHTML = '<div class="alert alert-light border">No hay pedidos disponibles.</div>';
+          lastOfferIds = new Set();
+        }else{
+          fetchFeed();
+        }
       }else if(data.error==='ocupado'){
         alert('Primero tenés que finalizar tu pedido en curso.');
       }else{
@@ -145,26 +202,27 @@
     }catch(e){ alert('Error de red.'); }
   });
 
-  // Aceptar pedido
+  // Aceptar pedido (POST a /cadete/aceptar-pedido/ID/)
   document.addEventListener('click', async (ev)=>{
     const btn = ev.target.closest('.btn-accept'); if(!btn) return;
+    const url = btn.dataset.url;
     btn.disabled = true; btn.textContent = 'Aceptando…';
-    const id = btn.dataset.id;
     try{
-      const res = await fetch(`/aceptar-pedido/${id}/`, {method:'POST', headers:{'X-CSRFToken':csrftoken, 'X-Requested-With':'XMLHttpRequest'}});
+      const res = await fetch(url, {method:'POST', headers:{'X-CSRFToken':csrftoken, 'X-Requested-With':'XMLHttpRequest'}});
       if(res.ok){
-        document.getElementById(`offer-${id}`)?.remove();
-        fetchFeed();
-        setAvailUI(false); // al aceptar, el backend deja el cadete NO disponible
+        // al aceptar, backend pone disponible=false
+        setAvailUI(false);
+        feedList.innerHTML = '<div class="alert alert-light border">No hay pedidos disponibles.</div>';
+        lastOfferIds = new Set();
       }else{
-        location.href = `/aceptar-pedido/${id}/`;
+        // fallback navegación normal si la vista no devolvió JSON
+        location.href = url;
       }
-    }catch(e){ location.href = `/aceptar-pedido/${id}/`; }
+    }catch(e){ location.href = url; }
   });
 
-  // init
+  // init + refresco
   fetchFeed();
-  // refresco liviano cada 20s sólo si sigue disponible
   setInterval(()=>{ if(disponible) fetchFeed(); }, 20000);
 </script>
 {% endblock %}
