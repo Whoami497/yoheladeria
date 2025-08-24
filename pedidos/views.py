@@ -884,15 +884,17 @@ def aceptar_pedido(request, pedido_id):
         messages.warning(request, "Ya tenés un pedido en curso. Entregalo antes de aceptar otro.")
         return redirect('panel_cadete')
 
+    # Verificación de disponibilidad del pedido
     if pedido.estado != 'EN_PREPARACION' or pedido.cadete_asignado_id:
         messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
         return redirect('panel_cadete')
 
-    # Asignar y marcar no disponible
+    # Asignar
     pedido.cadete_asignado = request.user.cadeteprofile
     pedido.estado = 'ASIGNADO'
     pedido.save()
 
+    # Al aceptar, queda NO disponible
     cp = request.user.cadeteprofile
     if hasattr(cp, 'disponible'):
         try:
@@ -908,6 +910,7 @@ def aceptar_pedido(request, pedido_id):
 
     messages.success(request, f"¡Has aceptado el Pedido #{pedido.id}! Por favor, prepárate para retirarlo.")
     return redirect('panel_cadete')
+
 
 
 def login_cadete(request):
@@ -1097,7 +1100,8 @@ def cadete_feed(request):
             } for d in p.detalles.all()],
         }
 
-    return JsonResponse({'ok': True, 'pedidos': [ser(p) for p in pedidos])}
+    return JsonResponse({'ok': True, 'pedidos': [ser(p) for p in pedidos]})
+
 
 
 @login_required
