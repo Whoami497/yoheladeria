@@ -64,7 +64,7 @@
                   </button>
                   <ul class="dropdown-menu dropdown-menu-end">
                     <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="{% url 'panel_alertas_set_estado' p.id %}">En preparación</button></li>
-                    <li><button class="dropdown-item btn-set-state" data-state="ASIGNADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Asignado</button></li>
+                    <!-- SIN 'ASIGNADO' -->
                     <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="{% url 'panel_alertas_set_estado' p.id %}">En camino</button></li>
                     <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Entregado</button></li>
                     <li><hr class="dropdown-divider"></li>
@@ -106,7 +106,7 @@
               <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
               <ul class="dropdown-menu dropdown-menu-end">
                 <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="{% url 'panel_alertas_set_estado' p.id %}">En preparación</button></li>
-                <li><button class="dropdown-item btn-set-state" data-state="ASIGNADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Asignado</button></li>
+                <!-- SIN 'ASIGNADO' -->
                 <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="{% url 'panel_alertas_set_estado' p.id %}">En camino</button></li>
                 <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Entregado</button></li>
                 <li><hr class="dropdown-divider"></li>
@@ -144,7 +144,7 @@
               <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
               <ul class="dropdown-menu dropdown-menu-end">
                 <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="{% url 'panel_alertas_set_estado' p.id %}">En preparación</button></li>
-                <li><button class="dropdown-item btn-set-state" data-state="ASIGNADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Asignado</button></li>
+                <!-- SIN 'ASIGNADO' -->
                 <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="{% url 'panel_alertas_set_estado' p.id %}">En camino</button></li>
                 <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Entregado</button></li>
                 <li><hr class="dropdown-divider"></li>
@@ -172,7 +172,6 @@
 </div>
 
 <script>
-
   // ===== CSRF =====
   function getCookie(name){const value=`; ${document.cookie}`;const parts=value.split(`; ${name}=`);if(parts.length===2) return parts.pop().split(';').shift();}
   const csrftoken=getCookie('csrftoken');
@@ -229,7 +228,7 @@
            <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
            <ul class="dropdown-menu dropdown-menu-end">
              <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="/panel-alertas/estado/${order.id}/">En preparación</button></li>
-             <li><button class="dropdown-item btn-set-state" data-state="ASIGNADO" data-url="/panel-alertas/estado/${order.id}/">Asignado</button></li>
+             <!-- SIN 'ASIGNADO' -->
              <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="/panel-alertas/estado/${order.id}/">En camino</button></li>
              <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="/panel-alertas/estado/${order.id}/">Entregado</button></li>
              <li><hr class="dropdown-divider"></li>
@@ -279,7 +278,7 @@
         <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
         <ul class="dropdown-menu dropdown-menu-end">
           <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="/panel-alertas/estado/${order.id}/">En preparación</button></li>
-          <li><button class="dropdown-item btn-set-state" data-state="ASIGNADO" data-url="/panel-alertas/estado/${order.id}/">Asignado</button></li>
+          <!-- SIN 'ASIGNADO' -->
           <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="/panel-alertas/estado/${order.id}/">En camino</button></li>
           <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="/panel-alertas/estado/${order.id}/">Entregado</button></li>
           <li><hr class="dropdown-divider"></li>
@@ -291,15 +290,15 @@
   }
 
   async function parseJSONorRedirect(res, fallbackUrl){
-  const ct = (res.headers.get('content-type') || '').toLowerCase();
-  if (!ct.includes('application/json')) {
-    // probablemente devolvió HTML (login), redirigimos
-    window.location.href = fallbackUrl;
-    return null;
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (!ct.includes('application/json')) {
+      window.location.href = fallbackUrl;
+      return null;
+    }
+    try { return await res.json(); }
+    catch { window.location.href = fallbackUrl; return null; }
   }
-  try { return await res.json(); }
-  catch { window.location.href = fallbackUrl; return null; }
-}
+
   // Delegación: confirmar pedido (AJAX)
   document.addEventListener('click', async (ev)=>{
     const btn=ev.target.closest('.btn-confirm'); if(!btn) return;
@@ -315,7 +314,7 @@
           <div class="dropdown">
             <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
             <ul class="dropdown-menu dropdown-menu-end">
-              <li><button class="dropdown-item btn-set-state" data-state="ASIGNADO" data-url="${url.replace('/confirmar-pedido','/panel-alertas/estado')}">Asignado</button></li>
+              <!-- SIN 'ASIGNADO' -->
               <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="${url.replace('/confirmar-pedido','/panel-alertas/estado')}">En camino</button></li>
               <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="${url.replace('/confirmar-pedido','/panel-alertas/estado')}">Entregado</button></li>
               <li><hr class="dropdown-divider"></li>
@@ -329,48 +328,47 @@
   });
 
   // Delegación: cambio de estado (AJAX) — con fallback si llega HTML
-document.addEventListener('click', async (ev)=>{
-  const item=ev.target.closest('.btn-set-state'); if(!item) return;
-  const url=item.dataset.url, estado=item.dataset.state;
-  const root = ev.target.closest('.order-card, .order-chip');
-  try{
-    const res=await fetch(url,{
-      method:'POST',
-      headers:{
-        'X-CSRFToken':csrftoken,
-        'X-Requested-With':'XMLHttpRequest',
-        'Content-Type':'application/x-www-form-urlencoded'
-      },
-      body:`estado=${encodeURIComponent(estado)}`
-    });
+  document.addEventListener('click', async (ev)=>{
+    const item=ev.target.closest('.btn-set-state'); if(!item) return;
+    const url=item.dataset.url, estado=item.dataset.state;
+    const root = ev.target.closest('.order-card, .order-chip');
+    try{
+      const res=await fetch(url,{
+        method:'POST',
+        headers:{
+          'X-CSRFToken':csrftoken,
+          'X-Requested-With':'XMLHttpRequest',
+          'Content-Type':'application/x-www-form-urlencoded'
+        },
+        body:`estado=${encodeURIComponent(estado)}`
+      });
 
-    const data = await parseJSONorRedirect(res, url);
-    if(!data) return;
+      const data = await parseJSONorRedirect(res, url);
+      if(!data) return;
 
-    if(data.ok){
-      const badge = root.querySelector('.badge');
-      if(badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
-      if((estado==='ENTREGADO'||estado==='CANCELADO') && root.classList.contains('order-card')){
-        const id = root.dataset.orderId;
-        const total = root.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
-        const cliente = root.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
-        const cadeteNode = root.querySelector('.small .fw-semibold');
-        const cadete = (data.cadete) || (cadeteNode ? cadeteNode.textContent.trim() : '—');
-        const order = { id, estado, total_pedido: total, cliente_nombre: cliente, cadete };
-        const chip = buildChip(order, true);
-        const empty = alertsHoyFinalizados.querySelector('.alert'); if(empty) empty.remove();
-        alertsHoyFinalizados.prepend(chip);
-        root.remove();
-        if(!alertsHoy.querySelector('.order-card')){
-          alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
+      if(data.ok){
+        const badge = root.querySelector('.badge');
+        if(badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
+        if((estado==='ENTREGADO'||estado==='CANCELADO') && root.classList.contains('order-card')){
+          const id = root.dataset.orderId;
+          const total = root.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
+          const cliente = root.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
+          const cadeteNode = root.querySelector('.small .fw-semibold');
+          const cadete = (data.cadete) || (cadeteNode ? cadeteNode.textContent.trim() : '—');
+          const order = { id, estado, total_pedido: total, cliente_nombre: cliente, cadete };
+          const chip = buildChip(order, true);
+          const empty = alertsHoyFinalizados.querySelector('.alert'); if(empty) empty.remove();
+          alertsHoyFinalizados.prepend(chip);
+          root.remove();
+          if(!alertsHoy.querySelector('.order-card')){
+            alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
+          }
         }
+      } else if (data.error === 'no_permiso'){
+        alert('No tenés permiso para cambiar este estado desde aquí.');
       }
-    } else if (data.error === 'no_permiso'){
-      alert('No tenés permiso para cambiar este estado desde aquí.');
-    }
-  }catch(e){ console.error(e); window.location.href=url; }
-});
-
+    }catch(e){ console.error(e); window.location.href=url; }
+  });
 
   // Limpiar
   document.getElementById('clear-alerts').addEventListener('click',()=>{
@@ -390,11 +388,10 @@ document.addEventListener('click', async (ev)=>{
 
   chatSocket.onmessage=function(e){
     const data=JSON.parse(e.data||'{}');
-    const kind = data.message || '';            // 'nuevo_pedido' | 'actualizacion_pedido' | otros
+    const kind = data.message || '';
     const orderId=data.order_id;
     const orderData=data.order_data||{};
 
-    // helper para mover a finalizados si corresponde
     function moveToFinalizadosFromCard(card, estadoActual){
       const total = card.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
       const cliente = card.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
@@ -442,13 +439,12 @@ document.addEventListener('click', async (ev)=>{
         const b = chip.querySelector('.badge');
         if (b){ b.className='badge '+badgeClass(estado); b.textContent=estado; }
       } else {
-        // No lo encontramos en DOM: hacemos un refresh liviano
         location.reload();
       }
       return;
     }
 
-    // === Fallback: tratar como nuevo si no lo tenemos
+    // === Fallback
     if (!orderExists(orderId)){
       orderData.id = orderId;
       const card=buildCard(orderData);

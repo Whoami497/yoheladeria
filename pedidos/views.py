@@ -915,7 +915,7 @@ def aceptar_pedido(request, pedido_id):
         messages.error(request, "Acción no permitida. No tienes un perfil de cadete.")
         return redirect('index')
 
-    # Bloquear si el cadete ya tiene un pedido en curso
+    # El cadete no puede aceptar si ya tiene uno en curso
     if Pedido.objects.filter(
         cadete_asignado=request.user.cadeteprofile,
         estado__in=['ASIGNADO', 'EN_CAMINO']
@@ -923,17 +923,17 @@ def aceptar_pedido(request, pedido_id):
         messages.warning(request, "Ya tenés un pedido en curso. Entregalo antes de aceptar otro.")
         return redirect('panel_cadete')
 
-    # Verificación de disponibilidad del pedido
+    # Sólo aceptable si la tienda lo confirmó y no tiene cadete
     if pedido.estado != 'EN_PREPARACION' or pedido.cadete_asignado_id:
         messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
         return redirect('panel_cadete')
 
-    # Asignar
+    # Asignar y pasar a ASIGNADO
     pedido.cadete_asignado = request.user.cadeteprofile
     pedido.estado = 'ASIGNADO'
     pedido.save()
 
-    # Al aceptar, queda NO disponible
+    # Al aceptar, dejar no-disponible al cadete
     cp = request.user.cadeteprofile
     if hasattr(cp, 'disponible'):
         try:
@@ -944,11 +944,15 @@ def aceptar_pedido(request, pedido_id):
     request.session['cadete_disponible'] = False
     request.session.modified = True
 
-    # Notificar al panel para refrescar
+    # Notificar al panel para refresco automático
     _notify_panel_update(pedido)
+
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+        return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': 'ASIGNADO'})
 
     messages.success(request, f"¡Has aceptado el Pedido #{pedido.id}! Por favor, prepárate para retirarlo.")
     return redirect('panel_cadete')
+
 
 
 

@@ -2,511 +2,175 @@
 {% load static %}
 
 {% block content %}
-<div class="container my-5">
-  <h2 class="section-title text-center mb-1">Panel de Alertas de Pedidos</h2>
-  <p class="text-center text-muted mb-4">Llegan en tiempo real y quedan visibles aun si recargás la página.</p>
-  <hr>
+<div class="container my-4">
+  <h2 class="mb-3">Panel del Cadete</h2>
 
-  <!-- ===== HOY (ACTIVOS) ===== -->
-  <h5 class="mb-3">Pedidos de <span class="fw-bold">HOY</span> (activos)</h5>
-  <div id="alerts-hoy">
-    {% if pedidos_hoy %}
-      {% for p in pedidos_hoy %}
-        <div class="order-card alert alert-primary alert-dismissible fade show mb-3 p-3" id="order-{{ p.id }}" data-order-id="{{ p.id }}">
-          <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
+  <!-- Pedidos en curso del cadete -->
+  {% if pedidos_en_curso %}
+    <div class="mb-4">
+      <h5>Tu pedido en curso</h5>
+      {% for p in pedidos_en_curso %}
+        <div class="card mb-2" id="curso-{{ p.id }}">
+          <div class="card-body d-flex justify-content-between align-items-start gap-3 flex-wrap">
             <div class="flex-grow-1">
-              <div class="d-flex align-items-center gap-2 mb-1">
-                <h6 class="mb-0">#{{ p.id }}</h6>
-                <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
-                <small class="text-muted">Total: ${{ p.total_pedido|default_if_none:"0.00" }}</small>
+              <div class="d-flex align-items-center gap-2">
+                <strong>#{{ p.id }}</strong>
+                <span class="badge bg-secondary">{{ p.estado }}</span>
               </div>
-
-              <div class="small text-muted mb-1">
-                Cliente: <span class="fw-semibold">{{ p.cliente_nombre|default:"N/A" }}</span>
-                · {{ p.cliente_telefono|default:"—" }} · {{ p.cliente_direccion|default:"—" }}
+              <div class="small text-muted mt-1">
+                {{ p.cliente_nombre|default:"" }} · {{ p.cliente_direccion|default:"" }} · {{ p.cliente_telefono|default:"" }}
               </div>
-              <div class="small">
-                Cadete:
-                <span class="fw-semibold">
-                  {% if p.cadete_asignado %}
-                    {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
-                  {% else %}—{% endif %}
-                </span>
-              </div>
-
-              <details class="mt-2">
-                <summary class="cursor-pointer">Ver productos</summary>
-                <ul class="mb-0 small mt-2">
-                  {% for d in p.detalles.all %}
-                    <li>
-                      {{ d.producto.nombre }}{% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %} (x{{ d.cantidad }})
-                      <br><span class="text-muted">Sabores:
-                        {% with sab=d.sabores.all %}{% if sab %}{{ sab|join:", " }}{% else %}Sin especificar{% endif %}{% endwith %}
-                      </span>
-                    </li>
-                  {% endfor %}
-                </ul>
-              </details>
+              <ul class="mb-1 small mt-2">
+                {% for d in p.detalles.all %}
+                  <li>
+                    {{ d.producto.nombre }}{% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %} (x{{ d.cantidad }})
+                    {% with sab=d.sabores.all %}
+                      {% if sab %}<br><span class="text-muted">Sabores: {{ sab|join:", " }}</span>{% endif %}
+                    {% endwith %}
+                  </li>
+                {% endfor %}
+              </ul>
+              <div class="fw-bold">Total: $ {{ p.total_pedido|default_if_none:"0.00" }}</div>
             </div>
-
-            <div class="text-end min-btn-col">
-              {% if p.estado == 'RECIBIDO' %}
-                <button class="btn btn-success fw-bold btn-confirm"
-                        data-confirm-url="{% url 'confirmar_pedido' p.id %}"
-                        data-order-id="{{ p.id }}">
-                  <i class="bi bi-check-circle-fill"></i> Confirmar
-                </button>
-                <div class="text-muted small mt-1">Notifica a cadetes</div>
+            <div class="text-end">
+              {% if p.estado == 'ASIGNADO' %}
+                <button class="btn btn-primary btn-sm cadete-set" data-id="{{ p.id }}" data-next="EN_CAMINO">Marcar EN CAMINO</button>
+              {% elif p.estado == 'EN_CAMINO' %}
+                <button class="btn btn-success btn-sm cadete-set" data-id="{{ p.id }}" data-next="ENTREGADO">Marcar ENTREGADO</button>
               {% else %}
-                <div class="dropdown">
-                  <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">
-                    Estado
-                  </button>
-                  <ul class="dropdown-menu dropdown-menu-end">
-                    <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="{% url 'panel_alertas_set_estado' p.id %}">En preparación</button></li>
-                    <li><button class="dropdown-item btn-set-state" data-state="ASIGNADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Asignado</button></li>
-                    <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="{% url 'panel_alertas_set_estado' p.id %}">En camino</button></li>
-                    <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Entregado</button></li>
-                    <li><hr class="dropdown-divider"></li>
-                    <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Cancelar</button></li>
-                  </ul>
-                </div>
+                <span class="text-muted small">Estado: {{ p.estado }}</span>
               {% endif %}
             </div>
           </div>
-
-          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
       {% endfor %}
-    {% else %}
-      <div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>
-    {% endif %}
-  </div>
-
-  <!-- ===== HOY — FINALIZADOS (ENTREGADO/CANCELADO) ===== -->
-  <details class="mt-4" open>
-    <summary class="h6">Pedidos de HOY — Finalizados</summary>
-    <div id="alerts-hoy-finalizados" class="mt-3">
-      {% if entregados_hoy %}
-        {% for p in entregados_hoy %}
-          <div class="order-chip d-flex align-items-center justify-content-between" id="chip-hoy-{{ p.id }}" data-order-id="{{ p.id }}">
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-              <span class="chip-id">#{{ p.id }}</span>
-              <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
-              <span class="text-muted small">$ {{ p.total_pedido|default_if_none:"0.00" }}</span>
-              <span class="small text-truncate chip-client">{{ p.cliente_nombre|default:"N/A" }}</span>
-              <span class="small text-muted">
-                · Cadete:
-                {% if p.cadete_asignado %}
-                  {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
-                {% else %}—{% endif %}
-              </span>
-            </div>
-            <div class="dropdown">
-              <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
-              <ul class="dropdown-menu dropdown-menu-end">
-                <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="{% url 'panel_alertas_set_estado' p.id %}">En preparación</button></li>
-                <li><button class="dropdown-item btn-set-state" data-state="ASIGNADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Asignado</button></li>
-                <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="{% url 'panel_alertas_set_estado' p.id %}">En camino</button></li>
-                <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Entregado</button></li>
-                <li><hr class="dropdown-divider"></li>
-                <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Cancelar</button></li>
-              </ul>
-            </div>
-          </div>
-        {% endfor %}
-      {% else %}
-        <div class="alert alert-light border text-center">Sin pedidos finalizados de hoy.</div>
-      {% endif %}
     </div>
-  </details>
+  {% else %}
+    <div class="alert alert-info">No tenés pedidos en curso.</div>
+  {% endif %}
 
-  <!-- ===== AYER ===== -->
-  <details class="mt-4">
-    <summary class="h6">Pedidos de AYER</summary>
-    <div id="alerts-ayer" class="mt-3">
-      {% if pedidos_ayer %}
-        {% for p in pedidos_ayer %}
-          <div class="order-chip d-flex align-items-center justify-content-between" id="chip-{{ p.id }}" data-order-id="{{ p.id }}">
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-              <span class="chip-id">#{{ p.id }}</span>
-              <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
-              <span class="text-muted small">$ {{ p.total_pedido|default_if_none:"0.00" }}</span>
-              <span class="small text-truncate chip-client">{{ p.cliente_nombre|default:"N/A" }}</span>
-              <span class="small text-muted">
-                · Cadete:
-                {% if p.cadete_asignado %}
-                  {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
-                {% else %}—{% endif %}
-              </span>
-            </div>
-            <div class="dropdown">
-              <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
-              <ul class="dropdown-menu dropdown-menu-end">
-                <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="{% url 'panel_alertas_set_estado' p.id %}">En preparación</button></li>
-                <li><button class="dropdown-item btn-set-state" data-state="ASIGNADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Asignado</button></li>
-                <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="{% url 'panel_alertas_set_estado' p.id %}">En camino</button></li>
-                <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Entregado</button></li>
-                <li><hr class="dropdown-divider"></li>
-                <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Cancelar</button></li>
-              </ul>
-            </div>
-          </div>
-        {% endfor %}
-      {% else %}
-        <div class="alert alert-light border text-center">Sin pedidos de ayer.</div>
-      {% endif %}
-    </div>
-  </details>
-
-  <div class="text-center mt-4">
-    <a href="{% url 'panel_alertas_anteriores' %}" class="btn btn-link">Ver pedidos anteriores</a>
+  <!-- Feed de pedidos disponibles (aparecen solo si la tienda los confirmó) -->
+  <div class="mb-2 d-flex align-items-center gap-2">
+    <h5 class="mb-0">Pedidos disponibles</h5>
+    <span class="text-muted small"> (se actualiza solo)</span>
   </div>
+  <div id="cadete-feed"></div>
 
-  <!-- controles -->
-  <div class="text-center mt-4 d-flex gap-2 justify-content-center flex-wrap">
-    <span id="ws-status" class="badge bg-secondary align-self-center">Conectando…</span>
-    <button id="toggle-sound" class="btn btn-outline-primary">🔔 Sonido: ON</button>
-    <button id="clear-alerts" class="btn btn-secondary">Limpiar Pedidos Mostrados</button>
+  <div class="mt-4">
+    <button id="refresh-feed" class="btn btn-outline-secondary btn-sm">Actualizar ahora</button>
   </div>
 </div>
 
 <script>
-  // ===== CSRF =====
-  function getCookie(name){const value=`; ${document.cookie}`;const parts=value.split(`; ${name}=`);if(parts.length===2) return parts.pop().split(';').shift();}
-  const csrftoken=getCookie('csrftoken');
+(function(){
+  // ===== CSRF
+  function getCookie(name){const v=`; ${document.cookie}`.split(`; ${name}=`);if(v.length===2) return v.pop().split(';').shift();}
+  const csrftoken = getCookie('csrftoken');
 
-  // ===== Sonido =====
-  const orderSoundUrl = "{% static 'pedidos/sounds/new-order.mp3' %}";
-  let soundEnabled=(localStorage.getItem('panel_sound') ?? 'on')!=='off';
-  const toggleSoundBtn=document.getElementById('toggle-sound');
-  function updateSoundBtn(){
-    toggleSoundBtn.textContent=soundEnabled?'🔔 Sonido: ON':'🔕 Sonido: OFF';
-    toggleSoundBtn.classList.toggle('btn-outline-primary', soundEnabled);
-    toggleSoundBtn.classList.toggle('btn-outline-secondary', !soundEnabled);
-  }
-  function playSound(){ if(!soundEnabled) return; try{const a=new Audio(orderSoundUrl); a.play().catch(()=>{});}catch(e){} }
-  toggleSoundBtn.addEventListener('click',()=>{soundEnabled=!soundEnabled;localStorage.setItem('panel_sound',soundEnabled?'on':'off');updateSoundBtn(); if(soundEnabled) playSound();});
-  updateSoundBtn();
+  const feedRoot = document.getElementById('cadete-feed');
+  const btnRefresh = document.getElementById('refresh-feed');
 
-  // ===== Helpers =====
-  const alertsHoy=document.getElementById('alerts-hoy');
-  const alertsHoyFinalizados=document.getElementById('alerts-hoy-finalizados');
-  const alertsAyer=document.getElementById('alerts-ayer');
-  const wsStatus=document.getElementById('ws-status');
-
-  function badgeClass(estado){return `bg-status-${(estado||'').toLowerCase()}`}
-  function orderExists(id){
-    return document.getElementById(`order-${id}`) || document.getElementById(`chip-${id}`) || document.getElementById(`chip-hoy-${id}`);
-  }
-
-  // Construye tarjeta (HOY activos)
-  function buildCard(order){
-    const wrapper=document.createElement('div');
-    wrapper.className='order-card alert alert-primary alert-dismissible fade show mb-3 p-3';
-    wrapper.id=`order-${order.id}`;
-    wrapper.dataset.orderId=order.id;
-
-    const cadeteTxt = order.cadete || '—';
-    const total = parseFloat(order.total_pedido||0).toFixed(2);
-    const estado = order.estado||'RECIBIDO';
-
-    const detailsHtml = (order.detalles||[]).map(d=>{
-      const name=d.opcion_nombre ? `${d.producto_nombre} - ${d.opcion_nombre}` : d.producto_nombre;
-      const sabores=(d.sabores_nombres && d.sabores_nombres.length)? d.sabores_nombres.join(', ') : 'Sin especificar';
-      return `<li>${name} (x${d.cantidad})<br><span class="text-muted">Sabores: ${sabores}</span></li>`;
-    }).join('');
-
-    const rightControls = estado==='RECIBIDO'
-      ? `<button class="btn btn-success fw-bold btn-confirm"
-                 data-confirm-url="/confirmar-pedido/${order.id}/"
-                 data-order-id="${order.id}">
-           <i class="bi bi-check-circle-fill"></i> Confirmar
-         </button>
-         <div class="text-muted small mt-1">Notifica a cadetes</div>`
-      : `<div class="dropdown">
-           <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
-           <ul class="dropdown-menu dropdown-menu-end">
-             <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="/panel-alertas/estado/${order.id}/">En preparación</button></li>
-             <li><button class="dropdown-item btn-set-state" data-state="ASIGNADO" data-url="/panel-alertas/estado/${order.id}/">Asignado</button></li>
-             <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="/panel-alertas/estado/${order.id}/">En camino</button></li>
-             <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="/panel-alertas/estado/${order.id}/">Entregado</button></li>
-             <li><hr class="dropdown-divider"></li>
-             <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="/panel-alertas/estado/${order.id}/">Cancelar</button></li>
-           </ul>
-         </div>`;
-
-    wrapper.innerHTML = `
-      <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
-        <div class="flex-grow-1">
-          <div class="d-flex align-items-center gap-2 mb-1">
-            <h6 class="mb-0">#${order.id}</h6>
-            <span class="badge ${badgeClass(estado)}">${estado}</span>
-            <small class="text-muted">Total: $${total}</small>
-          </div>
-          <div class="small text-muted mb-1">
-            Cliente: <span class="fw-semibold">${order.cliente_nombre||'N/A'}</span>
-            · ${order.cliente_telefono||'—'} · ${order.cliente_direccion||'—'}
-          </div>
-          <div class="small">Cadete: <span class="fw-semibold">${cadeteTxt}</span></div>
-          <details class="mt-2"><summary>Ver productos</summary><ul class="mb-0 small mt-2">${detailsHtml}</ul></details>
-        </div>
-        <div class="text-end min-btn-col">
-          ${rightControls}
-        </div>
-      </div>
-      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    `;
-    return wrapper;
-  }
-
-  // Construye chip (finalizados HOY o AYER)
-  function buildChip(order, inTodayFinalizados=false){
-    const chip=document.createElement('div');
-    chip.className='order-chip d-flex align-items-center justify-content-between';
-    chip.id= inTodayFinalizados ? `chip-hoy-${order.id}` : `chip-${order.id}`;
-    chip.dataset.orderId=order.id;
-    chip.innerHTML=`
-      <div class="d-flex align-items-center gap-2 flex-wrap">
-        <span class="chip-id">#${order.id}</span>
-        <span class="badge ${badgeClass(order.estado)}">${order.estado}</span>
-        <span class="text-muted small">$${parseFloat(order.total_pedido||0).toFixed(2)}</span>
-        <span class="small text-truncate chip-client">${order.cliente_nombre||'N/A'}</span>
-        <span class="small text-muted">· Cadete: ${order.cadete||'—'}</span>
-      </div>
-      <div class="dropdown">
-        <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
-        <ul class="dropdown-menu dropdown-menu-end">
-          <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="/panel-alertas/estado/${order.id}/">En preparación</button></li>
-          <li><button class="dropdown-item btn-set-state" data-state="ASIGNADO" data-url="/panel-alertas/estado/${order.id}/">Asignado</button></li>
-          <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="/panel-alertas/estado/${order.id}/">En camino</button></li>
-          <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="/panel-alertas/estado/${order.id}/">Entregado</button></li>
-          <li><hr class="dropdown-divider"></li>
-          <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="/panel-alertas/estado/${order.id}/">Cancelar</button></li>
-        </ul>
-      </div>
-    `;
-    return chip;
-  }
-
-  // Delegación: confirmar pedido (AJAX)
-  document.addEventListener('click', async (ev)=>{
-    const btn=ev.target.closest('.btn-confirm'); if(!btn) return;
-    ev.preventDefault();
-    const url=btn.dataset.confirmUrl;
-    const card=btn.closest('.order-card');
-    btn.disabled=true; btn.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Confirmando...';
+  async function loadFeed(){
     try{
-      const res=await fetch(url,{method:'POST',headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'}});
-      if(res.ok){
-        const badge=card.querySelector('.badge'); badge.className='badge '+badgeClass('EN_PREPARACION'); badge.textContent='EN_PREPARACION';
-        btn.parentElement.innerHTML = `
-          <div class="dropdown">
-            <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
-            <ul class="dropdown-menu dropdown-menu-end">
-              <li><button class="dropdown-item btn-set-state" data-state="ASIGNADO" data-url="${url.replace('/confirmar-pedido','/panel-alertas/estado')}">Asignado</button></li>
-              <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="${url.replace('/confirmar-pedido','/panel-alertas/estado')}">En camino</button></li>
-              <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="${url.replace('/confirmar-pedido','/panel-alertas/estado')}">Entregado</button></li>
-              <li><hr class="dropdown-divider"></li>
-              <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="${url.replace('/confirmar-pedido','/panel-alertas/estado')}">Cancelar</button></li>
-            </ul>
+      const res = await fetch("{% url 'cadete_feed' %}", {headers:{'X-Requested-With':'XMLHttpRequest'}});
+      const j = await res.json().catch(()=>({}));
+      const items = (j && j.ok && Array.isArray(j.pedidos)) ? j.pedidos : [];
+      if(!items.length){
+        feedRoot.innerHTML = '<div class="alert alert-light border">No hay pedidos disponibles por ahora.</div>';
+        return;
+      }
+      feedRoot.innerHTML = items.map(p=>{
+        const det = (p.detalles||[]).map(d=>`
+          <li>${d.product}${d.opcion?` - ${d.opcion}`:''} (x${d.cant})${(d.sabores&&d.sabores.length)?`<br><span class="text-muted">Sabores: ${d.sabores.join(', ')}</span>`:''}</li>
+        `.replace('product','producto')).join('');
+
+        return `
+          <div class="card mb-2" data-id="${p.id}">
+            <div class="card-body d-flex justify-content-between align-items-start gap-3 flex-wrap">
+              <div class="flex-grow-1">
+                <div class="d-flex align-items-center gap-2">
+                  <strong>#${p.id}</strong>
+                  <span class="badge bg-info text-dark">EN_PREPARACION</span>
+                </div>
+                <div class="small text-muted mt-1">${p.cliente_nombre||''} · ${p.cliente_direccion||''} · ${p.cliente_telefono||''}</div>
+                <ul class="mb-1 small mt-2">${det}</ul>
+                <div class="fw-bold">Total: $ ${p.total}</div>
+              </div>
+              <div class="text-end">
+                <button class="btn btn-primary btn-sm btn-aceptar" data-id="${p.id}">Aceptar pedido</button>
+              </div>
+            </div>
           </div>`;
-      }else{
-        window.location.href=url;
-      }
-    }catch(e){ window.location.href=url; }
-  });
-
-  // Delegación: cambio de estado (AJAX)
-  document.addEventListener('click', async (ev)=>{
-    const item=ev.target.closest('.btn-set-state'); if(!item) return;
-    const url=item.dataset.url, estado=item.dataset.state;
-    const root = ev.target.closest('.order-card, .order-chip');
-    try{
-      const res=await fetch(url,{
-        method:'POST',
-        headers:{
-          'X-CSRFToken':csrftoken,
-          'X-Requested-With':'XMLHttpRequest',
-          'Content-Type':'application/x-www-form-urlencoded'
-        },
-        body:`estado=${encodeURIComponent(estado)}`
-      });
-      const data = await res.json();
-      if(data.ok){
-        const badge = root.querySelector('.badge');
-        if(badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
-
-        if((estado==='ENTREGADO' || estado==='CANCELADO') && root.classList.contains('order-card')){
-          const id = root.dataset.orderId;
-          const total = root.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
-          const cliente = root.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
-          const cadeteNode = root.querySelector('.small .fw-semibold');
-          const cadete = (data.cadete) || (cadeteNode ? cadeteNode.textContent.trim() : '—');
-
-          const order = { id, estado, total_pedido: total, cliente_nombre: cliente, cadete };
-          const chip = buildChip(order, true);
-          const empty = alertsHoyFinalizados.querySelector('.alert');
-          if(empty) empty.remove();
-          alertsHoyFinalizados.prepend(chip);
-
-          root.remove();
-          if(!alertsHoy.querySelector('.order-card')){
-            alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
-          }
-        }
-      }
-    }catch(e){ console.error(e); }
-  });
-
-  // Limpiar
-  document.getElementById('clear-alerts').addEventListener('click',()=>{
-    alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
-    alertsHoyFinalizados.innerHTML='<div class="alert alert-light border text-center">Sin pedidos finalizados de hoy.</div>';
-    alertsAyer.innerHTML='';
-  });
-
-  /* ===== Refresco de estados (cada 7s) =====
-     Consulta en segundo plano el estado de "hoy" y "hoy_finalizados"
-     para sincronizar con otros dispositivos sin recargar manualmente. */
-  async function refreshEstados(){
-    try{
-      const [rAct, rFin] = await Promise.all([
-        fetch("{% url 'panel_alertas_data' %}?scope=hoy", {headers:{'X-Requested-With':'XMLHttpRequest'}}),
-        fetch("{% url 'panel_alertas_data' %}?scope=hoy_finalizados", {headers:{'X-Requested-With':'XMLHttpRequest'}}),
-      ]);
-      const activos = (await rAct.json()).pedidos || [];
-      const finalizados = (await rFin.json()).pedidos || [];
-
-      // Activos -> crear/actualizar
-      activos.forEach(p=>{
-        const card = document.getElementById(`order-${p.id}`);
-        if(!card){
-          alertsHoy.prepend(buildCard(p));
-          return;
-        }
-        const badge = card.querySelector('.badge');
-        if(badge && badge.textContent !== p.estado){
-          badge.className = 'badge ' + badgeClass(p.estado);
-          badge.textContent = p.estado;
-        }
-      });
-
-      // Finalizados de hoy -> mover/crear chip
-      finalizados.forEach(p=>{
-        const card = document.getElementById(`order-${p.id}`);
-        if(card) card.remove();
-        let chip = document.getElementById(`chip-hoy-${p.id}`);
-        if(!chip){
-          chip = buildChip(p, true);
-          alertsHoyFinalizados.prepend(chip);
-        }else{
-          const b = chip.querySelector('.badge');
-          if(b && b.textContent !== p.estado){
-            b.className = 'badge ' + badgeClass(p.estado);
-            b.textContent = p.estado;
-          }
-        }
-      });
-    }catch(e){ /* silencioso */ }
+      }).join('');
+    }catch(e){
+      feedRoot.innerHTML = '<div class="alert alert-danger">Error cargando el feed.</div>';
+    }
   }
-  setInterval(refreshEstados, 7000);
 
-  // ===== WebSocket (nuevos y actualizaciones) =====
-  const wsProtocol=window.location.protocol==='https:'?'wss://':'ws://';
-  const websocketUrl=wsProtocol + window.location.host + '/ws/pedidos/notifications/';
-  const chatSocket=new WebSocket(websocketUrl);
-
-  chatSocket.onopen=function(){ wsStatus.classList.remove('bg-secondary','bg-danger'); wsStatus.classList.add('bg-success'); wsStatus.textContent='Conectado'; };
-  chatSocket.onclose=function(){ wsStatus.classList.remove('bg-success','bg-secondary'); wsStatus.classList.add('bg-danger'); wsStatus.textContent='Desconectado'; };
-  chatSocket.onerror=function(){ wsStatus.classList.remove('bg-success','bg-secondary'); wsStatus.classList.add('bg-danger'); wsStatus.textContent='Error'; };
-
-  chatSocket.onmessage=function(e){
-    const data=JSON.parse(e.data||'{}');
-    const kind = data.message || '';            // 'nuevo_pedido' | 'actualizacion_pedido' | otros
-    const orderId=data.order_id;
-    const orderData=data.order_data||{};
-
-    function moveToFinalizadosFromCard(card, estadoActual){
-      const total = card.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
-      const cliente = card.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
-      const cadeteNode = card.querySelector('.small .fw-semibold');
-      const cadete = cadeteNode ? cadeteNode.textContent.trim() : '—';
-      const simple = { id: orderId, estado: estadoActual, total_pedido: total, cliente_nombre: cliente, cadete };
-      const chip = buildChip(simple, true);
-      const empty = alertsHoyFinalizados.querySelector('.alert');
-      if (empty) empty.remove();
-      alertsHoyFinalizados.prepend(chip);
-      card.remove();
-      if (!alertsHoy.querySelector('.order-card')){
-        alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
-      }
-    }
-
-    if (kind === 'nuevo_pedido'){
-      if (!orderExists(orderId)){
-        orderData.id = orderId;
-        const card=buildCard(orderData);
-        alertsHoy.prepend(card);
-        playSound();
-      }
-      return;
-    }
-
-    if (kind === 'actualizacion_pedido'){
-      const estado = orderData.estado;
-      if (!estado) return;
-
-      const card = document.getElementById(`order-${orderId}`);
-      const chipHoy = document.getElementById(`chip-hoy-${orderId}`);
-      const chipAyer = document.getElementById(`chip-${orderId}`);
-
-      if (card){
-        const badge = card.querySelector('.badge');
-        if (badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
-        if (estado==='ENTREGADO' || estado==='CANCELADO'){
-          moveToFinalizadosFromCard(card, estado);
-        }
-      } else if (chipHoy || chipAyer){
-        const chip = chipHoy || chipAyer;
-        const b = chip.querySelector('.badge');
-        if (b){ b.className='badge '+badgeClass(estado); b.textContent=estado; }
-      } else {
+  // aceptar pedido (delegación)
+  document.addEventListener('click', async (ev)=>{
+    const btn = ev.target.closest('.btn-aceptar'); if(!btn) return;
+    ev.preventDefault();
+    const id = btn.dataset.id;
+    btn.disabled = true; btn.textContent = 'Aceptando...';
+    try{
+      const res = await fetch(`/aceptar-pedido/${id}/`, {
+        method:'POST',
+        headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'}
+      });
+      if(res.ok){
+        await loadFeed();
+        // recargamos para refrescar “Tu pedido en curso”
         location.reload();
+      }else{
+        location.href = `/aceptar-pedido/${id}/`;
       }
-      return;
+    }catch(e){
+      location.href = `/aceptar-pedido/${id}/`;
     }
+  });
 
-    // Fallback: tratar como nuevo si no lo tenemos
-    if (!orderExists(orderId)){
-      orderData.id = orderId;
-      const card=buildCard(orderData);
-      alertsHoy.prepend(card);
-      playSound();
+  // cambiar estado del pedido en curso (ASIGNADO -> EN_CAMINO -> ENTREGADO)
+  document.addEventListener('click', async (ev)=>{
+    const btn = ev.target.closest('.cadete-set'); if(!btn) return;
+    ev.preventDefault();
+    const id = btn.dataset.id;
+    const next = btn.dataset.next;
+    btn.disabled = true; const old = btn.textContent; btn.textContent = 'Guardando...';
+    try{
+      const res = await fetch(`/cadete/pedido/${id}/estado/`, {
+        method:'POST',
+        headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest','Content-Type':'application/x-www-form-urlencoded'},
+        body: `estado=${encodeURIComponent(next)}`
+      });
+      const j = await res.json().catch(()=>({}));
+      if(res.ok && j.ok){
+        // si se entregó, recargamos todo (vuelve disponible)
+        if(next === 'ENTREGADO'){ location.reload(); return; }
+        // si pasó a EN_CAMINO, actualizamos badge y botón
+        const card = document.getElementById(`curso-${id}`);
+        const badge = card && card.querySelector('.badge');
+        if(badge){ badge.textContent = next; }
+        btn.textContent = 'Marcar ENTREGADO';
+        btn.dataset.next = 'ENTREGADO';
+        btn.classList.remove('btn-primary'); btn.classList.add('btn-success');
+        btn.disabled = false;
+      }else{
+        btn.textContent = old; btn.disabled = false;
+      }
+    }catch(e){
+      btn.textContent = old; btn.disabled = false;
     }
-  };
+  });
+
+  // primera carga + polling suave
+  loadFeed();
+  setInterval(loadFeed, 8000);
+  btnRefresh.addEventListener('click', loadFeed);
+})();
 </script>
 
 <style>
-  .order-chip{
-    border:1px solid var(--bs-primary);
-    background:rgba(13,110,253,.08);
-    border-radius:.75rem;
-    padding:.5rem .75rem;
-    margin-bottom:.6rem;
-  }
-  .chip-id{font-weight:700}
-  .chip-client{max-width:260px}
-
-  .order-card h6{font-size:1rem}
-  .compact-line{font-size:.95rem}
-  .min-btn-col{min-width:190px}
-
-  .bg-status-recibido{background:#0d6efd !important}
-  .bg-status-en_preparacion{background:#0dcaf0 !important}
-  .bg-status-asignado{background:#6f42c1 !important}
-  .bg-status-en_camino{background:#ffc107 !important; color:#212529 !important}
-  .bg-status-entregado{background:#198754 !important}
-  .bg-status-cancelado{background:#dc3545 !important}
+.badge{font-weight:600}
 </style>
 {% endblock %}
