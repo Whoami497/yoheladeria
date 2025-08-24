@@ -43,7 +43,7 @@ urlpatterns = [
     path('cadete/feed/', views.cadete_feed, name='cadete_feed'),
     path('cadete/historial/', views.cadete_historial, name='cadete_historial'),
     path('save-subscription/', views.save_subscription, name='save_subscription'),
-    path('cadete/push-test/', views.cadete_push_test, name='cadete_push_test'),
+    
 
     # --- Mercado Pago ---
     path('pagos/mp/webhook/', views.mp_webhook_view, name='mp_webhook'),
