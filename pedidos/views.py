@@ -93,8 +93,9 @@ def _notify_cadetes_new_order(request, pedido):
         print("WEBPUSH: Falta VAPID_PRIVATE_KEY en settings.")
         return
 
+    # Excluir cadetes con pedido activo
     activos_qs = Pedido.objects.filter(
-        cadete_asignado=OuterRef('pk'),
+        cadete_asignado_id=OuterRef('pk'),
         estado__in=['ASIGNADO', 'EN_CAMINO']
     )
 
@@ -125,7 +126,6 @@ def _notify_cadetes_new_order(request, pedido):
             )
         except Exception as e:
             print(f"WEBPUSH cadete {cp.user_id} error: {e}")
-
 
 
 # =========================
@@ -492,7 +492,7 @@ def ver_carrito(request):
                 'pedidos_new_orders',
                 {
                     'type': 'send_order_notification',
-                    'message': f'¡Nuevo pedido #{nuevo_pedido.id} recibido!',
+                    'message': 'nuevo_pedido',
                     'order_id': nuevo_pedido.id,
                     'order_data': {
                         'cliente_nombre': nuevo_pedido.cliente_nombre,
@@ -782,8 +782,19 @@ def panel_alertas_set_estado(request, pedido_id):
     validos = {'RECIBIDO', 'EN_PREPARACION', 'ASIGNADO', 'EN_CAMINO', 'ENTREGADO', 'CANCELADO'}
     if estado not in validos:
         return JsonResponse({'ok': False, 'error': 'Estado inválido'}, status=400)
+
     pedido.estado = estado
     pedido.save(update_fields=['estado'])
+
+    # Si se marca ENTREGADO desde tienda, liberar cadete
+    if estado == 'ENTREGADO' and getattr(pedido, 'cadete_asignado', None):
+        cp = pedido.cadete_asignado
+        if hasattr(cp, 'disponible'):
+            try:
+                cp.disponible = True
+                cp.save(update_fields=['disponible'])
+            except Exception:
+                pass
 
     # Notificar a panel para refrescar
     _notify_panel_update(pedido)
@@ -877,15 +888,11 @@ def aceptar_pedido(request, pedido_id):
         messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
         return redirect('panel_cadete')
 
+    # Asignar y marcar no disponible
     pedido.cadete_asignado = request.user.cadeteprofile
     pedido.estado = 'ASIGNADO'
     pedido.save()
 
-    messages.success(request, f"¡Has aceptado el Pedido #{pedido.id}! Por favor, prepárate para retirarlo.")
-    return redirect('panel_cadete')
-
-
-    # Al aceptar, lo dejamos NO disponible
     cp = request.user.cadeteprofile
     if hasattr(cp, 'disponible'):
         try:
@@ -968,7 +975,7 @@ def cadete_toggle_disponible(request):
         return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
 
     val = (request.POST.get('disponible') == '1')
-    # Si tiene un pedido activo, no puede ponerse disponible=false->true a menos que entregue
+    # Si tiene un pedido activo, no puede ponerse disponible=true hasta entregar
     if val and cadete_esta_ocupado(request.user.cadeteprofile):
         return JsonResponse({'ok': False, 'error': 'ocupado'}, status=400)
 
@@ -1090,8 +1097,7 @@ def cadete_feed(request):
             } for d in p.detalles.all()],
         }
 
-    return JsonResponse({'ok': True, 'pedidos': [ser(p) for p in pedidos]})
-
+    return JsonResponse({'ok': True, 'pedidos': [ser(p) for p in pedidos])}
 
 
 @login_required
@@ -1185,7 +1191,7 @@ def mp_webhook_view(request):
                 'pedidos_new_orders',
                 {
                     'type': 'send_order_notification',
-                    'message': f'¡Nuevo pedido #{pedido.id} recibido!',
+                    'message': 'nuevo_pedido',
                     'order_id': pedido.id,
                     'order_data': {
                         'cliente_nombre': pedido.cliente_nombre,
@@ -1227,7 +1233,7 @@ def mp_success(request):
                 'pedidos_new_orders',
                 {
                     'type': 'send_order_notification',
-                    'message': f'Pago aprobado. Pedido #{pedido.id}',
+                    'message': 'nuevo_pedido',
                     'order_id': pedido.id,
                     'order_data': {
                         'cliente_nombre': pedido.cliente_nombre,

@@ -4,7 +4,6 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Yo Heladerías</title>
-    <meta name="theme-color" content="#073653">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 
@@ -25,9 +24,14 @@
       .sidebar-desktop .sidebar-nav .nav-link{color:#fff;padding:15px 20px;font-weight:500;display:flex;align-items:center;border-radius:8px;margin:0 10px}
       .sidebar-desktop .sidebar-nav .nav-link i{margin-right:10px}
       .sidebar-desktop .sidebar-nav .nav-link:hover,.sidebar-desktop .sidebar-nav .nav-link.active{background:var(--c-azul-claro);color:#fff!important;box-shadow:0 2px 5px var(--s-soft)}
+      .sidebar-desktop .collapse .nav-link{padding:10px 20px;margin:0 10px;color:#d9d9d9}
 
       .main-content-wrapper{flex-grow:1;background:var(--c-dark);padding:20px}
-      .main-content{background:#fff;border-radius:15px;padding:30px;box-shadow:0 5px 20px var(--s-med);min-height:calc(100vh - 40px);color:var(--c-text)}
+      .main-content{background:#fff;border-radius:15px;padding:24px;box-shadow:0 5px 20px var(--s-med);min-height:calc(100vh - 40px);color:var(--c-text)}
+      /* imágenes y contenido fluidos (evita zoom raro en Inicio/Catálogo) */
+      img,video,iframe{max-width:100%;height:auto}
+      html{-webkit-text-size-adjust:100%}
+      .section-title{font-weight:800}
 
       /* Mensajes */
       .alert{border-radius:10px;font-weight:500}
@@ -43,50 +47,23 @@
       .btn-secondary:hover{background:var(--c-br);border-color:var(--c-br);color:var(--c-azul-hover)}
 
       /* Bottom bar móvil */
-      .mobile-tabbar{position:fixed;left:0;right:0;bottom:0;display:none;gap:.25rem;background:rgba(255,255,255,.86);backdrop-filter:blur(10px);border-top:1px solid rgba(7,54,83,.12);box-shadow:0 -6px 20px rgba(0,0,0,.15);z-index:1030;padding:.2rem .4rem}
+      .mobile-tabbar{position:fixed;left:0;right:0;bottom:0;display:none;gap:.25rem;background:rgba(255,255,255,.9);backdrop-filter:blur(10px);border-top:1px solid rgba(7,54,83,.12);box-shadow:0 -6px 20px rgba(0,0,0,.15);z-index:1030;padding:.2rem .4rem}
       .mobile-tabbar a.mbn-item{flex:1;text-align:center;text-decoration:none;color:var(--c-azul);font-weight:600;font-size:.86rem;padding:.35rem .25rem .5rem;border-radius:12px;display:flex;flex-direction:column;align-items:center}
       .mobile-tabbar a.mbn-item .bi{font-size:1.25rem;margin-bottom:.1rem}
       .mobile-tabbar a.mbn-item.active{color:var(--c-azul-claro);background:rgba(0,123,255,.08)}
 
-      /* ===== Desktop layout ===== */
       @media (min-width:992px){
         .page-wrapper{flex-direction:row}
         .sidebar-desktop{display:block}
         .main-content-wrapper{margin-left:250px}
       }
-
-      /* ===== Mobile tweaks (¡acá está el “boost”!) ===== */
       @media (max-width:991.98px){
         body{padding-bottom:64px}
         .sidebar-desktop{display:none}
         .mobile-tabbar{display:flex}
-
-        /* más legible en cell */
-        html{font-size:17px}
-        .main-content-wrapper{padding:12px}
-        .main-content{padding:18px 14px;border-radius:10px;box-shadow:0 3px 14px var(--s-soft);min-height:auto}
-        .section-title{font-size:1.35rem}
-
-        /* inputs y botones más grandes */
-        .form-control,.form-select{font-size:1rem;padding:.65rem .8rem;border-radius:.8rem}
-        .btn{font-size:1rem;padding:.62rem 1rem;border-radius:.9rem}
-        .btn-sm{font-size:.95rem;padding:.5rem .75rem}
-
-        /* listas/filtros del catálogo más “tocables” */
-        .nav-pills .nav-link,
-        .btn-group .btn,
-        .badge{font-size:.95rem}
-
-        /* tarjetas (por si el catálogo usa .card) */
-        .card{border-radius:1rem}
-        .card .card-body{padding:1rem}
-
-        /* mejorar respiración en el index */
-        .container{padding-left:14px;padding-right:14px}
+        .main-content{padding:18px 14px;border-radius:12px}
+        .section-title{font-size:1.25rem}
       }
-
-      /* imágenes seguras */
-      img{max-width:100%;height:auto}
     </style>
   </head>
   <body>
@@ -105,7 +82,7 @@
           <ul class="nav flex-column">
 
             {% if user.is_authenticated and user.cadeteprofile %}
-              <!-- ===== Menú de CADETE (desktop) ===== -->
+              <!-- ===== Menú de CADETE (desktop) — SIN CAMBIOS ===== -->
               <li class="nav-item">
                 <a class="nav-link {% if request.resolver_match.url_name == 'panel_cadete' %}active{% endif %}" href="{% url 'panel_cadete' %}">
                   <i class="bi bi-bicycle"></i> Panel del Cadete
@@ -130,11 +107,31 @@
 
             {% else %}
               <!-- ===== Menú de CLIENTE (desktop) ===== -->
+              <!-- Botón principal “Más” colapsable -->
               <li class="nav-item">
-                <a class="nav-link {% if request.resolver_match.url_name == 'index' %}active{% endif %}" href="{% url 'index' %}">
-                  <i class="bi bi-house-door-fill"></i> Inicio
+                <a class="nav-link d-flex justify-content-between align-items-center"
+                   data-bs-toggle="collapse" href="#moreMenuDesktop" role="button" aria-expanded="false" aria-controls="moreMenuDesktop">
+                  <span><i class="bi bi-three-dots"></i> Más</span>
+                  <i class="bi bi-caret-down-fill ms-2"></i>
                 </a>
+                <div class="collapse" id="moreMenuDesktop">
+                  <ul class="nav flex-column">
+                    <li><a class="nav-link" href="{% url 'index' %}"><i class="bi bi-house-door"></i> Inicio</a></li>
+                    {% if user.is_authenticated %}
+                      <li><a class="nav-link {% if request.resolver_match.url_name == 'canjear_puntos' %}active{% endif %}" href="{% url 'canjear_puntos' %}"><i class="bi bi-gift-fill"></i> Canjear Puntos</a></li>
+                      <li><a class="nav-link {% if request.resolver_match.url_name == 'historial_pedidos_cliente' %}active{% endif %}" href="{% url 'historial_pedidos_cliente' %}"><i class="bi bi-clock-history"></i> Historial</a></li>
+                      <li><a class="nav-link {% if request.resolver_match.url_name == 'perfil_cliente' %}active{% endif %}" href="{% url 'perfil_cliente' %}"><i class="bi bi-person-fill"></i> Mi Perfil ({{ user.username }})</a></li>
+                      <li><a class="nav-link" href="{% url 'logout_cliente' %}"><i class="bi bi-box-arrow-right"></i> Cerrar Sesión</a></li>
+                    {% else %}
+                      <li><a class="nav-link {% if request.resolver_match.url_name == 'login' %}active{% endif %}" href="{% url 'login' %}"><i class="bi bi-box-arrow-in-right"></i> Iniciar Sesión</a></li>
+                      <li><a class="nav-link {% if request.resolver_match.url_name == 'register_cliente' %}active{% endif %}" href="{% url 'register_cliente' %}"><i class="bi bi-person-plus-fill"></i> Registrarse</a></li>
+                    {% endif %}
+                    <li><a class="nav-link" href="/#contacto"><i class="bi bi-envelope-paper-heart"></i> Contacto</a></li>
+                  </ul>
+                </div>
               </li>
+
+              <!-- Accesos directos comunes -->
               <li class="nav-item">
                 <a class="nav-link {% if request.resolver_match.url_name == 'ver_carrito' %}active{% endif %}" href="{% url 'ver_carrito' %}">
                   <i class="bi bi-cart-fill"></i> Carrito
@@ -150,17 +147,6 @@
                     </a>
                   </li>
                 {% endfor %}
-              {% endif %}
-
-              <li class="nav-item px-3 mt-2 text-white-50">Más Opciones</li>
-              {% if user.is_authenticated %}
-                <li class="nav-item"><a class="nav-link {% if request.resolver_match.url_name == 'perfil_cliente' %}active{% endif %}" href="{% url 'perfil_cliente' %}"><i class="bi bi-person-fill"></i> Mi Perfil ({{ user.username }})</a></li>
-                <li class="nav-item"><a class="nav-link {% if request.resolver_match.url_name == 'historial_pedidos_cliente' %}active{% endif %}" href="{% url 'historial_pedidos_cliente' %}"><i class="bi bi-clock-history"></i> Historial</a></li>
-                <li class="nav-item"><a class="nav-link {% if request.resolver_match.url_name == 'canjear_puntos' %}active{% endif %}" href="{% url 'canjear_puntos' %}"><i class="bi bi-gift-fill"></i> Canjear Puntos</a></li>
-                <li class="nav-item"><a class="nav-link" href="{% url 'logout_cliente' %}"><i class="bi bi-box-arrow-right"></i> Cerrar Sesión</a></li>
-              {% else %}
-                <li class="nav-item"><a class="nav-link {% if request.resolver_match.url_name == 'login' %}active{% endif %}" href="{% url 'login' %}"><i class="bi bi-box-arrow-in-right"></i> Iniciar Sesión</a></li>
-                <li class="nav-item"><a class="nav-link {% if request.resolver_match.url_name == 'register_cliente' %}active{% endif %}" href="{% url 'register_cliente' %}"><i class="bi bi-person-plus-fill"></i> Registrarse</a></li>
               {% endif %}
             {% endif %}
 
@@ -190,7 +176,7 @@
     <!-- ===== Bottom Tab Bar (móvil) ===== -->
     {% with url_name=request.resolver_match.url_name %}
       {% if user.is_authenticated and user.cadeteprofile %}
-        <!-- Barra para CADETE -->
+        <!-- Barra para CADETE — SIN CAMBIOS -->
         <nav class="mobile-tabbar" aria-label="Navegación cadete">
           <a class="mbn-item {% if url_name == 'panel_cadete' %}active{% endif %}" href="{% url 'panel_cadete' %}">
             <i class="bi bi-bicycle"></i><span>Panel</span>
@@ -208,8 +194,9 @@
       {% else %}
         <!-- Barra para CLIENTE -->
         <nav class="mobile-tabbar" aria-label="Navegación cliente">
-          <a class="mbn-item {% if url_name == 'index' %}active{% endif %}" href="{% url 'index' %}">
-            <i class="bi bi-house-door"></i><span>Inicio</span>
+          <!-- “Más” abre offcanvas -->
+          <a class="mbn-item" href="#" data-bs-toggle="offcanvas" data-bs-target="#moreMenuMobile">
+            <i class="bi bi-three-dots"></i><span>Más</span>
           </a>
           <a class="mbn-item" href="/#nuestro-catalogo">
             <i class="bi bi-list-ul"></i><span>Catálogo</span>
@@ -229,6 +216,29 @@
         </nav>
       {% endif %}
     {% endwith %}
+
+    <!-- Offcanvas “Más” (móvil) -->
+    <div class="offcanvas offcanvas-bottom" tabindex="-1" id="moreMenuMobile" aria-labelledby="moreMenuMobileLabel" style="height:auto;max-height:80vh;">
+      <div class="offcanvas-header">
+        <h5 class="offcanvas-title" id="moreMenuMobileLabel">Más opciones</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Cerrar"></button>
+      </div>
+      <div class="offcanvas-body pt-0">
+        <div class="list-group">
+          <a class="list-group-item list-group-item-action" href="{% url 'index' %}"><i class="bi bi-house-door me-2"></i>Inicio</a>
+          {% if user.is_authenticated %}
+            <a class="list-group-item list-group-item-action" href="{% url 'canjear_puntos' %}"><i class="bi bi-gift-fill me-2"></i>Canjear Puntos</a>
+            <a class="list-group-item list-group-item-action" href="{% url 'historial_pedidos_cliente' %}"><i class="bi bi-clock-history me-2"></i>Historial</a>
+            <a class="list-group-item list-group-item-action" href="{% url 'perfil_cliente' %}"><i class="bi bi-person-fill me-2"></i>Mi Perfil</a>
+            <a class="list-group-item list-group-item-action" href="{% url 'logout_cliente' %}"><i class="bi bi-box-arrow-right me-2"></i>Cerrar Sesión</a>
+          {% else %}
+            <a class="list-group-item list-group-item-action" href="{% url 'login' %}"><i class="bi bi-box-arrow-in-right me-2"></i>Iniciar Sesión</a>
+            <a class="list-group-item list-group-item-action" href="{% url 'register_cliente' %}"><i class="bi bi-person-plus-fill me-2"></i>Registrarse</a>
+          {% endif %}
+          <a class="list-group-item list-group-item-action" href="/#contacto"><i class="bi bi-envelope-paper-heart me-2"></i>Contacto</a>
+        </div>
+      </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 
