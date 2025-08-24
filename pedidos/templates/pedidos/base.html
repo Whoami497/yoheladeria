@@ -249,127 +249,145 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 
-    <!-- ===== JS: disponibilidad + registro de Push para cadete ===== -->
-    <script>
-      (function () {
-        function getCookie(name){
-          const v = `; ${document.cookie}`.split(`; ${name}=`); 
-          if (v.length === 2) return v.pop().split(';').shift();
-        }
-        const csrftoken = getCookie('csrftoken');
+<!-- ===== JS: disponibilidad + registro de Push para cadete ===== -->
+<script>
+  (function () {
+    // --- CSRF
+    function getCookie(name){
+      const v = `; ${document.cookie}`.split(`; ${name}=`);
+      if (v.length === 2) return v.pop().split(';').shift();
+    }
+    const csrftoken = getCookie('csrftoken');
 
-        function urlB64ToUint8Array(base64String) {
-          const padding = '='.repeat((4 - base64String.length % 4) % 4);
-          const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-          const rawData = atob(base64);
-          const outputArray = new Uint8Array(rawData.length);
-          for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
-          return outputArray;
-        }
+    // --- Util VAPID
+    function urlB64ToUint8Array(base64String){
+      const padding = '='.repeat((4 - base64String.length % 4) % 4);
+      const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const rawData = atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+      return outputArray;
+    }
 
-        async function ensurePushRegistered(){
-          if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-          try{
-            const reg = await navigator.serviceWorker.register("{% url 'service_worker' %}");
-            // la librería webpush inyecta una var global con la clave pública
-            const vapid = (window.vapidPublicKey || window.vapid_key || '').trim();
-            if (!vapid) { console.warn('VAPID public key no disponible'); return; }
+    // --- REGISTRO PUSH (guarda el objeto "crudo": endpoint + keys)
+    async function ensurePushRegistered(){
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      try{
+        // registra (o reusa) el SW de raíz y espera a que quede activo
+        await navigator.serviceWorker.register("{% url 'service_worker' %}");
+        const readyReg = await navigator.serviceWorker.ready;
 
-            let sub = await reg.pushManager.getSubscription();
-            if (!sub){
-              sub = await reg.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: urlB64ToUint8Array(vapid)
-              });
-            }
-            await fetch("{% url 'save_subscription' %}", {
-              method: 'POST',
-              headers: {'Content-Type':'application/json','X-CSRFToken': csrftoken},
-              body: JSON.stringify({ subscription: sub.toJSON() })
-            });
-          }catch(e){ console.warn('No se pudo registrar push', e); }
-        }
+        // distintas libs inyectan el nombre de la variable de VAPID de forma distinta
+        const vapid =
+          (window.vapidPublicKey) ||
+          (window.django_webpush_config && window.django_webpush_config.vapidKey) ||
+          (window.vapid_key) || '';
+        const vapidKey = (vapid || '').trim();
+        if (!vapidKey){ console.warn('VAPID public key no disponible'); return; }
 
-        async function setDisponible(turnOn){
-          const fd = new FormData();
-          fd.append('disponible', turnOn ? '1' : '0');
-
-          try{
-            const res = await fetch("{% url 'cadete_toggle_disponible' %}", {
-              method: 'POST',
-              headers: {'X-CSRFToken': csrftoken},
-              body: fd
-            });
-
-            const ct = (res.headers.get('content-type') || '').toLowerCase();
-            if (!ct.includes('application/json')) {
-              window.location.href = "{% url 'login_cadete' %}";
-              return;
-            }
-
-            const j = await res.json();
-            if (!j.ok){
-              if (j.error === 'ocupado'){
-                alert('Tenés un pedido en curso. Entregalo antes de cambiar tu disponibilidad.');
-              }else{
-                alert('No se pudo cambiar la disponibilidad.');
-              }
-              return;
-            }
-            applyDisponibilidadToUI(!!j.disponible);
-            if (j.disponible) ensurePushRegistered();
-
-          }catch(e){
-            console.error('toggle disponible error', e);
-            alert('Error de red cambiando disponibilidad.');
-          }
-        }
-
-        function applyDisponibilidadToUI(val){
-          const btnM = document.getElementById('btn-cadete-dispo');
-          const btnD = document.getElementById('btn-cadete-dispo-desktop');
-
-          if (btnM){
-            btnM.dataset.on = val ? '1' : '0';
-            btnM.classList.toggle('active', val);
-            const spanM = btnM.querySelector('span');
-            if (spanM) spanM.textContent = val ? 'Disponible' : 'No disp.';
-          }
-          if (btnD){
-            btnD.dataset.on = val ? '1' : '0';
-            btnD.classList.toggle('btn-success', val);
-            btnD.classList.toggle('btn-secondary', !val);
-            const spanD = btnD.querySelector('span');
-            if (spanD) spanD.textContent = val ? 'Disponible' : 'Activar disponible';
-          }
-        }
-
-        function bindBtn(el){
-          if(!el) return;
-          el.addEventListener('click', function(ev){
-            ev.preventDefault();
-            const isOn = (this.dataset.on === '1');
-            const turningOn = !isOn;
-            if (!turningOn){
-              if (!confirm('¿Querés desactivar tu disponibilidad?')) return;
-            }
-            setDisponible(turningOn);
+        let sub = await readyReg.pushManager.getSubscription();
+        if (!sub){
+          sub = await readyReg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlB64ToUint8Array(vapidKey)
           });
         }
 
-        bindBtn(document.getElementById('btn-cadete-dispo'));
-        bindBtn(document.getElementById('btn-cadete-dispo-desktop'));
+        // ⚠️ Enviamos el objeto "crudo" (no envuelto en {subscription: ...})
+        const payload = sub.toJSON();
+        await fetch("{% url 'save_subscription' %}", {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrftoken,
+            'X-Requested-With':'XMLHttpRequest'
+          },
+          body: JSON.stringify(payload)
+        });
+      }catch(e){
+        console.warn('No se pudo registrar push', e);
+      }
+    }
 
-        function initState(){
-          const initial = "{% if user.is_authenticated and user.cadeteprofile %}{% if user.cadeteprofile.disponible %}1{% else %}0{% endif %}{% else %}0{% endif %}";
-          const fallback = "{{ request.session.cadete_disponible|default:'' }}";
-          const val = (initial === '1') || (fallback === 'True' || fallback === '1' || fallback === 'true');
-          applyDisponibilidadToUI(val);
-          if (val) ensurePushRegistered();
+    // --- Disponibilidad del cadete (único toggle desde barra)
+    function applyDisponibilidadToUI(val){
+      const btnM = document.getElementById('btn-cadete-dispo');
+      const btnD = document.getElementById('btn-cadete-dispo-desktop');
+
+      if (btnM){
+        btnM.dataset.on = val ? '1' : '0';
+        btnM.classList.toggle('active', val);
+        const spanM = btnM.querySelector('span');
+        if (spanM) spanM.textContent = val ? 'Disponible' : 'No disp.';
+      }
+      if (btnD){
+        btnD.dataset.on = val ? '1' : '0';
+        btnD.classList.toggle('btn-success', val);
+        btnD.classList.toggle('btn-secondary', !val);
+        const spanD = btnD.querySelector('span');
+        if (spanD) spanD.textContent = val ? 'Disponible' : 'Activar disponible';
+      }
+    }
+
+    async function setDisponible(turnOn){
+      const fd = new FormData();
+      fd.append('disponible', turnOn ? '1' : '0');
+
+      try{
+        const res = await fetch("{% url 'cadete_toggle_disponible' %}", {
+          method: 'POST',
+          headers: {'X-CSRFToken': csrftoken, 'X-Requested-With':'XMLHttpRequest'},
+          body: fd
+        });
+
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        if (!ct.includes('application/json')) {
+          window.location.href = "{% url 'login_cadete' %}";
+          return;
         }
-        initState();
-      })();
-    </script>
+
+        const j = await res.json();
+        if (!j.ok){
+          if (j.error === 'ocupado'){
+            alert('Tenés un pedido en curso. Entregalo antes de cambiar tu disponibilidad.');
+          }else{
+            alert('No se pudo cambiar la disponibilidad.');
+          }
+          return;
+        }
+        applyDisponibilidadToUI(!!j.disponible);
+        if (j.disponible) ensurePushRegistered();
+      }catch(e){
+        console.error('toggle disponible error', e);
+        alert('Error de red cambiando disponibilidad.');
+      }
+    }
+
+    function bindBtn(el){
+      if(!el) return;
+      el.addEventListener('click', function(ev){
+        ev.preventDefault();
+        const isOn = (this.dataset.on === '1');
+        const turningOn = !isOn;
+        if (!turningOn && !confirm('¿Querés desactivar tu disponibilidad?')) return;
+        setDisponible(turningOn);
+      });
+    }
+
+    bindBtn(document.getElementById('btn-cadete-dispo'));
+    bindBtn(document.getElementById('btn-cadete-dispo-desktop'));
+
+    // --- Estado inicial: SOLO lo que diga la DB (evitamos activar por sesión)
+    function initState(){
+      const initial = "{% if user.is_authenticated and user.cadeteprofile and user.cadeteprofile.disponible %}1{% else %}0{% endif %}";
+      const val = (initial === '1');
+      applyDisponibilidadToUI(val);
+      if (val) ensurePushRegistered();
+    }
+    initState();
+  })();
+</script>
+
 
     <!-- Debug overflow opcional -->
     <script>
