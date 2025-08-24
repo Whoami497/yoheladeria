@@ -1,5 +1,5 @@
 # pedidos/views.py
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q
 from django.conf import settings
 from django.http import JsonResponse, HttpResponse
 from django.shortcuts import render, redirect, get_object_or_404
@@ -13,7 +13,6 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from django.db.models import Q
 from django.views.decorators.csrf import csrf_exempt
 from decimal import Decimal
 from channels.layers import get_channel_layer
@@ -650,6 +649,8 @@ def logout_cliente(request):
     logout(request)
     messages.info(request, "Has cerrado sesión exitosamente.")
     return redirect('index')
+
+
 @login_required
 def pedido_en_curso(request):
     """
@@ -707,6 +708,7 @@ def panel_alertas(request):
     }
     return render(request, 'pedidos/panel_alertas.html', ctx)
 
+
 @staff_member_required
 def panel_alertas_data(request):
     """
@@ -759,6 +761,7 @@ def panel_alertas_data(request):
 
     return JsonResponse({'pedidos': [serialize(p) for p in qs]})
 
+
 @staff_member_required
 def panel_alertas_anteriores(request):
     """
@@ -791,9 +794,6 @@ def panel_alertas_anteriores(request):
     """
     return HttpResponse(html)
 
-
-from django.contrib.auth.decorators import login_required
-from django.shortcuts import redirect
 
 @require_POST
 @login_required
@@ -841,7 +841,6 @@ def panel_alertas_set_estado(request, pedido_id):
         cadete_nombre = pedido.cadete_asignado.user.get_full_name() or pedido.cadete_asignado.user.username
 
     return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': pedido.estado, 'cadete': cadete_nombre})
-
 
 
 # =========================
@@ -952,8 +951,6 @@ def aceptar_pedido(request, pedido_id):
 
     messages.success(request, f"¡Has aceptado el Pedido #{pedido.id}! Por favor, prepárate para retirarlo.")
     return redirect('panel_cadete')
-
-
 
 
 def login_cadete(request):
@@ -1077,16 +1074,18 @@ def cadete_set_estado(request, pedido_id):
     pedido.estado = estado
     pedido.save(update_fields=['estado'])
 
-    # Si entregó, vuelve a quedar disponible
+    # Si entregó, NO auto-activar disponibilidad: queda en OFF hasta que el cadete la prenda.
+    finalizado = False
     if estado == 'ENTREGADO':
+        finalizado = True
         cp = request.user.cadeteprofile
         if hasattr(cp, 'disponible'):
             try:
-                cp.disponible = True
+                cp.disponible = False  # se mantiene apagado; debe reactivarse manualmente
                 cp.save(update_fields=['disponible'])
             except Exception:
                 pass
-        request.session['cadete_disponible'] = True
+        request.session['cadete_disponible'] = False
         request.session.modified = True
 
     # Notificar al panel para refrescar
@@ -1094,11 +1093,19 @@ def cadete_set_estado(request, pedido_id):
 
     # Respuesta según tipo de request
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-        return JsonResponse({'ok': True, 'estado': pedido.estado, 'pedido_id': pedido.id})
+        return JsonResponse({
+            'ok': True,
+            'estado': pedido.estado,
+            'pedido_id': pedido.id,
+            'finalizado': finalizado,
+            'disponible': False if finalizado else None
+        })
     else:
-        messages.success(request, f"Pedido #{pedido.id} → {pedido.estado}.")
+        if finalizado:
+            messages.success(request, f"Pedido #{pedido.id} entregado. Podés volver a ponerte Disponible cuando quieras.")
+        else:
+            messages.success(request, f"Pedido #{pedido.id} → {pedido.estado}.")
         return redirect('panel_cadete')
-
 
 
 @login_required
@@ -1183,8 +1190,6 @@ def cadete_feed(request):
     return JsonResponse({'ok': True, 'disponible': True, 'pedidos': [ser(p) for p in pedidos]})
 
 
-
-
 # pedidos/views.py
 @login_required
 def cadete_historial(request):
@@ -1205,7 +1210,6 @@ def cadete_historial(request):
     )
 
     return render(request, 'pedidos/cadete_historial.html', {'pedidos': pedidos})
-
 
 
 # =========================

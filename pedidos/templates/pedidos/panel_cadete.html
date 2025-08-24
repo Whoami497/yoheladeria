@@ -5,48 +5,52 @@
 <div class="container my-4">
   <h2 class="mb-2">Panel del Cadete</h2>
 
-  {% if pedidos_en_curso %}
-    <div class="alert alert-info">Tenés pedidos en curso.</div>
-    {% for p in pedidos_en_curso %}
-      <div class="card mb-3" id="pedido-{{ p.id }}">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-            <div>
-              <h6 class="mb-1">
-                #{{ p.id }} <span class="badge bg-secondary js-badge">{{ p.estado }}</span>
-              </h6>
-              <div class="small text-muted">
-                {{ p.cliente_nombre|default:"" }} · {{ p.cliente_telefono|default:"" }} · {{ p.cliente_direccion|default:"" }}
+  <!-- === En curso (siempre con contenedor para poder actualizar por JS) === -->
+  <div id="en-curso-box">
+    {% if pedidos_en_curso %}
+      <div class="alert alert-info">Tenés pedidos en curso.</div>
+      {% for p in pedidos_en_curso %}
+        <div class="card mb-3" id="pedido-{{ p.id }}">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+              <div>
+                <h6 class="mb-1">
+                  #{{ p.id }} <span class="badge bg-secondary js-badge">{{ p.estado }}</span>
+                </h6>
+                <div class="small text-muted">
+                  {{ p.cliente_nombre|default:"" }} · {{ p.cliente_telefono|default:"" }} · {{ p.cliente_direccion|default:"" }}
+                </div>
+                <ul class="small mb-2 mt-2">
+                  {% for d in p.detalles.all %}
+                    <li>
+                      {{ d.producto.nombre }}{% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %} (x{{ d.cantidad }})
+                    </li>
+                  {% endfor %}
+                </ul>
+                <div class="fw-bold">Total: ${{ p.total_pedido|default_if_none:"0.00" }}</div>
               </div>
-              <ul class="small mb-2 mt-2">
-                {% for d in p.detalles.all %}
-                  <li>
-                    {{ d.producto.nombre }}{% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %} (x{{ d.cantidad }})
-                  </li>
-                {% endfor %}
-              </ul>
-              <div class="fw-bold">Total: ${{ p.total_pedido|default_if_none:"0.00" }}</div>
-            </div>
-            <div class="text-end">
-              <form action="{% url 'cadete_set_estado' p.id %}" method="post" class="d-inline js-state-form">
-                {% csrf_token %}
-                <input type="hidden" name="estado" value="EN_CAMINO">
-                <button class="btn btn-outline-primary btn-sm" {% if p.estado != 'ASIGNADO' %}disabled{% endif %}>Pasar a EN CAMINO</button>
-              </form>
-              <form action="{% url 'cadete_set_estado' p.id %}" method="post" class="d-inline js-state-form">
-                {% csrf_token %}
-                <input type="hidden" name="estado" value="ENTREGADO">
-                <button class="btn btn-success btn-sm">Marcar ENTREGADO</button>
-              </form>
+              <div class="text-end">
+                <form action="{% url 'cadete_set_estado' p.id %}" method="post" class="d-inline js-state-form">
+                  {% csrf_token %}
+                  <input type="hidden" name="estado" value="EN_CAMINO">
+                  <button class="btn btn-outline-primary btn-sm" {% if p.estado != 'ASIGNADO' %}disabled{% endif %}>Pasar a EN CAMINO</button>
+                </form>
+                <form action="{% url 'cadete_set_estado' p.id %}" method="post" class="d-inline js-state-form">
+                  {% csrf_token %}
+                  <input type="hidden" name="estado" value="ENTREGADO">
+                  <button class="btn btn-success btn-sm">Marcar ENTREGADO</button>
+                </form>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    {% endfor %}
-  {% else %}
-    <div class="alert alert-info">No tenés pedidos en curso.</div>
-  {% endif %}
+      {% endfor %}
+    {% else %}
+      <div class="alert alert-info">No tenés pedidos en curso.</div>
+    {% endif %}
+  </div>
 
+  <!-- === Feed de pedidos disponibles === -->
   <h5 class="mt-4">Pedidos disponibles <small class="text-muted">(se actualiza solo)</small></h5>
   <div id="feed-list">
     <div class="text-muted">Cargando…</div>
@@ -56,6 +60,18 @@
     <button id="btn-refresh" class="btn btn-sm btn-outline-secondary">Actualizar ahora</button>
   </div>
 </div>
+
+<style>
+  /* Toast fijo simple */
+  .toast-fixed-ok{
+    position:fixed;
+    left:50%;
+    transform:translateX(-50%);
+    bottom:80px;
+    z-index:2000;
+    box-shadow:0 8px 24px rgba(0,0,0,.25);
+  }
+</style>
 
 <script>
   // === CSRF desde cookie para formularios creados por JS ===
@@ -134,14 +150,32 @@
   loadFeed();
   setInterval(loadFeed, 12000);
 
-  // === Cambios de estado EN_CAMINO / ENTREGADO vía AJAX (sin salir de la página)
+  // === Helpers UI ===
   function badgeClass(estado){
     const e = (estado || '').toUpperCase();
     if (e === 'EN_CAMINO') return 'bg-warning text-dark';
     if (e === 'ENTREGADO') return 'bg-success';
+    if (e === 'ASIGNADO') return 'bg-primary';
     return 'bg-secondary';
   }
 
+  function showOk(msg){
+    const n = document.createElement('div');
+    n.className = 'alert alert-success toast-fixed-ok';
+    n.textContent = msg || 'Pedido finalizado con éxito. Activá "Disponible" para recibir más.';
+    document.body.appendChild(n);
+    setTimeout(()=> n.remove(), 3000);
+  }
+
+  function updateEmptyStateIfNeeded(){
+    const box = document.getElementById('en-curso-box');
+    if (!box) return;
+    if (!box.querySelector('.card')){
+      box.innerHTML = '<div class="alert alert-info">No tenés pedidos en curso.</div>';
+    }
+  }
+
+  // === Cambios de estado EN_CAMINO / ENTREGADO vía AJAX (sin salir de la página)
   document.addEventListener('submit', async (ev)=>{
     const form = ev.target.closest('.js-state-form');
     if(!form) return;
@@ -161,6 +195,14 @@
         headers: {'X-CSRFToken': csrftoken, 'X-Requested-With': 'XMLHttpRequest'},
         body: fd
       });
+
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (!ct.includes('application/json')) {
+        // Si por algún motivo no nos devolvieron JSON (login, etc.), recargamos
+        location.reload();
+        return;
+      }
+
       const j = await res.json().catch(()=>null);
       if (j && j.ok){
         const card = form.closest('.card');
@@ -169,13 +211,16 @@
           badge.className = 'badge js-badge ' + badgeClass(j.estado);
           badge.textContent = j.estado;
         }
-        // Si entregó, refrescamos para sacar el pedido de “en curso”
-        if (j.estado === 'ENTREGADO') {
-          location.reload();
+
+        // Si finalizó (backend puede mandar j.finalizado) o el estado es ENTREGADO
+        if (j.finalizado || j.estado === 'ENTREGADO'){
+          // quitamos la tarjeta y mostramos aviso
+          card.remove();
+          showOk('Pedido finalizado con éxito. Activá "Disponible" para recibir más.');
+          updateEmptyStateIfNeeded();
           return;
         }
       } else {
-        // Fallback: recargar
         location.reload();
       }
     }catch(e){

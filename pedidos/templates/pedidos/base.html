@@ -7,19 +7,19 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 
+    {% load webpush_notifications %}
+    {% webpush_header %}
+
     <style>
-      /* ===== Paleta / base ===== */
       :root{
         --c-dark:#1a1a1a;--c-dark-2:#2a2a2a;
         --c-azul:#073653;--c-azul-claro:#007bff;--c-azul-hover:#052a42;
         --c-white:#fff;--c-light:#f8f9fa;--c-text:#343a40;--c-muted:#6c757d;--c-br:#dee2e6;
         --s-soft:rgba(0,0,0,.2);--s-med:rgba(0,0,0,.3);--s-strong:rgba(0,0,0,.4);
-        /* ancho “carrito/perfil” aplicado a TODAS las vistas cliente */
         --shell: 920px;
       }
       body{padding-top:0;background:var(--c-dark);color:#e0e0e0;font-family:Arial,Helvetica,sans-serif}
 
-      /* ===== Anti-overflow para que Inicio/Catálogo no ensanchen la página ===== */
       html, body, .main-content-wrapper, .main-content { max-width:100vw; overflow-x:hidden; }
       .main-content .row{ margin-left:0; margin-right:0; }
       img,video{max-width:100%;height:auto}
@@ -35,23 +35,19 @@
 
       .main-content-wrapper{flex-grow:1;background:var(--c-dark);padding:20px}
       .main-content{background:#fff;border-radius:15px;padding:30px;box-shadow:0 5px 20px var(--s-med);min-height:calc(100vh - 40px);color:var(--c-text)}
-      /* mismo “cajón” para todas las páginas cliente (Inicio/Catálogo también) */
       .content-inner{max-width:var(--shell);margin:0 auto;width:100%}
 
-      /* Mensajes */
       .alert{border-radius:10px;font-weight:500}
       .alert-success{background:#d1ecf1;border-color:#bee5eb;color:var(--c-azul)}
       .alert-info{background:#e0f7fa;border-color:#b2ebf2;color:var(--c-azul)}
       .alert-warning{background:#ffecb3;border-color:#ffe082;color:#cc9900}
       .alert-danger{background:#ffcdd2;border-color:#ef9a9a;color:#d32f2f}
 
-      /* Botones */
       .btn-primary{background:var(--c-azul-claro);border-color:var(--c-azul-claro);font-weight:700}
       .btn-primary:hover{background:var(--c-azul);border-color:var(--c-azul);transform:translateY(-2px)}
       .btn-secondary{background:#fff;border-color:#fff;color:var(--c-azul);font-weight:700}
       .btn-secondary:hover{background:var(--c-br);border-color:var(--c-br);color:var(--c-azul-hover)}
 
-      /* Bottom bar móvil */
       .mobile-tabbar{position:fixed;left:0;right:0;bottom:0;display:none;gap:.25rem;background:rgba(255,255,255,.9);backdrop-filter:blur(10px);border-top:1px solid rgba(7,54,83,.12);box-shadow:0 -6px 20px rgba(0,0,0,.15);z-index:1030;padding:.2rem .4rem}
       .mobile-tabbar a.mbn-item{flex:1;text-align:center;text-decoration:none;color:var(--c-azul);font-weight:600;font-size:.86rem;padding:.35rem .25rem .5rem;border-radius:12px;display:flex;flex-direction:column;align-items:center}
       .mobile-tabbar a.mbn-item .bi{font-size:1.25rem;margin-bottom:.1rem}
@@ -77,7 +73,6 @@
     {% load static %}
 
     <div class="page-wrapper">
-      <!-- ===== Sidebar (desktop) ===== -->
       <aside class="sidebar-desktop">
         <div class="sidebar-logo">
           <a href="{% url 'index' %}">
@@ -87,9 +82,7 @@
 
         <nav class="sidebar-nav">
           <ul class="nav flex-column">
-
             {% if user.is_authenticated and user.cadeteprofile %}
-              <!-- ===== Menú de CADETE (desktop) ===== -->
               <li class="nav-item">
                 <a class="nav-link {% if request.resolver_match.url_name == 'panel_cadete' %}active{% endif %}" href="{% url 'panel_cadete' %}">
                   <i class="bi bi-bicycle"></i> Panel del Cadete
@@ -111,9 +104,7 @@
                   <i class="bi bi-box-arrow-right"></i> Cerrar sesión
                 </a>
               </li>
-
             {% else %}
-              <!-- ===== Menú de CLIENTE (desktop) ===== -->
               <li class="nav-item">
                 <a class="nav-link {% if request.resolver_match.url_name == 'index' %}active{% endif %}" href="{% url 'index' %}">
                   <i class="bi bi-house-door-fill"></i> Inicio
@@ -147,15 +138,13 @@
                 <li class="nav-item"><a class="nav-link {% if request.resolver_match.url_name == 'register_cliente' %}active{% endif %}" href="{% url 'register_cliente' %}"><i class="bi bi-person-plus-fill"></i> Registrarse</a></li>
               {% endif %}
             {% endif %}
-
           </ul>
         </nav>
       </aside>
 
-      <!-- ===== Contenido principal ===== -->
       <div class="main-content-wrapper">
         <div class="main-content">
-          <div class="content-inner"><!-- cajón común -->
+          <div class="content-inner">
             {% if messages %}
               <div class="messages mt-3">
                 {% for message in messages %}
@@ -173,10 +162,8 @@
       </div>
     </div>
 
-    <!-- ===== Bottom Tab Bar (móvil) ===== -->
     {% with url_name=request.resolver_match.url_name %}
       {% if user.is_authenticated and user.cadeteprofile %}
-        <!-- Barra para CADETE -->
         <nav class="mobile-tabbar" aria-label="Navegación cadete">
           <a class="mbn-item {% if url_name == 'panel_cadete' %}active{% endif %}" href="{% url 'panel_cadete' %}">
             <i class="bi bi-bicycle"></i><span>Panel</span>
@@ -192,7 +179,6 @@
           </a>
         </nav>
       {% else %}
-        <!-- Barra para CLIENTE -->
         <nav class="mobile-tabbar" aria-label="Navegación cliente">
           <a class="mbn-item" data-bs-toggle="modal" data-bs-target="#moreModal">
             <i class="bi bi-three-dots"></i><span>Más</span>
@@ -200,12 +186,9 @@
           <a class="mbn-item" href="/#nuestro-catalogo">
             <i class="bi bi-list-ul"></i><span>Catálogo</span>
           </a>
-
-          <!-- Pedido en curso -->
           <a class="mbn-item {% if url_name == 'pedido_en_curso' %}active{% endif %}" href="{% url 'pedido_en_curso' %}">
             <i class="bi bi-geo-alt"></i><span>Pedido</span>
           </a>
-
           <a class="mbn-item {% if url_name == 'ver_carrito' %}active{% endif %}" href="{% url 'ver_carrito' %}">
             <i class="bi bi-cart3"></i><span>Carrito</span>
           </a>
@@ -220,7 +203,6 @@
           {% endif %}
         </nav>
 
-        <!-- Modal “Más” (móvil) -->
         <div class="modal fade" id="moreModal" tabindex="-1" aria-hidden="true">
           <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -267,7 +249,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 
-    <!-- ===== JS: toggle disponibilidad cadete (desktop + móvil) ===== -->
+    <!-- ===== JS: disponibilidad + registro de Push para cadete ===== -->
     <script>
       (function () {
         function getCookie(name){
@@ -275,6 +257,38 @@
           if (v.length === 2) return v.pop().split(';').shift();
         }
         const csrftoken = getCookie('csrftoken');
+
+        function urlB64ToUint8Array(base64String) {
+          const padding = '='.repeat((4 - base64String.length % 4) % 4);
+          const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+          const rawData = atob(base64);
+          const outputArray = new Uint8Array(rawData.length);
+          for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+          return outputArray;
+        }
+
+        async function ensurePushRegistered(){
+          if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+          try{
+            const reg = await navigator.serviceWorker.register("{% url 'service_worker' %}");
+            // la librería webpush inyecta una var global con la clave pública
+            const vapid = (window.vapidPublicKey || window.vapid_key || '').trim();
+            if (!vapid) { console.warn('VAPID public key no disponible'); return; }
+
+            let sub = await reg.pushManager.getSubscription();
+            if (!sub){
+              sub = await reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlB64ToUint8Array(vapid)
+              });
+            }
+            await fetch("{% url 'save_subscription' %}", {
+              method: 'POST',
+              headers: {'Content-Type':'application/json','X-CSRFToken': csrftoken},
+              body: JSON.stringify({ subscription: sub.toJSON() })
+            });
+          }catch(e){ console.warn('No se pudo registrar push', e); }
+        }
 
         async function setDisponible(turnOn){
           const fd = new FormData();
@@ -289,26 +303,21 @@
 
             const ct = (res.headers.get('content-type') || '').toLowerCase();
             if (!ct.includes('application/json')) {
-              // sesión vencida u otra redirección -> ir a login cadete
               window.location.href = "{% url 'login_cadete' %}";
               return;
             }
 
             const j = await res.json();
-
             if (!j.ok){
               if (j.error === 'ocupado'){
                 alert('Tenés un pedido en curso. Entregalo antes de cambiar tu disponibilidad.');
-              }else if (j.error === 'no_cadete'){
-                alert('Solo los cadetes pueden usar esta opción.');
               }else{
                 alert('No se pudo cambiar la disponibilidad.');
               }
               return;
             }
-
-            const val = !!j.disponible;
-            applyDisponibilidadToUI(val);
+            applyDisponibilidadToUI(!!j.disponible);
+            if (j.disponible) ensurePushRegistered();
 
           }catch(e){
             console.error('toggle disponible error', e);
@@ -348,22 +357,21 @@
           });
         }
 
-        // Enlazar botones
         bindBtn(document.getElementById('btn-cadete-dispo'));
         bindBtn(document.getElementById('btn-cadete-dispo-desktop'));
 
-        // Estado inicial (perfil o sesión)
         function initState(){
           const initial = "{% if user.is_authenticated and user.cadeteprofile %}{% if user.cadeteprofile.disponible %}1{% else %}0{% endif %}{% else %}0{% endif %}";
           const fallback = "{{ request.session.cadete_disponible|default:'' }}";
           const val = (initial === '1') || (fallback === 'True' || fallback === '1' || fallback === 'true');
           applyDisponibilidadToUI(val);
+          if (val) ensurePushRegistered();
         }
         initState();
       })();
     </script>
 
-    <!-- (Opcional) Detector de overflow -->
+    <!-- Debug overflow opcional -->
     <script>
       (function(){
         if (!/debug-overflow=1/.test(location.search)) return;
