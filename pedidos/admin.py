@@ -5,16 +5,20 @@ from django.conf import settings
 from django.utils.html import format_html
 from django import forms
 from django.db import models
-from django.urls import reverse # Necesario para el enlace al usuario
+from django.urls import reverse
 
-# Importa todos tus modelos, incluyendo el nuevo CadeteProfile
 from .models import (
-    Categoria, Producto, OpcionProducto, Sabor, Pedido, DetallePedido, 
-    ClienteProfile, ProductoCanje, ZonaEnvio, CadeteProfile
+    # Online
+    Categoria, Producto, OpcionProducto, Sabor,
+    Pedido, DetallePedido, ClienteProfile, ProductoCanje, ZonaEnvio, CadeteProfile,
+    # POS / Caja
+    ProductoPOS, Caja, VentaPOS, VentaPOSItem, MovimientoCaja
 )
 
+# =========================
+# Catálogo ONLINE
+# =========================
 
-# Admin para Categorias
 @admin.register(Categoria)
 class CategoriaAdmin(admin.ModelAdmin):
     list_display = ('nombre', 'orden', 'disponible')
@@ -23,7 +27,6 @@ class CategoriaAdmin(admin.ModelAdmin):
     ordering = ('orden',)
 
 
-# Admin para Sabores
 @admin.register(Sabor)
 class SaborAdmin(admin.ModelAdmin):
     list_display = ('nombre', 'disponible')
@@ -31,19 +34,18 @@ class SaborAdmin(admin.ModelAdmin):
     search_fields = ('nombre',)
 
 
-# Custom Form para seleccionar imagen estática en Producto
 class ProductoAdminForm(forms.ModelForm):
     imagen = forms.CharField(
         required=False,
         label="Ruta de Imagen",
-        help_text="Ej: images/nombre_producto.png. Debe estar en tu STATICFILES_DIRS/images/"
+        help_text="Ej: images/nombre_producto.png. Debe estar en STATIC/images/"
     )
 
     class Meta:
         model = Producto
         fields = '__all__'
 
-# Inline para Opciones de Producto
+
 class OpcionProductoInline(admin.TabularInline):
     model = OpcionProducto
     extra = 1
@@ -54,7 +56,6 @@ class OpcionProductoInline(admin.TabularInline):
     }
 
 
-# Admin para Productos
 @admin.register(Producto)
 class ProductoAdmin(admin.ModelAdmin):
     form = ProductoAdminForm
@@ -63,11 +64,13 @@ class ProductoAdmin(admin.ModelAdmin):
     list_filter = ('categoria', 'disponible')
     search_fields = ('nombre', 'descripcion', 'categoria__nombre')
     ordering = ('nombre',)
-    
+
     def mostrar_imagen_miniatura(self, obj):
         if obj.imagen:
-            return format_html('<img src="{}" style="width: 50px; height: 50px; object-fit: contain;" />',
-                               settings.STATIC_URL + obj.imagen)
+            return format_html(
+                '<img src="{}" style="width:50px;height:50px;object-fit:contain;" />',
+                settings.STATIC_URL + obj.imagen
+            )
         return "Sin Imagen"
     mostrar_imagen_miniatura.short_description = 'Miniatura'
 
@@ -86,20 +89,21 @@ class DetallePedidoInline(admin.TabularInline):
     producto_display_method.short_description = 'Producto/Opción'
 
     def sabores_display_method(self, obj):
-        return ", ".join([sabor.nombre for sabor in obj.sabores.all()]) if obj.sabores.exists() else "N/A"
+        return ", ".join(s.nombre for s in obj.sabores.all()) if obj.sabores.exists() else "N/A"
     sabores_display_method.short_description = 'Sabores'
 
 
-# Admin para Pedidos
 @admin.register(Pedido)
 class PedidoAdmin(admin.ModelAdmin):
-    list_display = ('id', 'usuario_asociado', 'cliente_nombre', 'cliente_telefono', 'fecha_pedido', 'estado', 'metodo_pago', 'zona_envio', 'valor_total')
+    list_display = (
+        'id', 'usuario_asociado', 'cliente_nombre', 'cliente_telefono',
+        'fecha_pedido', 'estado', 'metodo_pago', 'zona_envio', 'valor_total'
+    )
     list_filter = ('estado', 'metodo_pago', 'zona_envio', 'fecha_pedido')
     search_fields = ('cliente_nombre', 'cliente_telefono', 'user__username', 'detalles__producto__nombre')
     date_hierarchy = 'fecha_pedido'
-    readonly_fields = ('fecha_pedido', 'valor_total') 
-    
-    inlines = [DetallePedidoInline] 
+    readonly_fields = ('fecha_pedido', 'valor_total')
+    inlines = [DetallePedidoInline]
 
     fieldsets = (
         (None, {
@@ -123,7 +127,6 @@ class PedidoAdmin(admin.ModelAdmin):
     valor_total.short_description = 'Valor Total'
 
 
-# Admin para DetallePedido
 @admin.register(DetallePedido)
 class DetallePedidoAdmin(admin.ModelAdmin):
     list_display = ('pedido', 'producto_detalle', 'cantidad_detalle', 'sabores_detalle')
@@ -141,11 +144,10 @@ class DetallePedidoAdmin(admin.ModelAdmin):
     cantidad_detalle.short_description = 'Cantidad'
 
     def sabores_detalle(self, obj):
-        return ", ".join([sabor.nombre for sabor in obj.sabores.all()]) if obj.sabores.exists() else "N/A"
+        return ", ".join(s.nombre for s in obj.sabores.all()) if obj.sabores.exists() else "N/A"
     sabores_detalle.short_description = 'Sabores'
 
 
-# Admin para ClienteProfile
 @admin.register(ClienteProfile)
 class ClienteProfileAdmin(admin.ModelAdmin):
     list_display = ('user_username', 'user_email', 'direccion', 'telefono', 'puntos_fidelidad')
@@ -160,42 +162,107 @@ class ClienteProfileAdmin(admin.ModelAdmin):
         return obj.user.email
     user_email.short_description = 'Email'
 
-# --- INICIO: NUEVO ADMIN PARA CadeteProfile ---
+
 @admin.register(CadeteProfile)
 class CadeteProfileAdmin(admin.ModelAdmin):
     list_display = ('user_link', 'telefono', 'vehiculo', 'disponible')
     list_filter = ('disponible', 'vehiculo')
     search_fields = ('user__username', 'user__first_name', 'user__last_name', 'telefono')
-    list_editable = ('disponible', 'vehiculo', 'telefono') # Permite editar estos campos directamente en la lista
+    list_editable = ('disponible', 'vehiculo', 'telefono')
 
     def user_link(self, obj):
-        # Crea un enlace clickeable al perfil del usuario en el admin
         link = reverse("admin:auth_user_change", args=[obj.user.id])
         return format_html('<a href="{}">{}</a>', link, obj.user.username)
     user_link.short_description = 'Usuario (Cadete)'
-# --- FIN: NUEVO ADMIN PARA CadeteProfile ---
 
 
-# Admin para ProductoCanje
 @admin.register(ProductoCanje)
 class ProductoCanjeAdmin(admin.ModelAdmin):
     list_display = ('nombre', 'puntos_requeridos', 'disponible', 'mostrar_imagen_miniatura')
     list_filter = ('disponible',)
     search_fields = ('nombre', 'descripcion')
     ordering = ('puntos_requeridos',)
-    
+
     def mostrar_imagen_miniatura(self, obj):
         if obj.imagen:
-            return format_html('<img src="{}" style="width: 50px; height: 50px; object-fit: contain;" />',
-                               settings.STATIC_URL + obj.imagen)
+            return format_html(
+                '<img src="{}" style="width:50px;height:50px;object-fit:contain;" />',
+                settings.STATIC_URL + obj.imagen
+            )
         return "Sin Imagen"
     mostrar_imagen_miniatura.short_description = 'Miniatura'
 
 
-# Admin para ZonaEnvio
 @admin.register(ZonaEnvio)
 class ZonaEnvioAdmin(admin.ModelAdmin):
     list_display = ('nombre', 'costo', 'disponible')
     list_filter = ('disponible',)
     search_fields = ('nombre',)
     ordering = ('nombre',)
+
+
+# =========================
+# POS / Caja
+# =========================
+
+@admin.register(ProductoPOS)
+class ProductoPOSAdmin(admin.ModelAdmin):
+    list_display = ('nombre', 'precio', 'codigo_sku', 'activo')
+    list_editable = ('precio', 'activo')
+    search_fields = ('nombre', 'codigo_sku')
+    list_filter = ('activo',)
+
+
+class VentaPOSItemInline(admin.TabularInline):
+    model = VentaPOSItem
+    extra = 1
+    fields = ('producto', 'descripcion', 'cantidad', 'precio_unitario', 'subtotal')
+    readonly_fields = ('subtotal',)
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.order_by('id')
+
+
+@admin.register(VentaPOS)
+class VentaPOSAdmin(admin.ModelAdmin):
+    list_display = (
+        'id', 'fecha', 'caja', 'usuario', 'tipo_comprobante',
+        'medio_pago', 'total', 'estado', 'numero_comprobante'
+    )
+    list_filter = ('tipo_comprobante', 'medio_pago', 'estado', 'caja')
+    search_fields = ('numero_comprobante', 'notas')
+    inlines = [VentaPOSItemInline]
+    readonly_fields = ('fecha',)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        obj.recomputar_total(save=True)
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        form.instance.recomputar_total(save=True)
+
+
+@admin.register(Caja)
+class CajaAdmin(admin.ModelAdmin):
+    list_display = (
+        'id', 'estado', 'fecha_apertura', 'usuario_apertura',
+        'fecha_cierre', 'usuario_cierre',
+        'saldo_inicial_efectivo', 'saldo_cierre_efectivo', 'diff_calc'
+    )
+    list_filter = ('estado', 'usuario_apertura')
+    search_fields = ('observaciones',)
+    readonly_fields = ('fecha_apertura', 'fecha_cierre')
+
+    def diff_calc(self, obj):
+        d = obj.diferencia_efectivo()
+        return '—' if d is None else f"${d}"
+    diff_calc.short_description = 'Diferencia efectivo'
+
+
+@admin.register(MovimientoCaja)
+class MovimientoCajaAdmin(admin.ModelAdmin):
+    list_display = ('fecha', 'caja', 'tipo', 'medio_pago', 'monto', 'usuario', 'venta', 'descripcion')
+    list_filter = ('tipo', 'medio_pago', 'caja')
+    search_fields = ('descripcion',)
