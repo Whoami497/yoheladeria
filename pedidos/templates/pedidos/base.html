@@ -320,30 +320,32 @@
       });
     }
 
-    // Estado inicial desde servidor (profile o sesión)
+    // Estado inicial desde servidor (perfil o sesión)
     function initState(){
-      const initial = "{{ request.user.is_authenticated and request.user.cadeteprofile|default_if_none:'' and request.user.cadeteprofile.disponible|yesno:'1,0' }}";
-      const fallback = "{{ request.session.cadete_disponible|default_if_none:'' }}";
-      const val = (initial === '1') || (fallback === 'True');
+      // 1 si el usuario es cadete y está disponible, si no 0
+      const initial = "{% if user.is_authenticated and user.cadeteprofile %}{% if user.cadeteprofile.disponible %}1{% else %}0{% endif %}{% else %}0{% endif %}";
+      // La sesión suele renderizar "True"/"False" en texto
+      const fallback = "{{ request.session.cadete_disponible|default:'' }}";
+
+      const val = (initial === '1') || (fallback === 'True' || fallback === '1' || fallback === 'true');
 
       const btnM = document.getElementById('btn-cadete-dispo');
       const btnD = document.getElementById('btn-cadete-dispo-desktop');
+
       if (btnM){
-        btnM.dataset.on = val ? '1':'0';
+        btnM.dataset.on = val ? '1' : '0';
         btnM.classList.toggle('active', val);
-        const span = btnM.querySelector('span'); if (span) span.textContent = val ? 'Disponible' : 'No disp.';
+        const span = btnM.querySelector('span');
+        if (span) span.textContent = val ? 'Disponible' : 'No disp.';
       }
       if (btnD){
-        btnD.dataset.on = val ? '1':'0';
+        btnD.dataset.on = val ? '1' : '0';
         btnD.classList.toggle('btn-success', val);
         btnD.classList.toggle('btn-secondary', !val);
-        const span = btnD.querySelector('span'); if (span) span.textContent = val ? 'Disponible' : 'Activar disponible';
+        const span = btnD.querySelector('span');
+        if (span) span.textContent = val ? 'Disponible' : 'Activar disponible';
       }
     }
-
-    bindBtn(document.getElementById('btn-cadete-dispo'));
-    bindBtn(document.getElementById('btn-cadete-dispo-desktop'));
-    initState();
   })();
 </script>
 
