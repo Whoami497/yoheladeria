@@ -1131,15 +1131,35 @@ def save_subscription(request):
 
 @login_required
 def cadete_feed(request):
+    """
+    Si el cadete tiene un pedido activo -> no mostramos ofertas.
+    Si el cadete NO está disponible -> no mostramos ofertas.
+    Si está disponible y libre -> mostramos pedidos EN_PREPARACION sin cadete.
+    """
     if not hasattr(request.user, 'cadeteprofile'):
         return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
 
-    # Si el cadete ya tiene pedido activo, no mostrarle más ofertas
+    cp = request.user.cadeteprofile
+
+    # Tiene pedido en curso -> feed vacío
     if Pedido.objects.filter(
-        cadete_asignado=request.user.cadeteprofile,
+        cadete_asignado=cp,
         estado__in=['ASIGNADO', 'EN_CAMINO']
     ).exists():
-        return JsonResponse({'ok': True, 'pedidos': []})
+        return JsonResponse({'ok': True, 'disponible': False, 'pedidos': []})
+
+    # Respetar "disponible": si existe el campo, usarlo; si no, usar sesión
+    disponible = None
+    if hasattr(cp, 'disponible'):
+        try:
+            disponible = bool(cp.disponible)
+        except Exception:
+            disponible = None
+    if disponible is None:  # fallback a sesión
+        disponible = bool(request.session.get('cadete_disponible', False))
+
+    if not disponible:
+        return JsonResponse({'ok': True, 'disponible': False, 'pedidos': []})
 
     pedidos = (Pedido.objects
                .filter(estado='EN_PREPARACION', cadete_asignado__isnull=True)
@@ -1160,7 +1180,8 @@ def cadete_feed(request):
             } for d in p.detalles.all()],
         }
 
-    return JsonResponse({'ok': True, 'pedidos': [ser(p) for p in pedidos]})
+    return JsonResponse({'ok': True, 'disponible': True, 'pedidos': [ser(p) for p in pedidos]})
+
 
 
 
