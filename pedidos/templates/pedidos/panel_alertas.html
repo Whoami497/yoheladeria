@@ -176,7 +176,7 @@
   function getCookie(name){const value=`; ${document.cookie}`;const parts=value.split(`; ${name}=`);if(parts.length===2) return parts.pop().split(';').shift();}
   const csrftoken=getCookie('csrftoken');
 
-  // ===== Sonido (archivo) =====
+  // ===== Sonido =====
   const orderSoundUrl = "{% static 'pedidos/sounds/new-order.mp3' %}";
   let soundEnabled=(localStorage.getItem('panel_sound') ?? 'on')!=='off';
   const toggleSoundBtn=document.getElementById('toggle-sound');
@@ -334,11 +334,9 @@
       });
       const data = await res.json();
       if(data.ok){
-        // actualizar badge visual
         const badge = root.querySelector('.badge');
         if(badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
 
-        // si pasó a ENTREGADO o CANCELADO: mover de "HOY (activos)" a "HOY — Finalizados"
         if((estado==='ENTREGADO' || estado==='CANCELADO') && root.classList.contains('order-card')){
           const id = root.dataset.orderId;
           const total = root.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
@@ -348,7 +346,6 @@
 
           const order = { id, estado, total_pedido: total, cliente_nombre: cliente, cadete };
           const chip = buildChip(order, true);
-          // si había mensaje de "vacío", lo removemos
           const empty = alertsHoyFinalizados.querySelector('.alert');
           if(empty) empty.remove();
           alertsHoyFinalizados.prepend(chip);
@@ -369,7 +366,7 @@
     alertsAyer.innerHTML='';
   });
 
-  // ===== WebSocket (nuevos pedidos) =====
+  // ===== WebSocket (nuevos y actualizaciones) =====
   const wsProtocol=window.location.protocol==='https:'?'wss://':'ws://';
   const websocketUrl=wsProtocol + window.location.host + '/ws/pedidos/notifications/';
   const chatSocket=new WebSocket(websocketUrl);
@@ -379,15 +376,72 @@
   chatSocket.onerror=function(){ wsStatus.classList.remove('bg-success','bg-secondary'); wsStatus.classList.add('bg-danger'); wsStatus.textContent='Error'; };
 
   chatSocket.onmessage=function(e){
-    const data=JSON.parse(e.data);
+    const data=JSON.parse(e.data||'{}');
+    const kind = data.message || '';            // 'nuevo_pedido' | 'actualizacion_pedido' | otros
     const orderId=data.order_id;
     const orderData=data.order_data||{};
-    if(orderExists(orderId)) return;
-    // Nuevos pedidos -> HOY (activos)
-    orderData.id = orderId;
-    const card=buildCard(orderData);
-    alertsHoy.prepend(card);
-    playSound();
+
+    // helper para mover a finalizados si corresponde
+    function moveToFinalizadosFromCard(card, estadoActual){
+      const total = card.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
+      const cliente = card.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
+      const cadeteNode = card.querySelector('.small .fw-semibold');
+      const cadete = cadeteNode ? cadeteNode.textContent.trim() : '—';
+      const simple = { id: orderId, estado: estadoActual, total_pedido: total, cliente_nombre: cliente, cadete };
+      const chip = buildChip(simple, true);
+      const empty = alertsHoyFinalizados.querySelector('.alert');
+      if (empty) empty.remove();
+      alertsHoyFinalizados.prepend(chip);
+      card.remove();
+      if (!alertsHoy.querySelector('.order-card')){
+        alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
+      }
+    }
+
+    // === Nuevo pedido
+    if (kind === 'nuevo_pedido'){
+      if (!orderExists(orderId)){
+        orderData.id = orderId;
+        const card=buildCard(orderData);
+        alertsHoy.prepend(card);
+        playSound();
+      }
+      return;
+    }
+
+    // === Actualización de estado
+    if (kind === 'actualizacion_pedido'){
+      const estado = orderData.estado;
+      if (!estado) return;
+
+      const card = document.getElementById(`order-${orderId}`);
+      const chipHoy = document.getElementById(`chip-hoy-${orderId}`);
+      const chipAyer = document.getElementById(`chip-${orderId}`);
+
+      if (card){
+        const badge = card.querySelector('.badge');
+        if (badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
+        if (estado==='ENTREGADO' || estado==='CANCELADO'){
+          moveToFinalizadosFromCard(card, estado);
+        }
+      } else if (chipHoy || chipAyer){
+        const chip = chipHoy || chipAyer;
+        const b = chip.querySelector('.badge');
+        if (b){ b.className='badge '+badgeClass(estado); b.textContent=estado; }
+      } else {
+        // No lo encontramos en DOM: hacemos un refresh liviano
+        location.reload();
+      }
+      return;
+    }
+
+    // === Fallback: tratar como nuevo si no lo tenemos
+    if (!orderExists(orderId)){
+      orderData.id = orderId;
+      const card=buildCard(orderData);
+      alertsHoy.prepend(card);
+      playSound();
+    }
   };
 </script>
 

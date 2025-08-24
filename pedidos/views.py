@@ -1,5 +1,5 @@
 # pedidos/views.py
-
+from django.db.models import Exists, OuterRef
 from django.conf import settings
 from django.http import JsonResponse, HttpResponse
 from django.shortcuts import render, redirect, get_object_or_404
@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_GET
 from django.contrib.admin.views.decorators import staff_member_required
 from django.urls import reverse
 from django.utils import timezone
@@ -45,14 +45,43 @@ def _abs_https(request, url_or_path: str) -> str:
     return url
 
 
-def _notify_cadetes_new_order(request, pedido):
+def cadete_esta_ocupado(cadete_profile) -> bool:
+    """True si el cadete tiene un pedido ASIGNADO o EN_CAMINO."""
+    if not cadete_profile:
+        return False
+    return Pedido.objects.filter(
+        cadete_asignado=cadete_profile,
+        estado__in=['ASIGNADO', 'EN_CAMINO']
+    ).exists()
+
+
+def _notify_panel_update(pedido, message='actualizacion_pedido'):
     """
-    Envía WebPush:
-      - solo a cadetes disponibles (si el modelo tiene booleano 'disponible')
-      - limpia suscripciones inválidas (410/404)
+    Broadcast para que el panel de alertas (tienda) refresque automáticamente.
+    Reusa el mismo grupo 'pedidos_new_orders'.
     """
     try:
-        from pywebpush import webpush, WebPushException
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            'pedidos_new_orders',
+            {
+                'type': 'send_order_notification',
+                'message': message,
+                'order_id': pedido.id,
+                'order_data': {'estado': pedido.estado}
+            }
+        )
+    except Exception as e:
+        print(f"WS panel update error: {e}")
+
+
+def _notify_cadetes_new_order(request, pedido):
+    """
+    Envia WebPush SOLO a cadetes sin pedido activo (ASIGNADO/EN_CAMINO)
+    y, si existe el campo, con disponible=True.
+    """
+    try:
+        from pywebpush import webpush
     except Exception as e:
         print(f"WEBPUSH no disponible: {e}")
         return
@@ -64,21 +93,28 @@ def _notify_cadetes_new_order(request, pedido):
         print("WEBPUSH: Falta VAPID_PRIVATE_KEY en settings.")
         return
 
-    url = _abs_https(request, reverse('panel_cadete'))
+    activos_qs = Pedido.objects.filter(
+        cadete_asignado=OuterRef('pk'),
+        estado__in=['ASIGNADO', 'EN_CAMINO']
+    )
+
+    cadetes = (CadeteProfile.objects
+               .exclude(subscription_info__isnull=True)
+               .annotate(tiene_activo=Exists(activos_qs))
+               .filter(tiene_activo=False))
+
+    # Respetar “disponible=True” si el modelo lo trae
+    cadetes = [c for c in cadetes if not hasattr(c, 'disponible') or c.disponible]
+
     payload = {
         "title": "Nuevo pedido disponible",
         "body": f"Pedido #{pedido.id} — {pedido.cliente_direccion or ''}",
-        "url": url,
+        "url": _abs_https(request, reverse('panel_cadete')),
     }
 
-    qs = CadeteProfile.objects.exclude(subscription_info__isnull=True)
-    # Si tu modelo tiene 'disponible', filtramos:
-    if hasattr(CadeteProfile, 'disponible'):
-        qs = qs.filter(disponible=True)
-
-    for cp in qs:
-        sub = cp.subscription_info or {}
-        if not isinstance(sub, dict):
+    for cp in cadetes:
+        sub = cp.subscription_info if isinstance(cp.subscription_info, dict) else None
+        if not sub:
             continue
         try:
             webpush(
@@ -87,16 +123,8 @@ def _notify_cadetes_new_order(request, pedido):
                 vapid_private_key=priv,
                 vapid_claims={"sub": f"mailto:{admin}"}
             )
-        except WebPushException as e:
-            # Si la suscripción ya no es válida, la borramos para evitar errores futuros
-            status = getattr(e.response, "status_code", None)
-            if status in (404, 410):
-                CadeteProfile.objects.filter(pk=cp.pk).update(subscription_info=None)
-                print(f"WEBPUSH: suscripción expirada limpiada (cadete {cp.user_id})")
-            else:
-                print(f"WEBPUSH cadete {cp.user_id} error: {e}")
         except Exception as e:
-            print(f"WEBPUSH cadete {cp.user_id} error genérico: {e}")
+            print(f"WEBPUSH cadete {cp.user_id} error: {e}")
 
 
 
@@ -757,6 +785,9 @@ def panel_alertas_set_estado(request, pedido_id):
     pedido.estado = estado
     pedido.save(update_fields=['estado'])
 
+    # Notificar a panel para refrescar
+    _notify_panel_update(pedido)
+
     cadete_nombre = None
     if getattr(pedido, 'cadete_asignado', None):
         cadete_nombre = pedido.cadete_asignado.user.get_full_name() or pedido.cadete_asignado.user.username
@@ -780,7 +811,7 @@ def confirmar_pedido(request, pedido_id):
     pedido.estado = 'EN_PREPARACION'
     pedido.save(update_fields=['estado'])
 
-    # WebSocket a tablets/tienda (como ya tenías) + Push a cadetes
+    # WebSocket a tablets/tienda + Push a cadetes
     try:
         channel_layer = get_channel_layer()
 
@@ -809,11 +840,14 @@ def confirmar_pedido(request, pedido_id):
     except Exception as e:
         print(f"ERROR al enviar notificación por WebSocket a cadetes: {e}")
 
-    # ➜ Enviar Push (para móviles con la app/navegador cerrado)
+    # Push solo a cadetes libres
     try:
         _notify_cadetes_new_order(request, pedido)
     except Exception as e:
         print(f"Notify cadetes error: {e}")
+
+    # Notificar al panel para que refresque listas
+    _notify_panel_update(pedido, message='nuevo_pedido')
 
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
         return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': 'EN_PREPARACION'})
@@ -831,13 +865,39 @@ def aceptar_pedido(request, pedido_id):
         messages.error(request, "Acción no permitida. No tienes un perfil de cadete.")
         return redirect('index')
 
-    if pedido.estado != 'EN_PREPARACION':
+    # Bloquear si el cadete ya tiene un pedido en curso
+    if Pedido.objects.filter(
+        cadete_asignado=request.user.cadeteprofile,
+        estado__in=['ASIGNADO', 'EN_CAMINO']
+    ).exists():
+        messages.warning(request, "Ya tenés un pedido en curso. Entregalo antes de aceptar otro.")
+        return redirect('panel_cadete')
+
+    if pedido.estado != 'EN_PREPARACION' or pedido.cadete_asignado_id:
         messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
         return redirect('panel_cadete')
 
     pedido.cadete_asignado = request.user.cadeteprofile
     pedido.estado = 'ASIGNADO'
     pedido.save()
+
+    messages.success(request, f"¡Has aceptado el Pedido #{pedido.id}! Por favor, prepárate para retirarlo.")
+    return redirect('panel_cadete')
+
+
+    # Al aceptar, lo dejamos NO disponible
+    cp = request.user.cadeteprofile
+    if hasattr(cp, 'disponible'):
+        try:
+            cp.disponible = False
+            cp.save(update_fields=['disponible'])
+        except Exception:
+            pass
+    request.session['cadete_disponible'] = False
+    request.session.modified = True
+
+    # Notificar al panel para refrescar
+    _notify_panel_update(pedido)
 
     messages.success(request, f"¡Has aceptado el Pedido #{pedido.id}! Por favor, prepárate para retirarlo.")
     return redirect('panel_cadete')
@@ -908,6 +968,10 @@ def cadete_toggle_disponible(request):
         return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
 
     val = (request.POST.get('disponible') == '1')
+    # Si tiene un pedido activo, no puede ponerse disponible=false->true a menos que entregue
+    if val and cadete_esta_ocupado(request.user.cadeteprofile):
+        return JsonResponse({'ok': False, 'error': 'ocupado'}, status=400)
+
     prof = request.user.cadeteprofile
     used_model_field = False
 
@@ -938,6 +1002,7 @@ def cadete_set_estado(request, pedido_id):
 
     pedido = get_object_or_404(Pedido, id=pedido_id)
 
+    # Debe ser el cadete asignado
     if pedido.cadete_asignado != request.user.cadeteprofile:
         return JsonResponse({'ok': False, 'error': 'no_autorizado'}, status=403)
 
@@ -947,6 +1012,21 @@ def cadete_set_estado(request, pedido_id):
 
     pedido.estado = estado
     pedido.save(update_fields=['estado'])
+
+    # Si entregó, vuelve a quedar disponible
+    if estado == 'ENTREGADO':
+        cp = request.user.cadeteprofile
+        if hasattr(cp, 'disponible'):
+            try:
+                cp.disponible = True
+                cp.save(update_fields=['disponible'])
+            except Exception:
+                pass
+        request.session['cadete_disponible'] = True
+        request.session.modified = True
+
+    # Notificar al panel para refrescar
+    _notify_panel_update(pedido)
 
     return JsonResponse({'ok': True, 'estado': pedido.estado, 'pedido_id': pedido.id})
 
@@ -981,14 +1061,15 @@ def save_subscription(request):
 
 @login_required
 def cadete_feed(request):
-    """
-    Lista pedidos disponibles para aceptar:
-      - estado EN_PREPARACION
-      - sin cadete asignado
-    Se usa por polling desde el panel del cadete.
-    """
     if not hasattr(request.user, 'cadeteprofile'):
         return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
+
+    # Si el cadete ya tiene pedido activo, no mostrarle más ofertas
+    if Pedido.objects.filter(
+        cadete_asignado=request.user.cadeteprofile,
+        estado__in=['ASIGNADO', 'EN_CAMINO']
+    ).exists():
+        return JsonResponse({'ok': True, 'pedidos': []})
 
     pedidos = (Pedido.objects
                .filter(estado='EN_PREPARACION', cadete_asignado__isnull=True)
@@ -1010,6 +1091,7 @@ def cadete_feed(request):
         }
 
     return JsonResponse({'ok': True, 'pedidos': [ser(p) for p in pedidos]})
+
 
 
 @login_required
@@ -1230,10 +1312,11 @@ def canjear_puntos(request):
 
     contexto = {'cliente_profile': cliente_profile, 'productos_canje': productos_canje}
     return render(request, 'pedidos/canjear_puntos.html', contexto)
-# pedidos/views.py
 
-from django.views.decorators.http import require_GET
 
+# =========================
+# === Service Worker (scope raíz)
+# =========================
 @require_GET
 def service_worker(request):
     """
@@ -1243,59 +1326,3 @@ def service_worker(request):
     resp = render(request, 'pedidos/sw.js', {})
     resp["Content-Type"] = "application/javascript"
     return resp
-# --- Test: enviar un push al cadete logueado ---
-from django.contrib.auth.decorators import login_required
-from django.shortcuts import redirect
-from django.contrib import messages
-import json
-
-@login_required
-def cadete_push_test(request):
-    """
-    Envía una notificación push de prueba al cadete actual.
-    Requiere que el cadete haya hecho 'Activar notificaciones' (tenga subscription_info)
-    y que en settings esté configurado WEBPUSH_SETTINGS con VAPID_PRIVATE_KEY.
-    """
-    # Debe ser cadete
-    if not hasattr(request.user, 'cadeteprofile'):
-        messages.error(request, "Solo disponible para cuentas de cadete.")
-        return redirect('index')
-
-    sub = request.user.cadeteprofile.subscription_info
-    if not sub:
-        messages.error(request, "Todavía no activaste las notificaciones en este dispositivo.")
-        return redirect('panel_cadete')
-
-    # Import local para evitar fallos si el paquete no está instalado en build
-    try:
-        from pywebpush import webpush
-    except Exception as e:
-        messages.error(request, f"No está disponible el envío de push (pywebpush): {e}")
-        return redirect('panel_cadete')
-
-    vapid = getattr(settings, 'WEBPUSH_SETTINGS', {}) or {}
-    priv = vapid.get('VAPID_PRIVATE_KEY')
-    admin = vapid.get('VAPID_ADMIN_EMAIL') or 'admin@example.com'
-
-    if not priv:
-        messages.error(request, "Falta VAPID_PRIVATE_KEY en settings.")
-        return redirect('panel_cadete')
-
-    payload = {
-        "title": "🔔 Prueba de notificación",
-        "body": "Si ves esto, las push están funcionando ✅",
-        "url": request.build_absolute_uri(reverse('panel_cadete')),
-    }
-
-    try:
-        webpush(
-            subscription_info=sub,
-            data=json.dumps(payload),
-            vapid_private_key=priv,
-            vapid_claims={"sub": f"mailto:{admin}"}
-        )
-        messages.success(request, "Notificación de prueba enviada a este dispositivo.")
-    except Exception as e:
-        messages.error(request, f"No se pudo enviar el push: {e}")
-
-    return redirect('panel_cadete')
