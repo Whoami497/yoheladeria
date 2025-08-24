@@ -14,10 +14,16 @@
         --c-azul:#073653;--c-azul-claro:#007bff;--c-azul-hover:#052a42;
         --c-white:#fff;--c-light:#f8f9fa;--c-text:#343a40;--c-muted:#6c757d;--c-br:#dee2e6;
         --s-soft:rgba(0,0,0,.2);--s-med:rgba(0,0,0,.3);--s-strong:rgba(0,0,0,.4);
-        /* NUEVO: ancho “carrito/perfil” aplicado a TODAS las vistas cliente */
+        /* ancho “carrito/perfil” aplicado a TODAS las vistas cliente */
         --shell: 920px;
       }
       body{padding-top:0;background:var(--c-dark);color:#e0e0e0;font-family:Arial,Helvetica,sans-serif}
+
+      /* ===== Anti-overflow para que Inicio/Catálogo no ensanchen la página ===== */
+      html, body, .main-content-wrapper, .main-content { max-width:100vw; overflow-x:hidden; }
+      .main-content .row{ margin-left:0; margin-right:0; } /* por si hay .row sueltas */
+      img,video{max-width:100%;height:auto}
+      .main-content .container,.main-content .container-fluid{max-width:100%}
 
       .page-wrapper{display:flex;min-height:100vh;background:var(--c-dark)}
       .sidebar-desktop{width:250px;background:var(--c-dark-2);box-shadow:2px 0 10px var(--s-soft);padding-top:20px;position:fixed;height:100%;overflow-y:auto;border-right:1px solid rgba(255,255,255,.05)}
@@ -29,11 +35,8 @@
 
       .main-content-wrapper{flex-grow:1;background:var(--c-dark);padding:20px}
       .main-content{background:#fff;border-radius:15px;padding:30px;box-shadow:0 5px 20px var(--s-med);min-height:calc(100vh - 40px);color:var(--c-text)}
-      /* NUEVO: mismo “cajón” para todas las páginas cliente (Inicio/Catálogo también) */
+      /* mismo “cajón” para todas las páginas cliente (Inicio/Catálogo también) */
       .content-inner{max-width:var(--shell);margin:0 auto;width:100%}
-      /* Evitar desbordes que forcen zoom raro en móvil */
-      img,video{max-width:100%;height:auto}
-      .main-content .container,.main-content .container-fluid{max-width:100%}
 
       /* Mensajes */
       .alert{border-radius:10px;font-weight:500}
@@ -67,7 +70,7 @@
         /* títulos y hero más contenidos en móvil */
         h1,h2{font-size:clamp(1.25rem,5.6vw,1.75rem)}
         .content-inner{max-width:100%}
-        /* por si Inicio usa un bloque “hero” */
+        /* por si Inicio usa un bloque “hero”/catálogo */
         .home-hero,#nuestro-catalogo{max-width:var(--shell);margin-inline:auto}
       }
     </style>
@@ -154,7 +157,7 @@
       <!-- ===== Contenido principal ===== -->
       <div class="main-content-wrapper">
         <div class="main-content">
-          <div class="content-inner"><!-- NUEVO “cajón” -->
+          <div class="content-inner"><!-- cajón común -->
             {% if messages %}
               <div class="messages mt-3">
                 {% for message in messages %}
@@ -309,6 +312,24 @@
 
         bindBtn(document.getElementById('btn-cadete-dispo'));
         bindBtn(document.getElementById('btn-cadete-dispo-desktop'));
+      })();
+    </script>
+
+    <!-- (Opcional) Detector de overflow: usar agregando ?debug-overflow=1 a la URL -->
+    <script>
+      (function(){
+        if (!/debug-overflow=1/.test(location.search)) return;
+        const vw = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+        const sw = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
+        console.log('[overflow-check] viewport=', vw, 'scrollWidth=', sw);
+        if (sw > vw) {
+          document.querySelectorAll('body *').forEach(el => {
+            const w = el.scrollWidth;
+            if (w > vw) { el.style.outline = '1px dashed red'; console.log('Overflow:', el, '->', w); }
+          });
+        } else {
+          console.log('Sin overflow horizontal 👍');
+        }
       })();
     </script>
   </body>
