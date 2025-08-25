@@ -5,27 +5,23 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.db import transaction
 from django.utils import timezone
-from django.http import HttpResponseForbidden, JsonResponse, HttpResponseNotAllowed
-from django.views.decorators.csrf import csrf_exempt  # <— NUEVO
+from django.http import HttpResponseForbidden, JsonResponse
 
 from .models import Caja, ProductoPOS, VentaPOS, VentaPOSItem, MovimientoCaja
-
 
 def es_staff(user):
     return user.is_authenticated and user.is_staff
 
-
 def _caja_abierta():
     return Caja.objects.filter(estado='ABIERTA').order_by('-id').first()
 
-@csrf_exempt  # <— BLINDA la ruta /pos/ contra CSRF si por accidente llega un POST
+def _is_ajax(request):
+    # Django 5 ya no tiene request.is_ajax()
+    return request.headers.get('x-requested-with') == 'XMLHttpRequest'
+
 @user_passes_test(es_staff)
 @login_required
 def pos_panel(request):
-    if request.method != 'GET':
-        # si algo intenta postear acá, lo cortamos elegante
-        return HttpResponseNotAllowed(['GET'])
-
     caja = _caja_abierta()
     productos = ProductoPOS.objects.filter(activo=True).order_by('nombre')
     ventas = VentaPOS.objects.order_by('-id')[:15]
@@ -43,8 +39,6 @@ def pos_panel(request):
         'saldo_teorico': teorico,
     })
 
-
-
 @user_passes_test(es_staff)
 @login_required
 @transaction.atomic
@@ -52,6 +46,8 @@ def pos_abrir_caja(request):
     if request.method != 'POST':
         return HttpResponseForbidden('Método no permitido')
     if _caja_abierta():
+        if _is_ajax(request):
+            return JsonResponse({'ok': False, 'error': 'Ya hay una caja ABIERTA.'}, status=400)
         messages.warning(request, 'Ya hay una caja ABIERTA.')
         return redirect('pos_panel')
 
@@ -65,57 +61,56 @@ def pos_abrir_caja(request):
         saldo_inicial_efectivo=inicial,
         estado='ABIERTA',
     )
+    if _is_ajax(request):
+        return JsonResponse({'ok': True})
     messages.success(request, 'Caja ABIERTA correctamente.')
     return redirect('pos_panel')
-
 
 @user_passes_test(es_staff)
 @login_required
 @transaction.atomic
 def pos_vender(request):
     """
-    Registrar venta con múltiples ítems.
-    - Crea la Venta y sus Items.
-    - Recalcula el total UNA sola vez.
-    - Genera/actualiza UN movimiento de caja tipo VENTA (anti-duplicado).
+    Vende múltiples ítems. Calcula totales explícitamente.
+    Devuelve JSON si es AJAX; si no, hace redirect con messages.
     """
     if request.method != 'POST':
         return HttpResponseForbidden('Método no permitido')
-
     caja = _caja_abierta()
     if not caja:
-        messages.error(request, 'Abrí una caja antes de vender.')
+        msg = 'Abrí una caja antes de vender.'
+        if _is_ajax(request):
+            return JsonResponse({'ok': False, 'error': msg}, status=400)
+        messages.error(request, msg)
         return redirect('pos_panel')
 
-    medio_pago = (request.POST.get('medio_pago') or 'EFECTIVO').upper()
-    tipo_comp = (request.POST.get('tipo_comprobante') or 'COMANDA').upper()
+    medio_pago = request.POST.get('medio_pago') or 'EFECTIVO'
+    tipo_comp = request.POST.get('tipo_comprobante') or 'COMANDA'
 
-    # Arrays de productos/cantidades (múltiples filas)
-    prod_ids = request.POST.getlist('item_producto')
+    ids = request.POST.getlist('item_producto')
     cants = request.POST.getlist('item_cantidad')
 
     lineas = []
-    for pid, cnt in zip(prod_ids, cants):
+    for pid, cnt in zip(ids, cants):
         pid = (pid or '').strip()
+        cnt = (cnt or '').strip()
         if not pid:
             continue
         try:
-            prod = ProductoPOS.objects.get(pk=int(pid), activo=True)
-        except (ProductoPOS.DoesNotExist, ValueError):
-            continue
-        try:
-            q = int(cnt or 1)
+            q = int(cnt) if cnt else 1
             if q < 1:
                 q = 1
         except Exception:
             q = 1
-        lineas.append((prod, q))
+        lineas.append((pid, q))
 
     if not lineas:
-        messages.error(request, 'Elegí al menos un producto.')
+        msg = 'Elegí al menos un producto.'
+        if _is_ajax(request):
+            return JsonResponse({'ok': False, 'error': msg}, status=400)
+        messages.error(request, msg)
         return redirect('pos_panel')
 
-    # 1) Crear venta (total provisional 0, se recalcula luego)
     venta = VentaPOS.objects.create(
         usuario=request.user,
         caja=caja,
@@ -125,35 +120,45 @@ def pos_vender(request):
         estado='COMPLETADA',
     )
 
-    # 2) Crear ítems (el save() de VentaPOSItem calcula subtotal)
-    for prod, q in lineas:
+    total_venta = Decimal('0')
+
+    for pid, q in lineas:
+        prod = get_object_or_404(ProductoPOS, pk=pid)
+        precio = prod.precio or Decimal('0')
+        desc = prod.nombre
+
+        subtotal = (precio or Decimal('0')) * Decimal(q)
+        total_venta += subtotal
+
         VentaPOSItem.objects.create(
             venta=venta,
             producto=prod,
-            descripcion=prod.nombre,       # snapshot del nombre
+            descripcion=desc,
             cantidad=q,
-            precio_unitario=prod.precio,
+            precio_unitario=precio,
+            subtotal=subtotal,
         )
 
-    # 3) Recalcular total UNA vez y guardar
-    venta.recomputar_total(save=True)  # asegura consistencia
+    venta.total = total_venta
+    venta.save(update_fields=['total'])
 
-    # 4) Movimiento de caja único por venta (anti-duplicado)
+    # Movimiento de caja por la venta
     MovimientoCaja.objects.update_or_create(
         caja=caja,
         venta=venta,
         tipo='VENTA',
         defaults={
             'medio_pago': medio_pago,
-            'monto': venta.total,
+            'monto': total_venta,
             'usuario': request.user,
-            'descripcion': f'VentaPOS #{venta.id} ({len(lineas)} ítem/s)',
+            'descripcion': f'VentaPOS #{venta.id}',
         }
     )
 
-    messages.success(request, f'Venta registrada (${venta.total}).')
+    if _is_ajax(request):
+        return JsonResponse({'ok': True, 'venta_id': venta.id, 'total': str(total_venta)})
+    messages.success(request, f'Venta registrada (${total_venta}).')
     return redirect('pos_panel')
-
 
 @user_passes_test(es_staff)
 @login_required
@@ -161,28 +166,33 @@ def pos_vender(request):
 def pos_movimiento(request):
     if request.method != 'POST':
         return HttpResponseForbidden('Método no permitido')
-
     caja = _caja_abierta()
     if not caja:
-        messages.error(request, 'Abrí una caja antes de registrar movimientos.')
+        msg = 'Abrí una caja antes de registrar movimientos.'
+        if _is_ajax(request):
+            return JsonResponse({'ok': False, 'error': msg}, status=400)
+        messages.error(request, msg)
         return redirect('pos_panel')
 
     tipo = request.POST.get('tipo')  # INGRESO / EGRESO / AJUSTE / RETIRO
-    if tipo == 'VENTA':
-        return HttpResponseForbidden('VENTA sólo se genera al registrar una venta')
-
-    medio = (request.POST.get('medio_pago') or 'EFECTIVO').upper()
+    medio = request.POST.get('medio_pago') or 'EFECTIVO'
     try:
         monto = Decimal(request.POST.get('monto', '0') or '0')
     except Exception:
         monto = Decimal('0')
-    desc = (request.POST.get('descripcion', '') or '').strip()
+    desc = (request.POST.get('descripcion') or '').strip()
 
     if tipo not in ['INGRESO', 'EGRESO', 'AJUSTE', 'RETIRO']:
-        messages.error(request, 'Tipo de movimiento inválido.')
+        msg = 'Tipo de movimiento inválido.'
+        if _is_ajax(request):
+            return JsonResponse({'ok': False, 'error': msg}, status=400)
+        messages.error(request, msg)
         return redirect('pos_panel')
     if monto <= 0:
-        messages.error(request, 'El monto debe ser mayor a 0.')
+        msg = 'El monto debe ser mayor a 0.'
+        if _is_ajax(request):
+            return JsonResponse({'ok': False, 'error': msg}, status=400)
+        messages.error(request, msg)
         return redirect('pos_panel')
 
     MovimientoCaja.objects.create(
@@ -193,9 +203,11 @@ def pos_movimiento(request):
         descripcion=desc,
         usuario=request.user
     )
+
+    if _is_ajax(request):
+        return JsonResponse({'ok': True})
     messages.success(request, f'Movimiento {tipo} registrado por ${monto}.')
     return redirect('pos_panel')
-
 
 @user_passes_test(es_staff)
 @login_required
@@ -203,9 +215,10 @@ def pos_movimiento(request):
 def pos_cerrar_caja(request):
     if request.method != 'POST':
         return HttpResponseForbidden('Método no permitido')
-
     caja = _caja_abierta()
     if not caja:
+        if _is_ajax(request):
+            return JsonResponse({'ok': False, 'error': 'No hay caja ABIERTA.'}, status=400)
         messages.warning(request, 'No hay caja ABIERTA.')
         return redirect('pos_panel')
 
@@ -218,7 +231,9 @@ def pos_cerrar_caja(request):
     caja.usuario_cierre = request.user
     caja.fecha_cierre = timezone.now()
     caja.saldo_cierre_efectivo = contado
-    caja.save(update_fields=['estado', 'usuario_cierre', 'fecha_cierre', 'saldo_cierre_efectivo'])
+    caja.save(update_fields=['estado','usuario_cierre','fecha_cierre','saldo_cierre_efectivo'])
 
+    if _is_ajax(request):
+        return JsonResponse({'ok': True})
     messages.success(request, 'Caja CERRADA. Podés revisar la diferencia de efectivo en el listado.')
     return redirect('pos_panel')
