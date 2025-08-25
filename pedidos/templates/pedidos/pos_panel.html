@@ -26,7 +26,7 @@
   </div>
 
   <div class="row g-3">
-    <!-- ===== Registrar venta (multi items) ===== -->
+    <!-- ===== Registrar venta (multi items + multi pagos) ===== -->
     <div class="col-lg-6">
       <div class="card">
         <div class="card-header">Registrar venta (múltiples items)</div>
@@ -41,17 +41,8 @@
               <button type="button" id="btn-clear-items" class="btn btn-outline-danger btn-sm">Vaciar</button>
             </div>
 
+            <!-- Comprobante -->
             <div class="row g-2">
-              <div class="col-md-6">
-                <label class="form-label">Medio de pago</label>
-                <select id="medio-pago" class="form-select" required>
-                  <option value="EFECTIVO">Efectivo</option>
-                  <option value="QR_MP">QR / MercadoPago</option>
-                  <option value="TARJETA">Tarjeta</option>
-                  <option value="TRANSFERENCIA">Transferencia</option>
-                  <option value="OTRO">Otro</option>
-                </select>
-              </div>
               <div class="col-md-6">
                 <label class="form-label">Comprobante</label>
                 <select id="tipo-comp" class="form-select" required>
@@ -61,8 +52,23 @@
               </div>
             </div>
 
+            <!-- Pagos múltiples -->
+            <div class="mt-3">
+              <div class="d-flex justify-content-between align-items-center">
+                <label class="form-label mb-0">Pagos (podés mezclar medios)</label>
+                <div class="d-flex gap-2">
+                  <button type="button" id="btn-add-pago" class="btn btn-outline-primary btn-sm">+ Agregar pago</button>
+                  <button type="button" id="btn-clear-pagos" class="btn btn-outline-danger btn-sm">Vaciar</button>
+                </div>
+              </div>
+              <div id="pagos-list" class="mt-2"></div>
+              <div class="small text-muted">La suma de los pagos debe ser igual al total de la venta.</div>
+            </div>
+
+            <!-- Total y faltante -->
             <div class="mt-3 fs-5">
               <strong>Total:</strong> <span id="preview-total">$0.00</span>
+              <span class="ms-3"><strong>Falta cubrir:</strong> <span id="faltante">$0.00</span></span>
             </div>
 
             <div class="mt-3">
@@ -209,7 +215,7 @@
 
 <script>
 (function(){
-  // mismo helper de CSRF que ya usás
+  // CSRF helper
   function getCookie(name){const v=`; ${document.cookie}`.split(`; ${name}=`); if(v.length===2) return v.pop().split(';').shift();}
   const csrftoken=getCookie('csrftoken');
 
@@ -250,15 +256,21 @@
 
   // ===== Helpers =====
   const itemsList     = document.getElementById('items-list');
-  const btnAdd        = document.getElementById('btn-add-item');
-  const btnClear      = document.getElementById('btn-clear-items');
+  const btnAddItem    = document.getElementById('btn-add-item');
+  const btnClearItems = document.getElementById('btn-clear-items');
+
+  const pagosList     = document.getElementById('pagos-list');
+  const btnAddPago    = document.getElementById('btn-add-pago');
+  const btnClearPagos = document.getElementById('btn-clear-pagos');
+
   const previewTotal  = document.getElementById('preview-total');
+  const faltanteEl    = document.getElementById('faltante');
+
   const btnVender     = document.getElementById('btn-vender');
-  const medioPagoSel  = document.getElementById('medio-pago');
   const compSel       = document.getElementById('tipo-comp');
 
-  // Plantilla de fila (sin mencionar llaves dobles para no gatillar el parser de Django)
-  function rowTemplate(){
+  // ===== Templates (sin backticks) =====
+  function itemRowTemplate(){
     return '' +
       '<div class="row g-2 align-items-end mb-2 item-row">' +
         '<div class="col-8">' +
@@ -280,21 +292,61 @@
       '</div>';
   }
 
-  function bindRow(row){
-    row.querySelector('.item-producto').addEventListener('change', recalcTotal);
-    row.querySelector('.item-cantidad').addEventListener('input', recalcTotal);
-    row.querySelector('.btn-remove').addEventListener('click', ()=>{ row.remove(); recalcTotal(); });
+  function pagoRowTemplate(){
+    return '' +
+      '<div class="row g-2 align-items-end mb-2 pago-row">' +
+        '<div class="col-7">' +
+          '<label class="form-label">Medio</label>' +
+          '<select name="pago_medio" class="form-select pago-medio" required>' +
+            '<option value="EFECTIVO">Efectivo</option>' +
+            '<option value="QR_MP">QR / MercadoPago</option>' +
+            '<option value="TARJETA">Tarjeta</option>' +
+            '<option value="TRANSFERENCIA">Transferencia</option>' +
+            '<option value="OTRO">Otro</option>' +
+          '</select>' +
+        '</div>' +
+        '<div class="col-4">' +
+          '<label class="form-label">Monto</label>' +
+          '<input type="number" step="0.01" min="0" name="pago_monto" class="form-control pago-monto" value="0.00">' +
+        '</div>' +
+        '<div class="col-1 text-end">' +
+          '<button type="button" class="btn btn-outline-danger btn-sm pago-remove" title="Quitar">×</button>' +
+        '</div>' +
+      '</div>';
   }
 
-  function addRow(){
+  // ===== Items =====
+  function bindItemRow(row){
+    row.querySelector('.item-producto').addEventListener('change', recalcAll);
+    row.querySelector('.item-cantidad').addEventListener('input', recalcAll);
+    row.querySelector('.btn-remove').addEventListener('click', ()=>{ row.remove(); recalcAll(); });
+  }
+  function addItemRow(){
     const wrap = document.createElement('div');
-    wrap.innerHTML = rowTemplate();
+    wrap.innerHTML = itemRowTemplate();
     const row = wrap.firstElementChild;
     itemsList.appendChild(row);
-    bindRow(row);
+    bindItemRow(row);
   }
 
-  function recalcTotal(){
+  // ===== Pagos =====
+  function bindPagoRow(row){
+    row.querySelector('.pago-medio').addEventListener('change', recalcAll);
+    row.querySelector('.pago-monto').addEventListener('input', recalcAll);
+    row.querySelector('.pago-remove').addEventListener('click', ()=>{ row.remove(); recalcAll(); });
+  }
+  function addPagoRow(medio, monto){
+    const wrap = document.createElement('div');
+    wrap.innerHTML = pagoRowTemplate();
+    const row = wrap.firstElementChild;
+    pagosList.appendChild(row);
+    if(medio){ row.querySelector('.pago-medio').value = medio; }
+    if(monto!=null){ row.querySelector('.pago-monto').value = monto; }
+    bindPagoRow(row);
+  }
+
+  // ===== Cálculos =====
+  function totalItems(){
     let t = 0;
     itemsList.querySelectorAll('.item-row').forEach(row=>{
       const sel  = row.querySelector('.item-producto');
@@ -303,25 +355,52 @@
       const price= opt ? parseFloat(opt.dataset.precio || '0') : 0;
       if(sel && sel.value) t += price * qty;
     });
-    previewTotal.textContent = '$' + t.toFixed(2);
-    btnVender.disabled = (t<=0 || !itemsList.querySelector('.item-row'));
     return t;
   }
+  function sumaPagos(){
+    let s=0;
+    pagosList.querySelectorAll('.pago-row').forEach(row=>{
+      const m=parseFloat(row.querySelector('.pago-monto').value||'0');
+      s += isNaN(m)?0:m;
+    });
+    return s;
+  }
+  function recalcAll(){
+    const total = totalItems();
+    previewTotal.textContent = '$' + total.toFixed(2);
+    const falt = +(total - sumaPagos()).toFixed(2);
+    faltanteEl.textContent = '$' + falt.toFixed(2);
 
-  // Eventos de items
-  btnAdd.addEventListener('click', ()=>{ addRow(); recalcTotal(); });
-  btnClear.addEventListener('click', ()=>{ itemsList.innerHTML=''; recalcTotal(); });
+    const okItems  = !!itemsList.querySelector('.item-row');
+    const okPagos  = !!pagosList.querySelector('.pago-row');
+    const okFalt   = Math.abs(falt) <= 0.01;
 
-  // Envío de venta por fetch (URL correcta)
+    btnVender.disabled = !(okItems && okPagos && okFalt);
+  }
+
+  // ===== Eventos Items =====
+  btnAddItem.addEventListener('click', ()=>{ addItemRow(); recalcAll(); });
+  btnClearItems.addEventListener('click', ()=>{ itemsList.innerHTML=''; recalcAll(); });
+
+  // ===== Eventos Pagos =====
+  btnAddPago.addEventListener('click', ()=>{ addPagoRow('EFECTIVO','0.00'); recalcAll(); });
+  btnClearPagos.addEventListener('click', ()=>{ pagosList.innerHTML=''; recalcAll(); });
+
+  // ===== Envío de venta (multi-pago) =====
   let sending = false;
   btnVender.addEventListener('click', async ()=>{
     if(sending) return;
 
-    const rows = itemsList.querySelectorAll('.item-row');
-    if(!rows.length){ alert('Agregá al menos un ítem.'); return; }
+    if(!itemsList.querySelector('.item-row')){ alert('Agregá al menos un ítem.'); return; }
+    if(!pagosList.querySelector('.pago-row')){ alert('Agregá al menos un pago.'); return; }
+
+    const total = totalItems();
+    const suma  = sumaPagos();
+    if(Math.abs(total - suma) > 0.01){ alert('La suma de pagos debe ser igual al total.'); return; }
 
     const fd = new FormData();
-    rows.forEach(r=>{
+    // Ítems
+    itemsList.querySelectorAll('.item-row').forEach(r=>{
       const sel=r.querySelector('.item-producto');
       const q=r.querySelector('.item-cantidad');
       if(sel && sel.value){
@@ -329,9 +408,17 @@
         fd.append('item_cantidad', q.value||'1');
       }
     });
-    if(!fd.has('item_producto')){ alert('Elegí al menos un producto.'); return; }
-    fd.append('medio_pago', medioPagoSel.value);
+    // Comprobante
     fd.append('tipo_comprobante', compSel.value);
+    // Pagos
+    pagosList.querySelectorAll('.pago-row').forEach(r=>{
+      const medio=r.querySelector('.pago-medio').value;
+      const monto=r.querySelector('.pago-monto').value||'0';
+      if(parseFloat(monto)>0){
+        fd.append('pago_medio', medio);
+        fd.append('pago_monto', monto);
+      }
+    });
 
     sending = true;
     btnVender.disabled = true;
@@ -351,7 +438,7 @@
     }
   });
 
-  // Movimiento manual (URL correcta: pos_movimiento)
+  // ===== Movimiento manual (igual que antes) =====
   document.getElementById('btn-mov').addEventListener('click', async ()=>{
     const params = new URLSearchParams();
     params.append('tipo', document.getElementById('mov-tipo').value);
@@ -377,7 +464,7 @@
     }
   });
 
-  // Cerrar caja con prompt de contado (POST)
+  // ===== Cerrar caja (igual que antes) =====
   function postCloseWithAmount(){
     const monto = prompt('Ingresá el monto contado en EFECTIVO (puede ser 0):', '0');
     if(monto===null) return;
@@ -389,9 +476,10 @@
     if(confirm('¿Cerrar caja ahora?')) postCloseWithAmount();
   });
 
-  // fila inicial
-  addRow();
-  recalcTotal();
+  // ===== Inicial =====
+  addItemRow();           // un ítem vacío
+  addPagoRow('EFECTIVO'); // un pago por defecto
+  recalcAll();
 })();
 </script>
 {% endif %}

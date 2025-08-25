@@ -71,29 +71,33 @@ def pos_abrir_caja(request):
 @transaction.atomic
 def pos_vender(request):
     """
-    Vende múltiples ítems. Calcula totales explícitamente.
-    Devuelve JSON si es AJAX; si no, hace redirect con messages.
+    Soporta múltiples ítems y múltiples medios de pago.
+    - Si vienen arrays pago_medio[] y pago_monto[], crea un MovimientoCaja por cada pago.
+    - Si no, usa el campo medio_pago único (compatibilidad).
+    - Devuelve JSON si la petición es AJAX (fetch), o redirige con mensajes si es navegación normal.
     """
+    is_ajax = request.headers.get('x-requested-with') == 'XMLHttpRequest'
+
     if request.method != 'POST':
         return HttpResponseForbidden('Método no permitido')
+
     caja = _caja_abierta()
     if not caja:
         msg = 'Abrí una caja antes de vender.'
-        if _is_ajax(request):
+        if is_ajax:
             return JsonResponse({'ok': False, 'error': msg}, status=400)
         messages.error(request, msg)
         return redirect('pos_panel')
 
-    medio_pago = request.POST.get('medio_pago') or 'EFECTIVO'
-    tipo_comp = request.POST.get('tipo_comprobante') or 'COMANDA'
+    tipo_comp = (request.POST.get('tipo_comprobante') or 'COMANDA').strip()
 
+    # ---- Ítems (producto + cantidad)
     ids = request.POST.getlist('item_producto')
     cants = request.POST.getlist('item_cantidad')
 
     lineas = []
     for pid, cnt in zip(ids, cants):
         pid = (pid or '').strip()
-        cnt = (cnt or '').strip()
         if not pid:
             continue
         try:
@@ -106,59 +110,101 @@ def pos_vender(request):
 
     if not lineas:
         msg = 'Elegí al menos un producto.'
-        if _is_ajax(request):
+        if is_ajax:
             return JsonResponse({'ok': False, 'error': msg}, status=400)
         messages.error(request, msg)
         return redirect('pos_panel')
 
+    # Preparamos datos de ítems y calculamos total (aún no grabamos venta)
+    items_data = []
+    total_venta = Decimal('0')
+    for pid, q in lineas:
+        prod = get_object_or_404(ProductoPOS, pk=pid)
+        precio = prod.precio or Decimal('0')
+        subtotal = (precio or Decimal('0')) * Decimal(q)
+        items_data.append((prod, q, precio, subtotal))
+        total_venta += subtotal
+
+    # ---- Pagos múltiples (opcional)
+    pagos_medios = request.POST.getlist('pago_medio')
+    pagos_montos = request.POST.getlist('pago_monto')
+    pagos = []
+    for m, amt in zip(pagos_medios, pagos_montos):
+        m = (m or '').strip() or 'EFECTIVO'
+        try:
+            d = Decimal(str(amt).replace(',', '.'))
+        except Exception:
+            d = Decimal('0')
+        if d > 0:
+            pagos.append((m, d))
+
+    # Validamos suma de pagos si se usó modo múltiple
+    if pagos:
+        suma = sum((d for _, d in pagos), Decimal('0'))
+        if (suma - total_venta).copy_abs() > Decimal('0.01'):
+            msg = f'La suma de pagos (${suma}) no coincide con el total (${total_venta}).'
+            if is_ajax:
+                return JsonResponse({'ok': False, 'error': msg}, status=400)
+            messages.error(request, msg)
+            return redirect('pos_panel')
+
+    # ---- Creamos la venta y sus ítems
     venta = VentaPOS.objects.create(
         usuario=request.user,
         caja=caja,
         tipo_comprobante=tipo_comp,
-        medio_pago=medio_pago,
+        medio_pago='PEND',  # lo fijamos más abajo
         total=Decimal('0'),
         estado='COMPLETADA',
     )
 
-    total_venta = Decimal('0')
-
-    for pid, q in lineas:
-        prod = get_object_or_404(ProductoPOS, pk=pid)
-        precio = prod.precio or Decimal('0')
-        desc = prod.nombre
-
-        subtotal = (precio or Decimal('0')) * Decimal(q)
-        total_venta += subtotal
-
+    for prod, q, precio, subtotal in items_data:
         VentaPOSItem.objects.create(
             venta=venta,
             producto=prod,
-            descripcion=desc,
+            descripcion=prod.nombre,
             cantidad=q,
             precio_unitario=precio,
             subtotal=subtotal,
         )
 
     venta.total = total_venta
-    venta.save(update_fields=['total'])
 
-    # Movimiento de caja por la venta
-    MovimientoCaja.objects.update_or_create(
-        caja=caja,
-        venta=venta,
-        tipo='VENTA',
-        defaults={
-            'medio_pago': medio_pago,
-            'monto': total_venta,
-            'usuario': request.user,
-            'descripcion': f'VentaPOS #{venta.id}',
-        }
-    )
+    # ---- Movimientos de caja según pagos
+    if pagos:
+        venta.medio_pago = 'MIXTO' if len(pagos) > 1 else pagos[0][0]
+        venta.save(update_fields=['total', 'medio_pago'])
+        for medio, monto in pagos:
+            MovimientoCaja.objects.create(
+                caja=caja,
+                tipo='VENTA',
+                medio_pago=medio,
+                monto=monto,
+                descripcion=f'VentaPOS #{venta.id} ({len(items_data)} ítem/s)',
+                venta=venta,
+                usuario=request.user,
+            )
+    else:
+        # Compatibilidad: un solo medio de pago tradicional
+        medio_pago = (request.POST.get('medio_pago') or 'EFECTIVO').strip()
+        venta.medio_pago = medio_pago
+        venta.save(update_fields=['total', 'medio_pago'])
+        MovimientoCaja.objects.create(
+            caja=caja,
+            tipo='VENTA',
+            medio_pago=medio_pago,
+            monto=total_venta,
+            descripcion=f'VentaPOS #{venta.id} ({len(items_data)} ítem/s)',
+            venta=venta,
+            usuario=request.user,
+        )
 
-    if _is_ajax(request):
+    if is_ajax:
         return JsonResponse({'ok': True, 'venta_id': venta.id, 'total': str(total_venta)})
-    messages.success(request, f'Venta registrada (${total_venta}).')
+
+    messages.success(request, f'Venta #{venta.id} registrada (${total_venta}).')
     return redirect('pos_panel')
+
 
 @user_passes_test(es_staff)
 @login_required
