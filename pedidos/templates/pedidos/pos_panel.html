@@ -31,8 +31,7 @@
       <div class="card">
         <div class="card-header">Registrar venta (múltiples items)</div>
         <div class="card-body">
-          <!-- anulamos submit clásico para que nunca postee a /pos/ -->
-          <form id="venta-form" autocomplete="off" onsubmit="return false;">
+          <form id="venta-form" autocomplete="off">
             {% csrf_token %}
 
             <!-- Items dinámicos -->
@@ -67,7 +66,7 @@
             </div>
 
             <div class="mt-3">
-              <!-- botón NO-submit, todo se envía por fetch -->
+              <!-- Botón NO-submit, todo va por fetch -->
               <button id="btn-vender" class="btn btn-success" type="button" disabled>Cargar venta</button>
             </div>
           </form>
@@ -80,7 +79,7 @@
       <div class="card">
         <div class="card-header">Movimiento de caja (Ingreso/Egreso/Ajuste/Retiro)</div>
         <div class="card-body">
-          <form id="mov-form" onsubmit="return false;">
+          <form id="mov-form">
             {% csrf_token %}
             <div class="row g-2">
               <div class="col-md-4">
@@ -196,21 +195,20 @@
   // ===== CSRF =====
   function getCookie(name){
     const v = `; ${document.cookie}`.split(`; ${name}=`);
-    if(v.length===2) return v.pop().split(';').shift();
+    if (v.length === 2) return v.pop().split(';').shift();
   }
-  const csrftoken=getCookie('csrftoken');
+  const csrftoken = getCookie('csrftoken');
 
   // ===== Helpers =====
-  const itemsList    = document.getElementById('items-list');
-  const btnAdd       = document.getElementById('btn-add-item');
-  const btnClear     = document.getElementById('btn-clear-items');
-  const previewTotal = document.getElementById('preview-total');
-  const btnVender    = document.getElementById('btn-vender');
+  const itemsList     = document.getElementById('items-list');
+  const btnAdd        = document.getElementById('btn-add-item');
+  const btnClear      = document.getElementById('btn-clear-items');
+  const previewTotal  = document.getElementById('preview-total');
+  const btnVender     = document.getElementById('btn-vender');
+  const medioPagoSel  = document.getElementById('medio-pago');
+  const compSel       = document.getElementById('tipo-comp');
 
-  const medioPagoSel = document.getElementById('medio-pago');
-  const compSel      = document.getElementById('tipo-comp');
-
-  // Plantilla de fila (sin backticks)
+  // Plantilla de fila (sin backticks para no chocar con {{ }})
   function rowTemplate(){
     return '' +
       '<div class="row g-2 align-items-end mb-2 item-row">' +
@@ -240,40 +238,40 @@
   }
 
   function addRow(){
-    const wrap=document.createElement('div');
-    wrap.innerHTML=rowTemplate();
+    const wrap = document.createElement('div');
+    wrap.innerHTML = rowTemplate();
     const row = wrap.firstElementChild;
     itemsList.appendChild(row);
     bindRow(row);
   }
 
   function recalcTotal(){
-    let t=0;
+    let t = 0;
     itemsList.querySelectorAll('.item-row').forEach(row=>{
       const sel  = row.querySelector('.item-producto');
       const qty  = parseInt(row.querySelector('.item-cantidad').value||'1',10);
-      const opt  = (sel && sel.selectedOptions && sel.selectedOptions[0]) ? sel.selectedOptions[0] : null;
-      const price= parseFloat((opt && opt.dataset && opt.dataset.precio) ? opt.dataset.precio : '0');
-      if(sel && sel.value) t += price*qty;
+      const opt  = sel ? sel.selectedOptions[0] : null;
+      const price= opt ? parseFloat(opt.dataset.precio || '0') : 0;
+      if(sel && sel.value) t += price * qty;
     });
-    previewTotal.textContent='$'+t.toFixed(2);
+    previewTotal.textContent = '$' + t.toFixed(2);
     btnVender.disabled = (t<=0 || !itemsList.querySelector('.item-row'));
     return t;
   }
 
-  // Items
+  // Eventos de items
   btnAdd.addEventListener('click', ()=>{ addRow(); recalcTotal(); });
   btnClear.addEventListener('click', ()=>{ itemsList.innerHTML=''; recalcTotal(); });
 
-  // Envío de venta por fetch (NO form submit)
-  let sending=false;
+  // Envío de venta por fetch a la URL correcta (pos_vender)
+  let sending = false;
   btnVender.addEventListener('click', async ()=>{
     if(sending) return;
 
-    const rows=itemsList.querySelectorAll('.item-row');
+    const rows = itemsList.querySelectorAll('.item-row');
     if(!rows.length){ alert('Agregá al menos un ítem.'); return; }
 
-    const fd=new FormData();
+    const fd = new FormData();
     rows.forEach(r=>{
       const sel=r.querySelector('.item-producto');
       const q=r.querySelector('.item-cantidad');
@@ -286,41 +284,51 @@
     fd.append('medio_pago', medioPagoSel.value);
     fd.append('tipo_comprobante', compSel.value);
 
-    sending=true; btnVender.disabled=true; btnVender.textContent='Cargando…';
+    sending = true;
+    btnVender.disabled = true;
+    btnVender.textContent = 'Cargando…';
 
     try{
-      const res=await fetch("{% url 'pos_registrar_venta' %}", {
-        method:'POST',
-        headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'},
-        body:fd
+      const res = await fetch("{% url 'pos_vender' %}", {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrftoken, 'X-Requested-With': 'XMLHttpRequest'},
+        body: fd
       });
-      const data= await res.json().catch(()=>null);
+      const data = await res.json().catch(()=>null);
       if(res.ok && data && data.ok){ location.reload(); }
       else { alert((data && data.error) || 'No se pudo registrar la venta'); location.reload(); }
-    }catch(e){ location.reload(); }
+    }catch(e){
+      location.reload();
+    }
   });
 
-  // Movimiento manual (param correcto: medio_pago)
+  // Movimiento manual (URL correcta: pos_movimiento)
   document.getElementById('btn-mov').addEventListener('click', async ()=>{
-    const params=new URLSearchParams();
+    const params = new URLSearchParams();
     params.append('tipo', document.getElementById('mov-tipo').value);
-    params.append('medio_pago', document.getElementById('mov-medio').value);
+    params.append('medio_pago', document.getElementById('mov-medio').value); // nombre esperado por la vista
     params.append('monto', document.getElementById('mov-monto').value||'0');
     params.append('descripcion', document.getElementById('mov-desc').value||'');
 
     try{
-      const res=await fetch("{% url 'pos_registrar_mov' %}", {
+      const res = await fetch("{% url 'pos_movimiento' %}", {
         method:'POST',
-        headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest','Content-Type':'application/x-www-form-urlencoded'},
-        body:params.toString()
+        headers:{
+          'X-CSRFToken': csrftoken,
+          'X-Requested-With':'XMLHttpRequest',
+          'Content-Type':'application/x-www-form-urlencoded'
+        },
+        body: params.toString()
       });
-      const data= await res.json().catch(()=>null);
+      const data = await res.json().catch(()=>null);
       if(res.ok && data && data.ok){ location.reload(); }
       else { alert((data && data.error) || 'No se pudo registrar el movimiento'); }
-    }catch(e){ location.reload(); }
+    }catch(e){
+      location.reload();
+    }
   });
 
-  // Cerrar caja con prompt de contado (POST clásico con CSRF OK)
+  // Cerrar caja con prompt de contado (POST)
   function postCloseWithAmount(){
     const monto = prompt('Ingresá el monto contado en EFECTIVO (puede ser 0):', '0');
     if(monto===null) return;
