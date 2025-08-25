@@ -360,11 +360,13 @@ class VentaPOSItem(models.Model):
 
 class MovimientoCaja(models.Model):
     TIPO_MOV = [
+        
         ('VENTA', 'VENTA'),
         ('INGRESO', 'INGRESO'),
         ('EGRESO', 'EGRESO'),
         ('AJUSTE', 'AJUSTE'),
         ('RETIRO', 'RETIRO'),
+        
     ]
 
     caja = models.ForeignKey(Caja, on_delete=models.CASCADE, related_name='movimientos')
@@ -378,7 +380,13 @@ class MovimientoCaja(models.Model):
 
     class Meta:
         ordering = ['-id']
-
+    constraints = [
+            models.UniqueConstraint(
+                fields=['venta', 'tipo'],
+                condition=models.Q(venta__isnull=False),
+                name='uniq_mov_por_venta_tipo'
+            ),
+        ]
     def __str__(self):
         return f"{self.tipo} {self.medio_pago} ${self.monto} (Caja #{self.caja_id})"
 # ===== Señales POS/Caja =====

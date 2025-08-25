@@ -3,197 +3,155 @@
 
 {% block content %}
 <div class="container my-4">
-  <h2 class="mb-3">POS / Caja</h2>
-  <p class="text-muted">Panel mínimo para probar Caja, Ventas y Movimientos (multi-ítems).</p>
-  <hr>
+  <h3 class="mb-3">Panel mínimo para Caja, Ventas y Movimientos (multi-items)</h3>
 
-  <!-- Estado de caja -->
   {% if caja %}
-    <div class="alert alert-success d-flex justify-content-between align-items-center">
-      <div>
-        <strong>Caja ABIERTA #{{ caja.id }}</strong> — Apertura: {{ caja.fecha_apertura|date:"d/m H:i" }} ({{ caja.usuario_apertura.username }})
-        <br>Saldo inicial efectivo: ${{ caja.saldo_inicial_efectivo }}
-        {% if saldo_teorico is not None %}
-          <br>Saldo efectivo teórico: <strong>${{ saldo_teorico }}</strong>
-        {% endif %}
-      </div>
-      <form method="post" action="{% url 'pos_cerrar_caja' %}" class="d-flex align-items-center gap-2" onsubmit="this.querySelector('button[type=submit]').disabled=true;">
-        {% csrf_token %}
-        <input type="number" step="0.01" class="form-control form-control-sm" name="saldo_cierre_efectivo" placeholder="Conteo EFECTIVO" required>
-        <button class="btn btn-danger btn-sm" type="submit">Cerrar caja</button>
-      </form>
+  <div class="alert alert-info d-flex align-items-center justify-content-between">
+    <div>
+      <strong>Caja ABIERTA #{{ caja.id }}</strong> — Apertura: {{ caja.fecha_apertura|date:"d/m H:i" }} ({{ caja.usuario_apertura.username }})<br>
+      Saldo inicial efectivo: ${{ caja.saldo_inicial_efectivo|default:"0.00" }}<br>
+      Saldo efectivo teórico: <strong>${{ caja.saldo_efectivo_teorico|default:"0.00" }}</strong>
     </div>
-  {% else %}
-    <div class="alert alert-warning d-flex justify-content-between align-items-center">
-      <div><strong>Sin caja abierta.</strong> Abrí una caja para comenzar a vender.</div>
-      <form method="post" action="{% url 'pos_abrir_caja' %}" class="d-flex align-items-center gap-2" onsubmit="this.querySelector('button[type=submit]').disabled=true;">
-        {% csrf_token %}
-        <input type="number" step="0.01" class="form-control form-control-sm" name="saldo_inicial_efectivo" placeholder="Saldo inicial EFECTIVO">
-        <button class="btn btn-primary btn-sm" type="submit">Abrir caja</button>
-      </form>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary" href="{% url 'pos_cerrar_caja' %}?mode=count">Conteo EFECTIVO</a>
+      <a class="btn btn-danger" href="{% url 'pos_cerrar_caja' %}">Cerrar caja</a>
     </div>
-  {% endif %}
+  </div>
 
   <div class="row g-3">
-    <!-- Form venta (multi-ítems) -->
+    <!-- ===== Registrar venta (multi items) ===== -->
     <div class="col-lg-6">
       <div class="card">
-        <div class="card-header">Registrar venta (múltiples ítems)</div>
+        <div class="card-header">Registrar venta (múltiples items)</div>
         <div class="card-body">
-          {% if not caja %}
-            <div class="alert alert-info">Abrí una caja para poder vender.</div>
-          {% else %}
-            <form method="post" action="{% url 'pos_vender' %}" id="venta-form">
-              {% csrf_token %}
-              <div id="items-list"></div>
+          <form id="venta-form" autocomplete="off">
+            {% csrf_token %}
 
-              <div class="d-flex gap-2 my-2">
-                <button class="btn btn-outline-secondary btn-sm" type="button" id="btn-add-item">+ Agregar ítem</button>
-                <button class="btn btn-outline-danger btn-sm" type="button" id="btn-clear-items">Vaciar</button>
-              </div>
+            <!-- Items dinámicos -->
+            <div id="items-list"></div>
+            <div class="mb-2 d-flex gap-2">
+              <button type="button" id="btn-add-item" class="btn btn-outline-primary btn-sm">+ Agregar ítem</button>
+              <button type="button" id="btn-clear-items" class="btn btn-outline-danger btn-sm">Vaciar</button>
+            </div>
 
-              <div class="row g-2">
-                <div class="col-4">
-                  <label class="form-label">Medio de pago</label>
-                  <select name="medio_pago" class="form-select">
-                    <option value="EFECTIVO">Efectivo</option>
-                    <option value="QR_MP">QR / MercadoPago</option>
-                    <option value="TARJETA">Tarjeta</option>
-                    <option value="TRANSFERENCIA">Transferencia</option>
-                    <option value="OTRO">Otro</option>
-                  </select>
-                </div>
-                <div class="col-4">
-                  <label class="form-label">Comprobante</label>
-                  <select name="tipo_comprobante" class="form-select">
-                    <option value="COMANDA">Comanda (sin fiscal)</option>
-                    <option value="BISTRO">Bistró (con factura)</option>
-                  </select>
-                </div>
-                <div class="col-4 d-flex align-items-end justify-content-end">
-                  <div class="fw-bold fs-5">Total: $<span id="preview-total">0</span></div>
-                </div>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label">Medio de pago</label>
+                <select id="medio-pago" class="form-select" required>
+                  <option value="EFECTIVO">Efectivo</option>
+                  <option value="QR_MP">QR / MercadoPago</option>
+                  <option value="TARJETA">Tarjeta</option>
+                  <option value="TRANSFERENCIA">Transferencia</option>
+                  <option value="OTRO">Otro</option>
+                </select>
               </div>
+              <div class="col-md-6">
+                <label class="form-label">Comprobante</label>
+                <select id="tipo-comp" class="form-select" required>
+                  <option value="COMANDA">Comanda (sin fiscal)</option>
+                  <option value="BISTRO">Bistró (con factura)</option>
+                </select>
+              </div>
+            </div>
 
-              <div class="mt-3">
-                <button class="btn btn-success" id="btn-vender" type="submit">Cargar venta</button>
-              </div>
-            </form>
-          {% endif %}
+            <div class="mt-3 fs-5">
+              <strong>Total:</strong> <span id="preview-total">$0.00</span>
+            </div>
+
+            <div class="mt-3">
+              <button id="btn-vender" class="btn btn-success" type="submit">Cargar venta</button>
+            </div>
+          </form>
         </div>
       </div>
     </div>
 
-    <!-- Form movimiento -->
+    <!-- ===== Movimiento de caja ===== -->
     <div class="col-lg-6">
       <div class="card">
         <div class="card-header">Movimiento de caja (Ingreso/Egreso/Ajuste/Retiro)</div>
         <div class="card-body">
-          {% if not caja %}
-            <div class="alert alert-info">Abrí una caja para registrar movimientos.</div>
-          {% else %}
-            <form method="post" action="{% url 'pos_movimiento' %}" class="row g-2" onsubmit="this.querySelector('button[type=submit]').disabled=true;">
-              {% csrf_token %}
-              <div class="col-5">
+          <form id="mov-form">
+            {% csrf_token %}
+            <div class="row g-2">
+              <div class="col-md-4">
                 <label class="form-label">Tipo</label>
-                <select name="tipo" class="form-select">
+                <select id="mov-tipo" class="form-select">
                   <option value="INGRESO">INGRESO</option>
                   <option value="EGRESO">EGRESO</option>
                   <option value="AJUSTE">AJUSTE</option>
                   <option value="RETIRO">RETIRO</option>
                 </select>
               </div>
-              <div class="col-4">
+              <div class="col-md-4">
                 <label class="form-label">Medio</label>
-                <select name="medio_pago" class="form-select">
+                <select id="mov-medio" class="form-select">
                   <option value="EFECTIVO">Efectivo</option>
-                  <option value="QR_MP">QR / MP</option>
+                  <option value="QR_MP">QR / MercadoPago</option>
                   <option value="TARJETA">Tarjeta</option>
                   <option value="TRANSFERENCIA">Transferencia</option>
                   <option value="OTRO">Otro</option>
                 </select>
               </div>
-              <div class="col-3">
+              <div class="col-md-4">
                 <label class="form-label">Monto</label>
-                <input type="number" step="0.01" name="monto" class="form-control" placeholder="0.00" required>
+                <input id="mov-monto" type="number" step="0.01" min="0" class="form-control" value="0.00">
               </div>
-              <div class="col-12">
-                <label class="form-label">Descripción</label>
-                <input type="text" name="descripcion" class="form-control" placeholder="Detalle (opcional)">
-              </div>
-              <div class="col-12">
-                <button class="btn btn-outline-primary" type="submit">Registrar movimiento</button>
-              </div>
-            </form>
-          {% endif %}
+            </div>
+            <div class="mt-2">
+              <input id="mov-desc" class="form-control" placeholder="Detalle (opcional)">
+            </div>
+            <div class="mt-3">
+              <button id="btn-mov" class="btn btn-primary" type="button">Registrar movimiento</button>
+            </div>
+          </form>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- Totales -->
-  <div class="row g-3 mt-3">
+    <!-- ===== Totales ===== -->
     <div class="col-lg-6">
-      <div class="card">
+      <div class="card mt-3">
         <div class="card-header">Totales por medio de pago (VENTAS)</div>
         <div class="card-body">
-          {% if caja %}
-            {% if totales_medio %}
-              <ul class="list-group">
-                {% for medio, tot in totales_medio.items %}
-                  <li class="list-group-item d-flex justify-content-between align-items-center">
-                    {{ medio }} <span class="badge text-bg-primary">${{ tot }}</span>
-                  </li>
-                {% endfor %}
-              </ul>
-            {% else %}
-              <div class="text-muted">Sin ventas aún.</div>
-            {% endif %}
+          {% if tot_mp %}
+            {% for k,v in tot_mp.items %}
+              <span class="badge text-bg-light me-2">{{ k }} <span class="badge text-bg-primary">${{ v|default:"0.00" }}</span></span>
+            {% endfor %}
           {% else %}
-            <div class="text-muted">Abrí una caja para ver totales.</div>
+            <div class="text-muted">Sin ventas aún.</div>
           {% endif %}
         </div>
       </div>
     </div>
 
     <div class="col-lg-6">
-      <div class="card">
+      <div class="card mt-3">
         <div class="card-header">Totales por tipo de movimiento</div>
         <div class="card-body">
-          {% if caja %}
-            {% if totales_tipo %}
-              <ul class="list-group">
-                {% for tipo, tot in totales_tipo.items %}
-                  <li class="list-group-item d-flex justify-content-between align-items-center">
-                    {{ tipo }} <span class="badge text-bg-secondary">${{ tot }}</span>
-                  </li>
-                {% endfor %}
-              </ul>
-            {% else %}
-              <div class="text-muted">Sin movimientos aún.</div>
-            {% endif %}
+          {% if tot_tipo %}
+            {% for k,v in tot_tipo.items %}
+              <span class="badge text-bg-light me-2">{{ k }} <span class="badge text-bg-secondary">${{ v|default:"0.00" }}</span></span>
+            {% endfor %}
           {% else %}
-            <div class="text-muted">Abrí una caja para ver totales.</div>
+            <div class="text-muted">Sin movimientos aún.</div>
           {% endif %}
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- Últimas ventas -->
-  <div class="card mt-3">
-    <div class="card-header">Últimas ventas</div>
-    <div class="card-body">
-      {% if ventas %}
-        <div class="table-responsive">
-          <table class="table align-middle">
-            <thead>
-              <tr>
-                <th>#</th><th>Fecha</th><th>Caja</th><th>Usuario</th><th>Comp.</th><th>Medio</th><th>Total</th><th>Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for v in ventas %}
+    <!-- ===== Últimas ventas ===== -->
+    <div class="col-12">
+      <div class="card mt-3">
+        <div class="card-header">Últimas ventas</div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table mb-0">
+              <thead>
+                <tr><th>#</th><th>Fecha</th><th>Caja</th><th>Usuario</th><th>Comp.</th><th>Medio</th><th>Total</th><th>Estado</th></tr>
+              </thead>
+              <tbody>
+              {% for v in ultimas_ventas %}
                 <tr>
                   <td>{{ v.id }}</td>
                   <td>{{ v.fecha|date:"d/m H:i" }}</td>
@@ -204,116 +162,162 @@
                   <td>${{ v.total }}</td>
                   <td>{{ v.estado }}</td>
                 </tr>
+              {% empty %}
+                <tr><td colspan="8" class="text-center text-muted">Sin ventas registradas.</td></tr>
               {% endfor %}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
         </div>
-      {% else %}
-        <div class="text-muted">Sin ventas registradas.</div>
-      {% endif %}
+      </div>
     </div>
-  </div>
+
+  </div><!--/row-->
+
+  {% else %}
+    <div class="alert alert-warning">
+      No hay caja abierta. Abrila desde <a href="{% url 'admin:index' %}">/admin</a> o implemente el flujo de apertura.
+    </div>
+  {% endif %}
 </div>
 
 {% if caja %}
 <script>
 (function(){
-  // Productos desde el servidor para mostrar precios en el preview
-  const productos = {
-    {% for pr in productos %}
-      "{{ pr.id }}": {"precio": "{{ pr.precio }}", "nombre": "{{ pr.nombre|escapejs }}"},
-    {% endfor %}
-  };
+  // ===== CSRF =====
+  function getCookie(name){const v=`; ${document.cookie}`.split(`; ${name}=`); if(v.length===2) return v.pop().split(';').shift();}
+  const csrftoken=getCookie('csrftoken');
 
-  const itemsList = document.getElementById('items-list');
-  const btnAdd = document.getElementById('btn-add-item');
-  const btnClear = document.getElementById('btn-clear-items');
-  const previewTotal = document.getElementById('preview-total');
-  const ventaForm = document.getElementById('venta-form');
-  const btnVender = document.getElementById('btn-vender');
+  // ===== Helpers =====
+  const itemsList=document.getElementById('items-list');
+  const btnAdd=document.getElementById('btn-add-item');
+  const btnClear=document.getElementById('btn-clear-items');
+  const previewTotal=document.getElementById('preview-total');
+  const formVenta=document.getElementById('venta-form');
+  const btnVender=document.getElementById('btn-vender');
 
+  const medioPagoSel=document.getElementById('medio-pago');
+  const compSel=document.getElementById('tipo-comp');
+
+  // Plantilla de fila (sin backticks para que no choque con {{ }})
   function rowTemplate(){
-    return `
-      <div class="row g-2 align-items-end mb-2 item-row">
-        <div class="col-8">
-          <label class="form-label">Producto</label>
-          <select name="item_producto" class="form-select item-producto">
-            <option value="" hidden>Elegir…</option>
-            {% for pr in productos %}
-              <option value="{{ pr.id }}" data-precio="{{ pr.precio }}">{{ pr.nombre }} — ${{ pr.precio }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-3">
-          <label class="form-label">Cant.</label>
-          <input type="number" name="item_cantidad" class="form-control item-cantidad" value="1" min="1">
-        </div>
-        <div class="col-1 text-end">
-          <button type="button" class="btn btn-outline-danger btn-sm btn-remove" title="Quitar">×</button>
-        </div>
-      </div>`;
-  }
-
-  function recalcTotal(){
-    let total = 0;
-    itemsList.querySelectorAll('.item-row').forEach(row=>{
-      const sel = row.querySelector('.item-producto');
-      const qty = parseInt(row.querySelector('.item-cantidad').value || '1', 10);
-      const pid = sel.value;
-      if (pid && productos[pid]){
-        const precio = parseFloat(productos[pid].precio || '0');
-        total += (precio * (isNaN(qty) ? 1 : qty));
-      }
-    });
-    previewTotal.textContent = (Math.round(total * 100) / 100).toFixed(2);
-  }
-
-  function bindRow(row){
-    row.querySelector('.item-producto').addEventListener('change', recalcTotal);
-    row.querySelector('.item-cantidad').addEventListener('input', recalcTotal);
-    row.querySelector('.btn-remove').addEventListener('click', ()=>{
-      row.remove();
-      if (!itemsList.querySelector('.item-row')) addRow(); // siempre dejar una fila como mínimo
-      recalcTotal();
-    });
+    return '' +
+      '<div class="row g-2 align-items-end mb-2 item-row">' +
+        '<div class="col-8">' +
+          '<label class="form-label">Producto</label>' +
+          '<select name="item_producto" class="form-select item-producto" required>' +
+            '<option value="" hidden>Elegir…</option>' +
+            '{% for pr in productos %}' +
+              '<option value="{{ pr.id }}" data-precio="{{ pr.precio }}">{{ pr.nombre }} - ${{ pr.precio }}</option>' +
+            '{% endfor %}' +
+          '</select>' +
+        '</div>' +
+        '<div class="col-3">' +
+          '<label class="form-label">Cant.</label>' +
+          '<input type="number" name="item_cantidad" class="form-control item-cantidad" value="1" min="1">' +
+        '</div>' +
+        '<div class="col-1 text-end">' +
+          '<button type="button" class="btn btn-outline-danger btn-sm item-remove" title="Quitar">✖</button>' +
+        '</div>' +
+      '</div>';
   }
 
   function addRow(){
-    const wrap = document.createElement('div');
-    wrap.innerHTML = rowTemplate();
-    const row = wrap.firstElementChild;
-    itemsList.appendChild(row);
-    bindRow(row);
+    const wrap=document.createElement('div');
+    wrap.innerHTML=rowTemplate();
+    itemsList.appendChild(wrap.firstChild);
   }
 
-  btnAdd.addEventListener('click', addRow);
-  btnClear.addEventListener('click', ()=>{
-    itemsList.innerHTML = '';
-    addRow();
+  function recalcTotal(){
+    let t=0;
+    itemsList.querySelectorAll('.item-row').forEach(row=>{
+      const sel=row.querySelector('.item-producto');
+      const q=row.querySelector('.item-cantidad');
+      if(sel && sel.value){
+        const p=parseFloat(sel.selectedOptions[0].dataset.precio||0);
+        const c=parseInt(q.value||0,10);
+        t += p*c;
+      }
+    });
+    previewTotal.textContent='$'+t.toFixed(2);
+    return t;
+  }
+
+  // Eventos
+  btnAdd.addEventListener('click', ()=>{ addRow(); recalcTotal(); });
+  btnClear.addEventListener('click', ()=>{ itemsList.innerHTML=''; recalcTotal(); });
+
+  itemsList.addEventListener('change', ev=>{
+    if(ev.target.classList.contains('item-producto') || ev.target.classList.contains('item-cantidad')){
+      recalcTotal();
+    }
+  });
+  itemsList.addEventListener('click', ev=>{
+    const b=ev.target.closest('.item-remove'); if(!b) return;
+    b.closest('.item-row').remove();
     recalcTotal();
   });
 
-  // On submit: normalizamos nombres para enviar múltiples (getlist en el server)
-  ventaForm.addEventListener('submit', (ev)=>{
-    // deshabilitar botón para evitar doble submit
-    btnVender.disabled = true;
+  // Envío de venta — evita doble POST
+  let sending=false;
+  formVenta.addEventListener('submit', async (ev)=>{
+    ev.preventDefault();
+    if(sending) return;
+    const rows=itemsList.querySelectorAll('.item-row');
+    if(!rows.length){ alert('Agregá al menos un ítem.'); return; }
 
-    // renombrar a arrays
-    itemsList.querySelectorAll('.item-row').forEach(row=>{
-      row.querySelector('.item-producto').setAttribute('name', 'item_producto');
-      row.querySelector('.item-cantidad').setAttribute('name', 'item_cantidad');
+    const fd=new FormData();
+    rows.forEach(r=>{
+      const sel=r.querySelector('.item-producto');
+      const q=r.querySelector('.item-cantidad');
+      if(sel && sel.value && q && q.value){
+        fd.append('item_producto', sel.value);
+        fd.append('item_cantidad', q.value);
+      }
     });
+    if(!fd.has('item_producto')){ alert('Elegí al menos un producto.'); return; }
 
-    // Validar al menos un producto seleccionado
-    const hasOne = Array.from(itemsList.querySelectorAll('.item-producto')).some(s=>s.value);
-    if (!hasOne){
-      ev.preventDefault();
-      btnVender.disabled = false;
-      alert('Elegí por lo menos un producto.');
-    }
+    fd.append('medio_pago', medioPagoSel.value);
+    fd.append('tipo_comprobante', compSel.value);
+
+    sending=true;
+    btnVender.disabled=true;
+    btnVender.textContent='Cargando…';
+
+    try{
+      const res=await fetch("{% url 'pos_registrar_venta' %}", {
+        method:'POST',
+        headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'},
+        body:fd
+      });
+      if(!res.ok){ location.reload(); return; }
+      const data=await res.json();
+      if(data.ok){ location.reload(); }
+      else{ alert(data.error||'No se pudo registrar la venta'); location.reload(); }
+    }catch(e){ location.reload(); }
   });
 
-  // init con una fila
+  // Movimiento manual
+  document.getElementById('btn-mov').addEventListener('click', async ()=>{
+    const fd=new URLSearchParams();
+    fd.append('tipo', document.getElementById('mov-tipo').value);
+    fd.append('medio', document.getElementById('mov-medio').value);
+    fd.append('monto', document.getElementById('mov-monto').value||'0');
+    fd.append('descripcion', document.getElementById('mov-desc').value||'');
+
+    try{
+      const res=await fetch("{% url 'pos_registrar_mov' %}", {
+        method:'POST',
+        headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest','Content-Type':'application/x-www-form-urlencoded'},
+        body:fd.toString()
+      });
+      if(!res.ok){ location.reload(); return; }
+      const data=await res.json();
+      if(data.ok){ location.reload(); } else { alert(data.error||'No se pudo registrar'); }
+    }catch(e){ location.reload(); }
+  });
+
+  // fila inicial
   addRow();
   recalcTotal();
 })();
