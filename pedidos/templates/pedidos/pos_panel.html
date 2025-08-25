@@ -66,7 +66,7 @@
             </div>
 
             <div class="mt-3">
-              <!-- Botón NO-submit, todo va por fetch -->
+              <!-- Botón NO-submit, todo se envía por fetch -->
               <button id="btn-vender" class="btn btn-success" type="button" disabled>Cargar venta</button>
             </div>
           </form>
@@ -208,7 +208,7 @@
   const medioPagoSel  = document.getElementById('medio-pago');
   const compSel       = document.getElementById('tipo-comp');
 
-  // Plantilla de fila (sin backticks para no chocar con {{ }})
+  // Plantilla de fila (sin mencionar llaves dobles para no gatillar el parser de Django)
   function rowTemplate(){
     return '' +
       '<div class="row g-2 align-items-end mb-2 item-row">' +
@@ -263,7 +263,7 @@
   btnAdd.addEventListener('click', ()=>{ addRow(); recalcTotal(); });
   btnClear.addEventListener('click', ()=>{ itemsList.innerHTML=''; recalcTotal(); });
 
-  // Envío de venta por fetch a la URL correcta (pos_vender)
+  // Envío de venta por fetch (URL correcta)
   let sending = false;
   btnVender.addEventListener('click', async ()=>{
     if(sending) return;
@@ -306,7 +306,7 @@
   document.getElementById('btn-mov').addEventListener('click', async ()=>{
     const params = new URLSearchParams();
     params.append('tipo', document.getElementById('mov-tipo').value);
-    params.append('medio_pago', document.getElementById('mov-medio').value); // nombre esperado por la vista
+    params.append('medio_pago', document.getElementById('mov-medio').value);
     params.append('monto', document.getElementById('mov-monto').value||'0');
     params.append('descripcion', document.getElementById('mov-desc').value||'');
 
