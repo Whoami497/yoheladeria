@@ -10,11 +10,18 @@
     <div>
       <strong>Caja ABIERTA #{{ caja.id }}</strong> — Apertura: {{ caja.fecha_apertura|date:"d/m H:i" }} ({{ caja.usuario_apertura.username }})<br>
       Saldo inicial efectivo: ${{ caja.saldo_inicial_efectivo|default:"0.00" }}<br>
-      Saldo efectivo teórico: <strong>${{ caja.saldo_efectivo_teorico|default:"0.00" }}</strong>
+      Saldo efectivo teórico: <strong>${{ saldo_teorico|default:"0.00" }}</strong>
     </div>
+
+    <!-- Form oculto para cerrar caja via POST -->
+    <form id="close-form" method="post" action="{% url 'pos_cerrar_caja' %}" class="d-none">
+      {% csrf_token %}
+      <input type="hidden" name="saldo_cierre_efectivo" id="saldo-cierre-input">
+    </form>
+
     <div class="d-flex gap-2">
-      <a class="btn btn-outline-secondary" href="{% url 'pos_cerrar_caja' %}?mode=count">Conteo EFECTIVO</a>
-      <a class="btn btn-danger" href="{% url 'pos_cerrar_caja' %}">Cerrar caja</a>
+      <button type="button" class="btn btn-outline-secondary" id="btn-count-cash">Conteo EFECTIVO</button>
+      <button type="button" class="btn btn-danger" id="btn-close-cash">Cerrar caja</button>
     </div>
   </div>
 
@@ -59,7 +66,7 @@
             </div>
 
             <div class="mt-3">
-              <button id="btn-vender" class="btn btn-success" type="submit">Cargar venta</button>
+              <button id="btn-vender" class="btn btn-success" type="submit" disabled>Cargar venta</button>
             </div>
           </form>
         </div>
@@ -114,8 +121,8 @@
       <div class="card mt-3">
         <div class="card-header">Totales por medio de pago (VENTAS)</div>
         <div class="card-body">
-          {% if tot_mp %}
-            {% for k,v in tot_mp.items %}
+          {% if totales_medio %}
+            {% for k,v in totales_medio.items %}
               <span class="badge text-bg-light me-2">{{ k }} <span class="badge text-bg-primary">${{ v|default:"0.00" }}</span></span>
             {% endfor %}
           {% else %}
@@ -129,8 +136,8 @@
       <div class="card mt-3">
         <div class="card-header">Totales por tipo de movimiento</div>
         <div class="card-body">
-          {% if tot_tipo %}
-            {% for k,v in tot_tipo.items %}
+          {% if totales_tipo %}
+            {% for k,v in totales_tipo.items %}
               <span class="badge text-bg-light me-2">{{ k }} <span class="badge text-bg-secondary">${{ v|default:"0.00" }}</span></span>
             {% endfor %}
           {% else %}
@@ -151,7 +158,7 @@
                 <tr><th>#</th><th>Fecha</th><th>Caja</th><th>Usuario</th><th>Comp.</th><th>Medio</th><th>Total</th><th>Estado</th></tr>
               </thead>
               <tbody>
-              {% for v in ultimas_ventas %}
+              {% for v in ventas %}
                 <tr>
                   <td>{{ v.id }}</td>
                   <td>{{ v.fecha|date:"d/m H:i" }}</td>
@@ -176,7 +183,7 @@
 
   {% else %}
     <div class="alert alert-warning">
-      No hay caja abierta. Abrila desde <a href="{% url 'admin:index' %}">/admin</a> o implemente el flujo de apertura.
+      No hay caja abierta. Abrila desde <a href="{% url 'admin:index' %}">/admin</a> o implementá el flujo de apertura.
     </div>
   {% endif %}
 </div>
@@ -189,17 +196,17 @@
   const csrftoken=getCookie('csrftoken');
 
   // ===== Helpers =====
-  const itemsList=document.getElementById('items-list');
-  const btnAdd=document.getElementById('btn-add-item');
-  const btnClear=document.getElementById('btn-clear-items');
-  const previewTotal=document.getElementById('preview-total');
-  const formVenta=document.getElementById('venta-form');
-  const btnVender=document.getElementById('btn-vender');
+  const itemsList   = document.getElementById('items-list');
+  const btnAdd      = document.getElementById('btn-add-item');
+  const btnClear    = document.getElementById('btn-clear-items');
+  const previewTotal= document.getElementById('preview-total');
+  const formVenta   = document.getElementById('venta-form');
+  const btnVender   = document.getElementById('btn-vender');
 
-  const medioPagoSel=document.getElementById('medio-pago');
-  const compSel=document.getElementById('tipo-comp');
+  const medioPagoSel= document.getElementById('medio-pago');
+  const compSel     = document.getElementById('tipo-comp');
 
-  // Plantilla de fila (sin backticks para que no choque con {{ }})
+  // Plantilla de fila (sin usar backticks para no chocar con tags del template)
   function rowTemplate(){
     return '' +
       '<div class="row g-2 align-items-end mb-2 item-row">' +
@@ -217,52 +224,48 @@
           '<input type="number" name="item_cantidad" class="form-control item-cantidad" value="1" min="1">' +
         '</div>' +
         '<div class="col-1 text-end">' +
-          '<button type="button" class="btn btn-outline-danger btn-sm item-remove" title="Quitar">✖</button>' +
+          '<button type="button" class="btn btn-outline-danger btn-sm btn-remove" title="Quitar">×</button>' +
         '</div>' +
       '</div>';
+  }
+
+  function bindRow(row){
+    row.querySelector('.item-producto').addEventListener('change', recalcTotal);
+    row.querySelector('.item-cantidad').addEventListener('input', recalcTotal);
+    row.querySelector('.btn-remove').addEventListener('click', ()=>{ row.remove(); recalcTotal(); });
   }
 
   function addRow(){
     const wrap=document.createElement('div');
     wrap.innerHTML=rowTemplate();
-    itemsList.appendChild(wrap.firstChild);
+    const row = wrap.firstElementChild;
+    itemsList.appendChild(row);
+    bindRow(row);
   }
 
   function recalcTotal(){
     let t=0;
     itemsList.querySelectorAll('.item-row').forEach(row=>{
       const sel=row.querySelector('.item-producto');
-      const q=row.querySelector('.item-cantidad');
-      if(sel && sel.value){
-        const p=parseFloat(sel.selectedOptions[0].dataset.precio||0);
-        const c=parseInt(q.value||0,10);
-        t += p*c;
-      }
+      const qty=parseInt(row.querySelector('.item-cantidad').value||'1',10);
+      const price=parseFloat((sel.selectedOptions[0]||{}).dataset?.precio || '0');
+      if(sel.value) t += price*qty;
     });
     previewTotal.textContent='$'+t.toFixed(2);
+    btnVender.disabled = (t<=0 || !itemsList.querySelector('.item-row'));
     return t;
   }
 
-  // Eventos
+  // Eventos de items
   btnAdd.addEventListener('click', ()=>{ addRow(); recalcTotal(); });
   btnClear.addEventListener('click', ()=>{ itemsList.innerHTML=''; recalcTotal(); });
 
-  itemsList.addEventListener('change', ev=>{
-    if(ev.target.classList.contains('item-producto') || ev.target.classList.contains('item-cantidad')){
-      recalcTotal();
-    }
-  });
-  itemsList.addEventListener('click', ev=>{
-    const b=ev.target.closest('.item-remove'); if(!b) return;
-    b.closest('.item-row').remove();
-    recalcTotal();
-  });
-
-  // Envío de venta — evita doble POST
+  // Envío de venta con fetch (JSON)
   let sending=false;
   formVenta.addEventListener('submit', async (ev)=>{
     ev.preventDefault();
     if(sending) return;
+
     const rows=itemsList.querySelectorAll('.item-row');
     if(!rows.length){ alert('Agregá al menos un ítem.'); return; }
 
@@ -270,19 +273,13 @@
     rows.forEach(r=>{
       const sel=r.querySelector('.item-producto');
       const q=r.querySelector('.item-cantidad');
-      if(sel && sel.value && q && q.value){
-        fd.append('item_producto', sel.value);
-        fd.append('item_cantidad', q.value);
-      }
+      if(sel && sel.value){ fd.append('item_producto', sel.value); fd.append('item_cantidad', q.value||'1'); }
     });
     if(!fd.has('item_producto')){ alert('Elegí al menos un producto.'); return; }
-
     fd.append('medio_pago', medioPagoSel.value);
     fd.append('tipo_comprobante', compSel.value);
 
-    sending=true;
-    btnVender.disabled=true;
-    btnVender.textContent='Cargando…';
+    sending=true; btnVender.disabled=true; btnVender.textContent='Cargando…';
 
     try{
       const res=await fetch("{% url 'pos_registrar_venta' %}", {
@@ -290,31 +287,42 @@
         headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'},
         body:fd
       });
-      if(!res.ok){ location.reload(); return; }
-      const data=await res.json();
-      if(data.ok){ location.reload(); }
-      else{ alert(data.error||'No se pudo registrar la venta'); location.reload(); }
+      const data= await res.json().catch(()=>null);
+      if(res.ok && data && data.ok){ location.reload(); }
+      else { alert((data && data.error) || 'No se pudo registrar la venta'); location.reload(); }
     }catch(e){ location.reload(); }
   });
 
-  // Movimiento manual
+  // Movimiento manual (param correcto: medio_pago)
   document.getElementById('btn-mov').addEventListener('click', async ()=>{
-    const fd=new URLSearchParams();
-    fd.append('tipo', document.getElementById('mov-tipo').value);
-    fd.append('medio', document.getElementById('mov-medio').value);
-    fd.append('monto', document.getElementById('mov-monto').value||'0');
-    fd.append('descripcion', document.getElementById('mov-desc').value||'');
+    const params=new URLSearchParams();
+    params.append('tipo', document.getElementById('mov-tipo').value);
+    params.append('medio_pago', document.getElementById('mov-medio').value);
+    params.append('monto', document.getElementById('mov-monto').value||'0');
+    params.append('descripcion', document.getElementById('mov-desc').value||'');
 
     try{
       const res=await fetch("{% url 'pos_registrar_mov' %}", {
         method:'POST',
         headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest','Content-Type':'application/x-www-form-urlencoded'},
-        body:fd.toString()
+        body:params.toString()
       });
-      if(!res.ok){ location.reload(); return; }
-      const data=await res.json();
-      if(data.ok){ location.reload(); } else { alert(data.error||'No se pudo registrar'); }
+      const data= await res.json().catch(()=>null);
+      if(res.ok && data && data.ok){ location.reload(); }
+      else { alert((data && data.error) || 'No se pudo registrar el movimiento'); }
     }catch(e){ location.reload(); }
+  });
+
+  // Cerrar caja con prompt de contado (POST)
+  function postCloseWithAmount(){
+    const monto = prompt('Ingresá el monto contado en EFECTIVO (puede ser 0):', '0');
+    if(monto===null) return;
+    document.getElementById('saldo-cierre-input').value = String(monto||'0');
+    document.getElementById('close-form').submit();
+  }
+  document.getElementById('btn-count-cash').addEventListener('click', postCloseWithAmount);
+  document.getElementById('btn-close-cash').addEventListener('click', ()=>{
+    if(confirm('¿Cerrar caja ahora?')) postCloseWithAmount();
   });
 
   // fila inicial
