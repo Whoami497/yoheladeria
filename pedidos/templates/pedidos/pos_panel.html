@@ -31,7 +31,8 @@
       <div class="card">
         <div class="card-header">Registrar venta (múltiples items)</div>
         <div class="card-body">
-          <form id="venta-form" autocomplete="off">
+          <!-- anulamos submit clásico para que nunca postee a /pos/ -->
+          <form id="venta-form" autocomplete="off" onsubmit="return false;">
             {% csrf_token %}
 
             <!-- Items dinámicos -->
@@ -66,7 +67,8 @@
             </div>
 
             <div class="mt-3">
-              <button id="btn-vender" class="btn btn-success" type="submit" disabled>Cargar venta</button>
+              <!-- botón NO-submit, todo se envía por fetch -->
+              <button id="btn-vender" class="btn btn-success" type="button" disabled>Cargar venta</button>
             </div>
           </form>
         </div>
@@ -78,7 +80,7 @@
       <div class="card">
         <div class="card-header">Movimiento de caja (Ingreso/Egreso/Ajuste/Retiro)</div>
         <div class="card-body">
-          <form id="mov-form">
+          <form id="mov-form" onsubmit="return false;">
             {% csrf_token %}
             <div class="row g-2">
               <div class="col-md-4">
@@ -192,21 +194,23 @@
 <script>
 (function(){
   // ===== CSRF =====
-  function getCookie(name){const v=`; ${document.cookie}`.split(`; ${name}=`); if(v.length===2) return v.pop().split(';').shift();}
+  function getCookie(name){
+    const v = `; ${document.cookie}`.split(`; ${name}=`);
+    if(v.length===2) return v.pop().split(';').shift();
+  }
   const csrftoken=getCookie('csrftoken');
 
   // ===== Helpers =====
-  const itemsList   = document.getElementById('items-list');
-  const btnAdd      = document.getElementById('btn-add-item');
-  const btnClear    = document.getElementById('btn-clear-items');
-  const previewTotal= document.getElementById('preview-total');
-  const formVenta   = document.getElementById('venta-form');
-  const btnVender   = document.getElementById('btn-vender');
+  const itemsList    = document.getElementById('items-list');
+  const btnAdd       = document.getElementById('btn-add-item');
+  const btnClear     = document.getElementById('btn-clear-items');
+  const previewTotal = document.getElementById('preview-total');
+  const btnVender    = document.getElementById('btn-vender');
 
-  const medioPagoSel= document.getElementById('medio-pago');
-  const compSel     = document.getElementById('tipo-comp');
+  const medioPagoSel = document.getElementById('medio-pago');
+  const compSel      = document.getElementById('tipo-comp');
 
-  // Plantilla de fila (sin usar backticks para no chocar con tags del template)
+  // Plantilla de fila (sin backticks para no chocar con {{ }})
   function rowTemplate(){
     return '' +
       '<div class="row g-2 align-items-end mb-2 item-row">' +
@@ -246,24 +250,24 @@
   function recalcTotal(){
     let t=0;
     itemsList.querySelectorAll('.item-row').forEach(row=>{
-      const sel=row.querySelector('.item-producto');
-      const qty=parseInt(row.querySelector('.item-cantidad').value||'1',10);
-      const price=parseFloat((sel.selectedOptions[0]||{}).dataset?.precio || '0');
-      if(sel.value) t += price*qty;
+      const sel  = row.querySelector('.item-producto');
+      const qty  = parseInt(row.querySelector('.item-cantidad').value||'1',10);
+      const opt  = (sel && sel.selectedOptions && sel.selectedOptions[0]) ? sel.selectedOptions[0] : null;
+      const price= parseFloat((opt && opt.dataset && opt.dataset.precio) ? opt.dataset.precio : '0');
+      if(sel && sel.value) t += price*qty;
     });
     previewTotal.textContent='$'+t.toFixed(2);
     btnVender.disabled = (t<=0 || !itemsList.querySelector('.item-row'));
     return t;
   }
 
-  // Eventos de items
+  // Items
   btnAdd.addEventListener('click', ()=>{ addRow(); recalcTotal(); });
   btnClear.addEventListener('click', ()=>{ itemsList.innerHTML=''; recalcTotal(); });
 
-  // Envío de venta con fetch (JSON)
+  // Envío de venta por fetch (NO form submit)
   let sending=false;
-  formVenta.addEventListener('submit', async (ev)=>{
-    ev.preventDefault();
+  btnVender.addEventListener('click', async ()=>{
     if(sending) return;
 
     const rows=itemsList.querySelectorAll('.item-row');
@@ -273,7 +277,10 @@
     rows.forEach(r=>{
       const sel=r.querySelector('.item-producto');
       const q=r.querySelector('.item-cantidad');
-      if(sel && sel.value){ fd.append('item_producto', sel.value); fd.append('item_cantidad', q.value||'1'); }
+      if(sel && sel.value){
+        fd.append('item_producto', sel.value);
+        fd.append('item_cantidad', q.value||'1');
+      }
     });
     if(!fd.has('item_producto')){ alert('Elegí al menos un producto.'); return; }
     fd.append('medio_pago', medioPagoSel.value);
@@ -313,7 +320,7 @@
     }catch(e){ location.reload(); }
   });
 
-  // Cerrar caja con prompt de contado (POST)
+  // Cerrar caja con prompt de contado (POST clásico con CSRF OK)
   function postCloseWithAmount(){
     const monto = prompt('Ingresá el monto contado en EFECTIVO (puede ser 0):', '0');
     if(monto===null) return;

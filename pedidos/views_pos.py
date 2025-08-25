@@ -5,7 +5,8 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.db import transaction
 from django.utils import timezone
-from django.http import HttpResponseForbidden
+from django.http import HttpResponseForbidden, JsonResponse, HttpResponseNotAllowed
+from django.views.decorators.csrf import csrf_exempt  # <— NUEVO
 
 from .models import Caja, ProductoPOS, VentaPOS, VentaPOSItem, MovimientoCaja
 
@@ -17,10 +18,14 @@ def es_staff(user):
 def _caja_abierta():
     return Caja.objects.filter(estado='ABIERTA').order_by('-id').first()
 
-
+@csrf_exempt  # <— BLINDA la ruta /pos/ contra CSRF si por accidente llega un POST
 @user_passes_test(es_staff)
 @login_required
 def pos_panel(request):
+    if request.method != 'GET':
+        # si algo intenta postear acá, lo cortamos elegante
+        return HttpResponseNotAllowed(['GET'])
+
     caja = _caja_abierta()
     productos = ProductoPOS.objects.filter(activo=True).order_by('nombre')
     ventas = VentaPOS.objects.order_by('-id')[:15]
@@ -37,6 +42,7 @@ def pos_panel(request):
         'totales_tipo': totales_tipo,
         'saldo_teorico': teorico,
     })
+
 
 
 @user_passes_test(es_staff)
