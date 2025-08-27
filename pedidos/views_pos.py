@@ -20,7 +20,6 @@ def es_staff(user):
     return user.is_authenticated and user.is_staff
 
 def es_manager(user):
-    # Superusuarios o quienes estén en el grupo "Gerencia"
     if not user.is_authenticated:
         return False
     if user.is_superuser:
@@ -28,7 +27,6 @@ def es_manager(user):
     return user.groups.filter(name='Gerencia').exists()
 
 def _caja_abierta():
-    # Toma la última caja en estado ABIERTA
     return Caja.objects.filter(estado='ABIERTA').order_by('-id').first()
 
 # =======================
@@ -45,11 +43,35 @@ def pos_panel(request):
     teorico = None
 
     if caja:
-        # SOLO ventas de la caja abierta
+        # Listado de últimas ventas (solo para la tabla)
         ventas = VentaPOS.objects.filter(caja=caja).order_by('-id')[:15]
-        totales_medio = caja.total_ventas_por_medio() or {}
-        totales_tipo = caja.total_por_tipo_mov() or {}
-        teorico = caja.saldo_efectivo_teorico()
+
+        # === Fuente única de verdad: MovimientoCaja ===
+        movs = MovimientoCaja.objects.filter(caja=caja)
+
+        # Ventas por medio (solo tipo VENTA)
+        m_venta = (
+            movs.filter(tipo='VENTA')
+                .values('medio_pago')
+                .annotate(total=Sum('monto'))
+        )
+        totales_medio = {r['medio_pago']: r['total'] or Decimal('0') for r in m_venta}
+
+        # Totales por tipo de movimiento
+        m_tipo = movs.values('tipo').annotate(total=Sum('monto'))
+        totales_tipo = {r['tipo']: r['total'] or Decimal('0') for r in m_tipo}
+
+        # Efectivo teórico = saldo inicial + (VENTA/INGRESO/AJUSTE en EFECTIVO) - (EGRESO/RETIRO en EFECTIVO)
+        efectivo_inicial = caja.saldo_inicial_efectivo or Decimal('0')
+        eff_add = movs.filter(
+            medio_pago='EFECTIVO',
+            tipo__in=['VENTA', 'INGRESO', 'AJUSTE'],
+        ).aggregate(s=Sum('monto'))['s'] or Decimal('0')
+        eff_sub = movs.filter(
+            medio_pago='EFECTIVO',
+            tipo__in=['EGRESO', 'RETIRO'],
+        ).aggregate(s=Sum('monto'))['s'] or Decimal('0')
+        teorico = efectivo_inicial + eff_add - eff_sub
 
     return render(request, 'pedidos/pos_panel.html', {
         'caja': caja,
@@ -98,7 +120,7 @@ def pos_abrir_caja(request):
 @login_required
 @transaction.atomic
 def pos_vender(request):
-    # El front usa fetch + AJAX
+    # El front usa fetch (AJAX)
     if request.method != 'POST' or request.headers.get('x-requested-with') != 'XMLHttpRequest':
         return JsonResponse({'ok': False, 'error': 'Solicitud inválida'}, status=400)
 
@@ -106,13 +128,12 @@ def pos_vender(request):
     if not caja:
         return JsonResponse({'ok': False, 'error': 'No hay caja abierta.'}, status=400)
 
-    # Ítems enviados como campos repetidos: item_producto / item_cantidad
+    # Ítems
     prod_ids = request.POST.getlist('item_producto')
     cantidades = request.POST.getlist('item_cantidad')
     if not prod_ids:
         return JsonResponse({'ok': False, 'error': 'Sin ítems.'}, status=400)
 
-    # Armar ítems y calcular total
     items = []
     total = Decimal('0')
     try:
@@ -130,10 +151,10 @@ def pos_vender(request):
         return JsonResponse({'ok': False, 'error': 'Ítems inválidos.'}, status=400)
 
     tipo_comp   = request.POST.get('tipo_comprobante', 'COMANDA')
-    medio_unico = request.POST.get('medio_pago')  # usado si NO hay pagos_json
-    pagos_json  = request.POST.get('pagos_json')  # string JSON opcional
+    medio_unico = request.POST.get('medio_pago')  # si NO hay pagos_json
+    pagos_json  = request.POST.get('pagos_json')
 
-    # Si vienen pagos parciales, validamos su suma
+    # Pagos parciales (si llegan)
     pagos = None
     if pagos_json:
         try:
@@ -144,8 +165,8 @@ def pos_vender(request):
         except Exception:
             return JsonResponse({'ok': False, 'error': 'Formato de pagos inválido.'}, status=400)
 
-    # Crear Venta + Items + Movimientos
     try:
+        # Venta
         venta = VentaPOS.objects.create(
             usuario=request.user,
             caja=caja,
@@ -166,7 +187,7 @@ def pos_vender(request):
                 subtotal=subtotal,
             )
 
-        # Movimientos de caja: usamos tipo='VENTA' (KPI "VENTAS (hoy)")
+        # Movimientos (única fuente para la caja)
         if pagos:
             for p in pagos:
                 monto = Decimal(str(p.get('monto', 0) or '0'))
@@ -193,7 +214,6 @@ def pos_vender(request):
             )
 
         return JsonResponse({'ok': True, 'venta_id': venta.id})
-
     except Exception:
         logger.exception('Error en pos_vender')
         return JsonResponse({'ok': False, 'error': 'Error registrando la venta.'}, status=500)
@@ -260,7 +280,6 @@ def pos_cerrar_caja(request):
     caja.saldo_cierre_efectivo = contado
     caja.save(update_fields=['estado','usuario_cierre','fecha_cierre','saldo_cierre_efectivo'])
 
-    # Al cerrar, llevamos directo al ticket para imprimir
     return HttpResponseRedirect(reverse('pos_ticket_cierre', args=[caja.id]))
 
 # =======================
@@ -271,10 +290,20 @@ def pos_cerrar_caja(request):
 def pos_ticket_cierre(request, caja_id):
     caja = get_object_or_404(Caja, pk=caja_id)
 
-    totales_medio = caja.total_ventas_por_medio() or {}
-    totales_tipo  = caja.total_por_tipo_mov() or {}
-    teorico = caja.saldo_efectivo_teorico()
-    diff = caja.diferencia_efectivo()
+    # Igual que en el panel: basarse en MovimientoCaja
+    movs = MovimientoCaja.objects.filter(caja=caja)
+    totales_medio = {
+        r['medio_pago']: r['total'] or Decimal('0')
+        for r in movs.filter(tipo='VENTA').values('medio_pago').annotate(total=Sum('monto'))
+    }
+    totales_tipo = {
+        r['tipo']: r['total'] or Decimal('0')
+        for r in movs.values('tipo').annotate(total=Sum('monto'))
+    }
+    efectivo_inicial = caja.saldo_inicial_efectivo or Decimal('0')
+    eff_add = movs.filter(medio_pago='EFECTIVO', tipo__in=['VENTA','INGRESO','AJUSTE']).aggregate(s=Sum('monto'))['s'] or Decimal('0')
+    eff_sub = movs.filter(medio_pago='EFECTIVO', tipo__in=['EGRESO','RETIRO']).aggregate(s=Sum('monto'))['s'] or Decimal('0')
+    teorico = efectivo_inicial + eff_add - eff_sub
 
     ventas_qs = VentaPOS.objects.filter(caja=caja, estado='COMPLETADA')
     ventas_count = ventas_qs.count()
@@ -285,7 +314,7 @@ def pos_ticket_cierre(request, caja_id):
         'totales_medio': totales_medio,
         'totales_tipo': totales_tipo,
         'saldo_teorico': teorico,
-        'diferencia': diff,
+        'diferencia': caja.diferencia_efectivo() if hasattr(caja, 'diferencia_efectivo') else None,
         'ventas_count': ventas_count,
         'ventas_total': ventas_total,
     })
@@ -305,12 +334,26 @@ def pos_caja_detalle(request, caja_id):
     caja = get_object_or_404(Caja, pk=caja_id)
     ventas = VentaPOS.objects.filter(caja=caja).order_by('fecha')
     movs   = MovimientoCaja.objects.filter(caja=caja).order_by('fecha')
+    # Totales coherentes con el resto:
+    totales_medio = {
+        r['medio_pago']: r['total'] or Decimal('0')
+        for r in movs.filter(tipo='VENTA').values('medio_pago').annotate(total=Sum('monto'))
+    }
+    totales_tipo = {
+        r['tipo']: r['total'] or Decimal('0')
+        for r in movs.values('tipo').annotate(total=Sum('monto'))
+    }
+    efectivo_inicial = caja.saldo_inicial_efectivo or Decimal('0')
+    eff_add = movs.filter(medio_pago='EFECTIVO', tipo__in=['VENTA','INGRESO','AJUSTE']).aggregate(s=Sum('monto'))['s'] or Decimal('0')
+    eff_sub = movs.filter(medio_pago='EFECTIVO', tipo__in=['EGRESO','RETIRO']).aggregate(s=Sum('monto'))['s'] or Decimal('0')
+    teorico = efectivo_inicial + eff_add - eff_sub
+
     return render(request, 'pedidos/pos_caja_detalle.html', {
         'caja': caja,
         'ventas': ventas,
         'movimientos': movs,
-        'totales_medio': caja.total_ventas_por_medio() or {},
-        'totales_tipo': caja.total_por_tipo_mov() or {},
-        'saldo_teorico': caja.saldo_efectivo_teorico(),
-        'diferencia': caja.diferencia_efectivo(),
+        'totales_medio': totales_medio,
+        'totales_tipo': totales_tipo,
+        'saldo_teorico': teorico,
+        'diferencia': caja.diferencia_efectivo() if hasattr(caja, 'diferencia_efectivo') else None,
     })
