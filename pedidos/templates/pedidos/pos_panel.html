@@ -2,246 +2,287 @@
 {% load static %}
 
 {% block content %}
-<style>
-  /* ====== Look tipo tablero ====== */
-  .pos-wrap{max-width:1200px;margin:auto}
-  .tile-grid{display:grid;grid-template-columns:repeat(7,minmax(120px,1fr));gap:10px}
-  .tile{background:#0f172a;color:#fff;border-radius:14px;padding:14px;box-shadow:0 6px 18px rgba(2,6,23,.2)}
-  .tile h6{font-size:.8rem;opacity:.8;margin:0 0 6px}
-  .tile .amt{font-weight:700;font-size:1rem;margin:0}
-  .tile .icon{font-size:22px;opacity:.85;margin-right:6px}
-  .tile.invert{background:#1e293b}
-  .tile.cash{background:#0ea5e9}    /* EFECTIVO */
-  .tile.card{background:#6366f1}    /* TARJETA */
-  .tile.qr{background:#22c55e}      /* QR */
-  .tile.transfer{background:#f59e0b}/* TRANSFERENCIA */
-  .tile.other{background:#64748b}   /* OTRO */
-  .tile.total{background:#334155}
-  .pos-header{background:#e2e8f0;border-radius:14px;padding:14px 16px;margin-bottom:12px}
+<div id="pos-root" class="container-fluid py-3">
 
-  /* paneles */
-  .card{border-radius:14px}
-  .card-header{background:#111827;color:#fff;border-top-left-radius:14px;border-top-right-radius:14px}
-  .sticky-bar{position:sticky;bottom:0;background:#0b1324;border-radius:16px;padding:10px;margin-top:12px;
-              box-shadow:0 -10px 30px rgba(2,6,23,.35)}
-  .sticky-bar .btn{min-width:140px}
-  .small-hint{font-size:.85rem;color:#6b7280}
-
-  /* items de venta */
-  .item-row{border:1px dashed #cbd5e1;border-radius:10px;padding:8px}
-  .split-row{display:grid;grid-template-columns:1fr 140px 40px;gap:8px;margin-top:6px}
-  .split-row input{text-align:right}
-</style>
-
-<div class="pos-wrap my-3">
+  <!-- Ocultar barra lateral SOLO en este panel -->
+  <style>
+    /* intenta varias clases/elementos comunes del sidebar para ocultarlo */
+    .sidebar, aside, .left-menu, .app-sidebar, nav.list-group, .col-sidebar { display:none !important; }
+    /* expande el área principal */
+    #pos-root, .container, .container-fluid, main, .col-main, .col { width:100% !important; max-width:100% !important; }
+    /* estética general */
+    .pos-cards .card { border:0; box-shadow:0 2px 12px rgba(0,0,0,.08); border-radius:14px; }
+    .kpi { display:flex; gap:.5rem; align-items:center; color:#1d2b3a; }
+    .kpi .amt { font-weight:700; font-size:1.05rem; }
+    .kpi .muted{ color:#6b7280; font-size:.8rem }
+    .pill { border-radius:999px; padding:.35rem .8rem; background:#0d1b2a; color:#fff; font-size:.85rem; }
+    .tab-btn { border:0; padding:.6rem 1rem; border-radius:12px; background:#f1f5f9; color:#0f172a; font-weight:600; }
+    .tab-btn.active { background:#0ea5e9; color:#fff; }
+    .catalog-grid { display:grid; grid-template-columns: repeat( auto-fill, minmax(170px,1fr) ); gap:.75rem; }
+    .catalog-item { border:0; border-radius:14px; box-shadow:0 2px 10px rgba(0,0,0,.06); cursor:pointer; padding:.85rem; background:#fff; display:flex; flex-direction:column; gap:.35rem; }
+    .catalog-item .name{ font-weight:600; line-height:1.15; }
+    .catalog-item .price{ color:#0ea5e9; font-weight:700; }
+    .ticket { border-radius:14px; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.08); }
+    .ticket thead th { font-size:.8rem; color:#64748b; font-weight:600; }
+    .ticket tfoot td { font-size:1.2rem; font-weight:800; }
+    .btn-icon { border:1px solid #e5e7eb; width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:8px; }
+    .stack-sm { display:flex; gap:.5rem; flex-wrap:wrap }
+    .stack { display:flex; gap:1rem; align-items:center; flex-wrap:wrap }
+    .section-title{ font-weight:700; }
+    .divider { height:1px; background:#e5e7eb; margin:.75rem 0; }
+    .badge-soft { background:#e2e8f0; color:#0f172a; border-radius:999px; padding:.25rem .6rem; font-size:.8rem; font-weight:600 }
+    .floating-cta { position:sticky; bottom:0; background:#fff; border-top:1px solid #e5e7eb; padding:.75rem; display:flex; justify-content:flex-end; gap:.5rem; z-index:5 }
+    .btn-wide { min-width:140px }
+  </style>
 
   {% if caja %}
-  <!-- ====== CABECERA CAJA ABIERTA ====== -->
-  <div class="pos-header d-flex justify-content-between align-items-center">
-    <div>
-      <strong>Caja ABIERTA #{{ caja.id }}</strong>
-      — Apertura: {{ caja.fecha_apertura|date:"d/m H:i" }} ({{ caja.usuario_apertura.username }})<br>
-      <span class="small-hint">Saldo inicial efectivo: ${{ caja.saldo_inicial_efectivo|default:"0.00" }}</span>
-    </div>
-    <div class="d-flex gap-2">
-      <button class="btn btn-outline-secondary btn-sm" id="btn-count-cash">Conteo EFECTIVO</button>
-      <button class="btn btn-danger btn-sm" id="btn-close-cash">Cerrar caja</button>
-    </div>
-  </div>
 
-  <!-- Tiles resumen (medios + total efectivo teórico) -->
-  <div class="tile-grid mb-3">
-    <div class="tile cash">
-      <h6><span class="icon">💵</span>EFECTIVO</h6>
-      <p class="amt">${{ totales_medio.EFECTIVO|default:"0.00" }}</p>
-    </div>
-    <div class="tile card">
-      <h6><span class="icon">💳</span>TARJETA</h6>
-      <p class="amt">${{ totales_medio.TARJETA|default:"0.00" }}</p>
-    </div>
-    <div class="tile qr">
-      <h6><span class="icon">📱</span>QR / MP</h6>
-      <p class="amt">${{ totales_medio.QR_MP|default:"0.00" }}</p>
-    </div>
-    <div class="tile transfer">
-      <h6><span class="icon">💱</span>TRANSFERENCIA</h6>
-      <p class="amt">${{ totales_medio.TRANSFERENCIA|default:"0.00" }}</p>
-    </div>
-    <div class="tile other">
-      <h6><span class="icon">🧾</span>OTRO</h6>
-      <p class="amt">${{ totales_medio.OTRO|default:"0.00" }}</p>
-    </div>
-    <div class="tile invert">
-      <h6><span class="icon">🧮</span>VENTAS (hoy)</h6>
-      <p class="amt">${{ totales_tipo.VENTA|default:"0.00" }}</p>
-    </div>
-    <div class="tile total">
-      <h6><span class="icon">🏦</span>EFECTIVO TEÓRICO</h6>
-      <p class="amt"><strong>${{ saldo_teorico|default:"0.00" }}</strong></p>
-    </div>
-  </div>
-
-  <div class="row g-3">
-    <!-- ===== Registrar venta ===== -->
-    <div class="col-lg-7">
+  <!-- HEADER CAJA -->
+  <div class="pos-cards row g-3 align-items-center mb-3">
+    <div class="col">
       <div class="card">
-        <div class="card-header">Registrar venta</div>
-        <div class="card-body">
-          <form id="venta-form" autocomplete="off">
-            {% csrf_token %}
-
-            <!-- Ítems -->
-            <div id="items-list"></div>
-            <div class="mt-2 d-flex gap-2">
-              <button type="button" id="btn-add-item" class="btn btn-outline-primary btn-sm">+ Ítem</button>
-              <button type="button" id="btn-clear-items" class="btn btn-outline-danger btn-sm">Vaciar</button>
+        <div class="card-body d-flex justify-content-between align-items-center">
+          <div class="kpi">
+            <div>
+              <div class="section-title">Caja <span class="badge-soft">ABIERTA #{{ caja.id }}</span></div>
+              <div class="muted">Apertura: {{ caja.fecha_apertura|date:"d/m H:i" }} — {{ caja.usuario_apertura.username }}</div>
+              <div class="muted">Saldo inicial efectivo: <b>${{ caja.saldo_inicial_efectivo|default:"0.00" }}</b></div>
             </div>
-
-            <hr>
-
-            <div class="row g-2">
-              <div class="col-md-6">
-                <label class="form-label">Comprobante</label>
-                <select id="tipo-comp" class="form-select" required>
-                  <option value="COMANDA">Comanda (sin fiscal)</option>
-                  <option value="BISTRO">Bistró (con factura)</option>
-                </select>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Medio de pago</label>
-                <select id="medio-pago" class="form-select">
-                  <option value="EFECTIVO">Efectivo</option>
-                  <option value="QR_MP">QR / MercadoPago</option>
-                  <option value="TARJETA">Tarjeta</option>
-                  <option value="TRANSFERENCIA">Transferencia</option>
-                  <option value="OTRO">Otro</option>
-                </select>
-                <div class="form-check mt-2">
-                  <input class="form-check-input" type="checkbox" id="split-toggle">
-                  <label class="form-check-label" for="split-toggle">Pago dividido / parcial</label>
-                </div>
-                <div id="split-zone" class="mt-2 d-none">
-                  <div id="split-list"></div>
-                  <button class="btn btn-outline-secondary btn-sm mt-2" type="button" id="split-add">+ Agregar medio</button>
-                  <div class="small-hint mt-2">
-                    Suma de pagos: <strong>$<span id="split-suma">0.00</span></strong>
-                    — Total venta: <strong>$<span id="split-total">0.00</span></strong>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="mt-3 fs-5">
-              <strong>Total:</strong> <span id="preview-total">$0.00</span>
-            </div>
-
-            <div class="mt-3">
-              <button id="btn-vender" class="btn btn-success" type="button" disabled>Cobrar</button>
-            </div>
-          </form>
+          </div>
+          <div class="stack">
+            <button class="btn btn-outline-secondary" id="btn-count-cash">Conteo EFECTIVO</button>
+            <form id="close-form" method="post" action="{% url 'pos_cerrar_caja' %}" class="d-none">
+              {% csrf_token %}<input type="hidden" name="saldo_cierre_efectivo" id="saldo-cierre-input">
+            </form>
+            <button class="btn btn-danger" id="btn-close-cash">Cerrar caja</button>
+          </div>
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- ===== Movimiento manual ===== -->
-    <div class="col-lg-5">
-      <div class="card">
-        <div class="card-header">Movimiento de caja</div>
-        <div class="card-body">
-          <form id="mov-form">
-            {% csrf_token %}
-            <div class="row g-2">
-              <div class="col-4">
-                <label class="form-label">Tipo</label>
-                <select id="mov-tipo" class="form-select">
-                  <option value="INGRESO">INGRESO</option>
-                  <option value="EGRESO">EGRESO</option>
-                  <option value="AJUSTE">AJUSTE</option>
-                  <option value="RETIRO">RETIRO</option>
-                </select>
-              </div>
-              <div class="col-4">
-                <label class="form-label">Medio</label>
-                <select id="mov-medio" class="form-select">
-                  <option value="EFECTIVO">Efectivo</option>
-                  <option value="QR_MP">QR / MercadoPago</option>
-                  <option value="TARJETA">Tarjeta</option>
-                  <option value="TRANSFERENCIA">Transferencia</option>
-                  <option value="OTRO">Otro</option>
-                </select>
-              </div>
-              <div class="col-4">
-                <label class="form-label">Monto</label>
-                <input id="mov-monto" type="number" step="0.01" min="0" class="form-control" value="0.00">
-              </div>
+  <!-- TABS -->
+  <div class="d-flex gap-2 mb-3">
+    <button class="tab-btn active" data-tab="venta">Venta</button>
+    <button class="tab-btn" data-tab="caja">Caja</button>
+  </div>
+
+  <!-- ======= TAB: VENTA ======= -->
+  <section id="tab-venta" class="tab-pane">
+    <div class="row g-3">
+      <!-- Ticket / Ítems -->
+      <div class="col-lg-5">
+        <div class="ticket p-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="section-title">Ítems</div>
+            <div class="stack-sm">
+              <button id="btn-clear" type="button" class="btn btn-outline-danger btn-sm">Vaciar</button>
             </div>
-            <input id="mov-desc" class="form-control mt-2" placeholder="Detalle (opcional)">
-            <button id="btn-mov" class="btn btn-primary mt-3" type="button">Registrar movimiento</button>
-          </form>
-        </div>
-      </div>
-
-      <!-- últimas ventas compactas -->
-      <div class="card mt-3">
-        <div class="card-header">Últimas ventas</div>
-        <div class="card-body p-0">
+          </div>
           <div class="table-responsive">
-            <table class="table table-sm mb-0">
-              <thead><tr><th>#</th><th>Fecha</th><th>Comp.</th><th>Medio</th><th class="text-end">Total</th></tr></thead>
-              <tbody>
-              {% for v in ventas %}
+            <table class="table align-middle mb-2">
+              <thead>
+                <tr><th>Producto</th><th style="width:120px">Cant.</th><th class="text-end" style="width:120px">Precio</th><th class="text-end" style="width:120px">Subtot.</th><th></th></tr>
+              </thead>
+              <tbody id="ticket-body"></tbody>
+              <tfoot>
                 <tr>
-                  <td>{{ v.id }}</td>
-                  <td>{{ v.fecha|date:"d/m H:i" }}</td>
-                  <td>{{ v.tipo_comprobante }}</td>
-                  <td>{{ v.medio_pago }}</td>
-                  <td class="text-end">${{ v.total }}</td>
+                  <td colspan="3" class="text-end">TOTAL</td>
+                  <td class="text-end" id="ticket-total">$0.00</td>
+                  <td></td>
                 </tr>
-              {% empty %}
-                <tr><td colspan="5" class="text-center text-muted">Sin ventas.</td></tr>
-              {% endfor %}
-              </tbody>
+              </tfoot>
             </table>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="row g-2">
+            <div class="col-12 col-md-6">
+              <label class="form-label">Comprobante</label>
+              <select id="tipo-comp" class="form-select">
+                <option value="BISTRO">Bistró (con factura)</option>
+                <option value="COMANDA">Comanda (sin fiscal)</option>
+              </select>
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label">Medio de pago</label>
+              <select id="medio-pago" class="form-select">
+                <option value="EFECTIVO">Efectivo</option>
+                <option value="QR_MP">QR / MercadoPago</option>
+                <option value="TARJETA">Tarjeta</option>
+                <option value="TRANSFERENCIA">Transferencia</option>
+                <option value="OTRO">Otro</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="pago-dividido">
+            <label class="form-check-label" for="pago-dividido">Pago dividido / parcial</label>
+          </div>
+
+          <!-- líneas de pago parcial -->
+          <div id="pagos-parciales" class="mt-2" style="display:none">
+            <div class="stack-sm mb-1">
+              <button type="button" id="btn-add-pago" class="btn btn-outline-primary btn-sm">+ Agregar medio</button>
+              <span class="badge-soft">Tiene que sumar al total</span>
+            </div>
+            <div id="pagos-list"></div>
+          </div>
+
+          <div class="floating-cta">
+            <button id="btn-cobrar" type="button" class="btn btn-success btn-wide">Cobrar</button>
           </div>
         </div>
       </div>
 
+      <!-- Catálogo por categorías -->
+      <div class="col-lg-7">
+        <div class="card">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <div class="section-title">Productos</div>
+              <div class="stack-sm" id="cat-pills">
+                <!-- se generan con regroup -->
+                {% regroup productos by categoria as grupos %}
+                {% for g in grupos %}
+                  <button type="button" class="pill cat-pill {% if forloop.first %}active{% endif %}" data-cat="cat-{{ forloop.counter }}">{{ g.grouper }}</button>
+                {% endfor %}
+              </div>
+            </div>
+
+            {% regroup productos by categoria as grupos2 %}
+            {% for g in grupos2 %}
+              <div class="catalog-grid cat-panel {% if not forloop.first %}d-none{% endif %}" id="cat-{{ forloop.counter }}">
+                {% for pr in g.list %}
+                  <div class="catalog-item" data-id="{{ pr.id }}" data-precio="{{ pr.precio|floatformat:2 }}" data-nombre="{{ pr.nombre|escape }}">
+                    <div class="name">{{ pr.nombre }}</div>
+                    <div class="price">${{ pr.precio }}</div>
+                    <div class="stack-sm">
+                      <button type="button" class="btn btn-outline-secondary btn-sm add-1">+1</button>
+                      <button type="button" class="btn btn-outline-secondary btn-sm add-2">+2</button>
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            {% empty %}
+              <div class="text-muted">No hay productos.</div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <!-- ===== Barra fija de acciones rápidas ===== -->
-  <div class="sticky-bar d-flex flex-wrap gap-2 justify-content-center">
-    <button class="btn btn-outline-danger" id="quick-retirar">Retirar</button>
-    <button class="btn btn-outline-success" id="quick-depositar">Depositar</button>
-    <button class="btn btn-warning text-dark" id="quick-cerrar">Cerrar caja</button>
-    <button class="btn btn-outline-light" id="quick-impresion">Impresión parcial</button>
-  </div>
+  <!-- ======= TAB: CAJA ======= -->
+  <section id="tab-caja" class="tab-pane d-none">
+    <div class="row g-3">
+      <!-- KPIs -->
+      <div class="col-12">
+        <div class="row row-cols-2 row-cols-md-6 g-2">
+          <div class="col">
+            <div class="card"><div class="card-body">
+              <div class="muted">EFECTIVO</div><div class="amt">${{ totales_medio.EFECTIVO|default:"0.00" }}</div>
+            </div></div>
+          </div>
+          <div class="col"><div class="card"><div class="card-body">
+            <div class="muted">TARJETA</div><div class="amt">${{ totales_medio.TARJETA|default:"0.00" }}</div>
+          </div></div></div>
+          <div class="col"><div class="card"><div class="card-body">
+            <div class="muted">QR / MP</div><div class="amt">${{ totales_medio.QR_MP|default:"0.00" }}</div>
+          </div></div></div>
+          <div class="col"><div class="card"><div class="card-body">
+            <div class="muted">TRANSFERENCIA</div><div class="amt">${{ totales_medio.TRANSFERENCIA|default:"0.00" }}</div>
+          </div></div></div>
+          <div class="col"><div class="card"><div class="card-body">
+            <div class="muted">VENTAS (hoy)</div><div class="amt">${{ totales_tipo.VENTA|default:"0.00" }}</div>
+          </div></div></div>
+          <div class="col"><div class="card"><div class="card-body">
+            <div class="muted">EFECTIVO TEÓRICO</div><div class="amt">${{ saldo_teorico|default:"0.00" }}</div>
+          </div></div></div>
+        </div>
+      </div>
 
-  <!-- form oculto para cierre -->
-  <form id="close-form" method="post" action="{% url 'pos_cerrar_caja' %}" class="d-none">
-    {% csrf_token %}
-    <input type="hidden" name="saldo_cierre_efectivo" id="saldo-cierre-input">
-  </form>
+      <!-- Movimiento caja -->
+      <div class="col-lg-6">
+        <div class="card"><div class="card-header">Movimiento de caja</div><div class="card-body">
+          <div class="row g-2">
+            <div class="col-md-4">
+              <label class="form-label">Tipo</label>
+              <select id="mov-tipo" class="form-select">
+                <option>INGRESO</option><option>EGRESO</option><option>AJUSTE</option><option>RETIRO</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Medio</label>
+              <select id="mov-medio" class="form-select">
+                <option>EFECTIVO</option><option>QR_MP</option><option>TARJETA</option><option>TRANSFERENCIA</option><option>OTRO</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Monto</label>
+              <input id="mov-monto" type="number" step="0.01" min="0" value="0.00" class="form-control">
+            </div>
+          </div>
+          <input id="mov-desc" class="form-control mt-2" placeholder="Detalle (opcional)">
+          <button id="btn-mov" type="button" class="btn btn-primary mt-2">Registrar movimiento</button>
+        </div></div>
+      </div>
+
+      <!-- Últimas ventas -->
+      <div class="col-lg-6">
+        <div class="card"><div class="card-header">Últimas ventas</div>
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table mb-0">
+                <thead><tr><th>#</th><th>Fecha</th><th>Caja</th><th>Usuario</th><th>Comp.</th><th>Medio</th><th>Total</th><th>Estado</th></tr></thead>
+                <tbody>
+                  {% for v in ventas %}
+                    <tr>
+                      <td>{{ v.id }}</td><td>{{ v.fecha|date:"d/m H:i" }}</td><td>#{{ v.caja_id }}</td>
+                      <td>{{ v.usuario.username }}</td><td>{{ v.tipo_comprobante }}</td><td>{{ v.medio_pago }}</td>
+                      <td>${{ v.total }}</td><td>{{ v.estado }}</td>
+                    </tr>
+                  {% empty %}
+                    <tr><td colspan="8" class="text-center text-muted">Sin ventas.</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Acciones rápidas -->
+      <div class="col-12">
+        <div class="d-flex gap-2 justify-content-end">
+          <button class="btn btn-outline-danger" id="btn-retirar">Retirar</button>
+          <button class="btn btn-outline-success" id="btn-depositar">Depositar</button>
+          <button class="btn btn-warning" id="btn-close-cash-2">Cerrar caja</button>
+          <button class="btn btn-outline-secondary" id="btn-imp-parcial">Impresión parcial</button>
+        </div>
+      </div>
+    </div>
+  </section>
 
   {% else %}
-  <!-- ===== PANTALLA PARA ABRIR CAJA ===== -->
+  <!-- CAJA CERRADA: abrir -->
   <div class="row justify-content-center">
     <div class="col-md-6">
       <div class="card shadow-sm">
         <div class="card-header">Abrir caja</div>
         <div class="card-body">
-          <form id="abrir-form" method="post" action="{% url 'pos_abrir_caja' %}" autocomplete="off">
+          <form id="abrir-form" action="{% url 'pos_abrir_caja' %}" method="post" autocomplete="off">
             {% csrf_token %}
             <label class="form-label">Saldo inicial en EFECTIVO</label>
             <div class="input-group">
               <span class="input-group-text">$</span>
-              <input type="number" step="0.01" min="0" name="saldo_inicial_efectivo" id="saldo-inicial" class="form-control" value="0.00">
+              <input class="form-control" type="number" step="0.01" min="0" name="saldo_inicial_efectivo" value="0.00">
             </div>
-            <button class="btn btn-success mt-3" type="submit" id="btn-abrir">Abrir caja</button>
+            <button id="btn-abrir" class="btn btn-success mt-3" type="submit">Abrir caja</button>
           </form>
-          <p class="text-muted small mt-2 mb-0">
-            Esto crea una nueva caja en estado <strong>ABIERTA</strong> y te devuelve a este panel.
-          </p>
+          <p class="text-muted small mt-2 mb-0">Crea una caja en estado <b>ABIERTA</b> y vuelve a este panel.</p>
         </div>
       </div>
     </div>
@@ -250,235 +291,237 @@
 </div>
 {% endblock %}
 
-{% block extra_js %}
 {% if caja %}
+{% block extra_js %}
 <script>
 (function(){
   // ===== CSRF =====
-  function getCookie(n){const v=`; ${document.cookie}`.split(`; ${n}=`);if(v.length===2)return v.pop().split(';').shift();}
-  const csrftoken=getCookie('csrftoken');
-
-  // ===== Helpers DOM =====
-  const itemsList  = document.getElementById('items-list');
-  const btnAdd     = document.getElementById('btn-add-item');
-  const btnClear   = document.getElementById('btn-clear-items');
-  const previewTot = document.getElementById('preview-total');
-  const btnVender  = document.getElementById('btn-vender');
-  const medioSel   = document.getElementById('medio-pago');
-  const compSel    = document.getElementById('tipo-comp');
-
-  // ===== Pago dividido =====
-  const splitToggle = document.getElementById('split-toggle');
-  const splitZone   = document.getElementById('split-zone');
-  const splitList   = document.getElementById('split-list');
-  const splitAddBtn = document.getElementById('split-add');
-  const splitSumaEl = document.getElementById('split-suma');
-  const splitTotalEl= document.getElementById('split-total');
-
-  function fmt(n){return Number(n||0).toFixed(2);}
-  function mkItemRowHTML(){
-    return ''+
-      '<div class="item-row row g-2 align-items-end mb-2">'+
-        '<div class="col-8">'+
-          '<label class="form-label">Producto</label>'+
-          '<select class="form-select item-producto" required>'+
-            '<option value="" hidden>Elegir…</option>'+
-            '{% for pr in productos %}'+
-              '<option value="{{ pr.id }}" data-precio="{{ pr.precio }}">{{ pr.nombre }} - ${{ pr.precio }}</option>'+
-            '{% endfor %}'+
-          '</select>'+
-        '</div>'+
-        '<div class="col-3">'+
-          '<label class="form-label">Cant.</label>'+
-          '<input type="number" class="form-control item-cantidad" value="1" min="1">'+
-        '</div>'+
-        '<div class="col-1 text-end">'+
-          '<button type="button" class="btn btn-outline-danger btn-sm btn-remove" title="Quitar">×</button>'+
-        '</div>'+
-      '</div>';
+  function getCookie(name){
+    const m = document.cookie.match(new RegExp('(^| )'+name+'=([^;]+)'));
+    return m ? m[2] : null;
   }
-  function bindItemRow(row){
-    row.querySelector('.item-producto').addEventListener('change', recalcTotal);
-    row.querySelector('.item-cantidad').addEventListener('input', recalcTotal);
-    row.querySelector('.btn-remove').addEventListener('click',()=>{ row.remove(); recalcTotal(); updateSplitTarget(); });
-  }
-  function addItem(){ const w=document.createElement('div'); w.innerHTML=mkItemRowHTML(); const r=w.firstElementChild; itemsList.appendChild(r); bindItemRow(r); }
+  const CSRF = getCookie('csrftoken');
 
-  function currentTotal(){
-    let t=0;
-    itemsList.querySelectorAll('.item-row').forEach(r=>{
-      const sel=r.querySelector('.item-producto');
-      const qty=parseInt(r.querySelector('.item-cantidad').value||'1',10);
-      const price=sel && sel.selectedOptions[0] ? parseFloat(sel.selectedOptions[0].dataset.precio||'0') : 0;
-      if(sel && sel.value){ t+= price*qty; }
+  // ===== TABS =====
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  tabBtns.forEach(b=>{
+    b.addEventListener('click', ()=>{
+      tabBtns.forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      document.querySelectorAll('.tab-pane').forEach(p=>p.classList.add('d-none'));
+      document.getElementById('tab-'+b.dataset.tab).classList.remove('d-none');
     });
-    return t;
-  }
-  function recalcTotal(){
-    const t=currentTotal();
-    previewTot.textContent='$'+fmt(t);
-    splitTotalEl && (splitTotalEl.textContent=fmt(t));
-    btnVender.disabled = (t<=0 || !itemsList.querySelector('.item-row'));
-    return t;
-  }
-
-  // ===== Split helpers =====
-  function mkSplitRow(medio='EFECTIVO', monto=''){
-    const row=document.createElement('div');
-    row.className='split-row';
-    row.innerHTML=
-      '<select class="form-select split-medio">'+
-        '<option value="EFECTIVO">Efectivo</option>'+
-        '<option value="QR_MP">QR / MP</option>'+
-        '<option value="TARJETA">Tarjeta</option>'+
-        '<option value="TRANSFERENCIA">Transferencia</option>'+
-        '<option value="OTRO">Otro</option>'+
-      '</select>'+
-      '<input class="form-control split-monto" type="number" step="0.01" min="0" placeholder="0.00">'+
-      '<button type="button" class="btn btn-outline-danger btn-sm split-del">×</button>';
-    row.querySelector('.split-medio').value=medio;
-    row.querySelector('.split-monto').value=monto;
-    row.querySelector('.split-monto').addEventListener('input', updateSplitSum);
-    row.querySelector('.split-del').addEventListener('click',()=>{ row.remove(); updateSplitSum(); });
-    return row;
-  }
-  function updateSplitSum(){
-    let s=0;
-    splitList.querySelectorAll('.split-monto').forEach(i=>{ s+= parseFloat(i.value||'0'); });
-    splitSumaEl.textContent=fmt(s);
-  }
-  function updateSplitTarget(){
-    // mantiene la suma visible cuando cambia el total
-    splitTotalEl.textContent=fmt(currentTotal());
-  }
-
-  splitToggle.addEventListener('change', ()=>{
-    if(splitToggle.checked){
-      splitZone.classList.remove('d-none');
-      if(!splitList.childElementCount){
-        // dos filas por defecto
-        splitList.appendChild(mkSplitRow('EFECTIVO',''));
-        splitList.appendChild(mkSplitRow('QR_MP',''));
-      }
-      updateSplitTarget(); updateSplitSum();
-    }else{
-      splitZone.classList.add('d-none');
-    }
   });
-  splitAddBtn.addEventListener('click', ()=>{ splitList.appendChild(mkSplitRow()); updateSplitSum(); });
 
-  // ===== Eventos items =====
-  btnAdd.addEventListener('click', ()=>{ addItem(); recalcTotal(); });
-  btnClear.addEventListener('click', ()=>{ itemsList.innerHTML=''; recalcTotal(); updateSplitTarget(); });
+  // ===== CATALOGO =====
+  const ticketBody = document.getElementById('ticket-body');
+  const totalEl    = document.getElementById('ticket-total');
+  const map = new Map(); // key: prodId -> {id,nombre,precio,cant}
+  function fmt(n){ return '$'+(Number(n)||0).toFixed(2); }
 
-  // ===== Enviar venta =====
-  btnVender.addEventListener('click', async ()=>{
-    const rows = itemsList.querySelectorAll('.item-row');
-    if(!rows.length){ alert('Agregá al menos un ítem.'); return; }
-    const fd=new FormData();
-    rows.forEach(r=>{
-      const sel=r.querySelector('.item-producto');
-      const q=r.querySelector('.item-cantidad');
-      if(sel && sel.value){ fd.append('item_producto', sel.value); fd.append('item_cantidad', q.value||'1'); }
+  function renderTicket(){
+    ticketBody.innerHTML = '';
+    let total = 0;
+    for(const [id,item] of map){
+      const sub = item.precio*item.cant;
+      total += sub;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${item.nombre}</td>
+        <td>
+          <div class="stack-sm">
+            <button class="btn-icon minus">-</button>
+            <input class="form-control form-control-sm qty" style="width:56px" type="number" min="1" value="${item.cant}">
+            <button class="btn-icon plus">+</button>
+          </div>
+        </td>
+        <td class="text-end">${fmt(item.precio)}</td>
+        <td class="text-end">${fmt(sub)}</td>
+        <td class="text-end"><button class="btn btn-outline-danger btn-sm del">x</button></td>
+      `;
+      // bind
+      tr.querySelector('.minus').onclick = ()=>{ item.cant=Math.max(1,item.cant-1); renderTicket(); };
+      tr.querySelector('.plus').onclick  = ()=>{ item.cant++; renderTicket(); };
+      tr.querySelector('.qty').oninput   = (e)=>{ item.cant=Math.max(1,parseInt(e.target.value||'1',10)); renderTicket(); };
+      tr.querySelector('.del').onclick   = ()=>{ map.delete(id); renderTicket(); };
+      ticketBody.appendChild(tr);
+    }
+    totalEl.textContent = fmt(total);
+    document.getElementById('btn-cobrar').disabled = total<=0;
+  }
+
+  // cat pills
+  document.querySelectorAll('.cat-pill').forEach(p=>{
+    p.addEventListener('click', ()=>{
+      document.querySelectorAll('.cat-pill').forEach(x=>x.classList.remove('active'));
+      p.classList.add('active');
+      document.querySelectorAll('.cat-panel').forEach(x=>x.classList.add('d-none'));
+      document.getElementById(p.dataset.cat).classList.remove('d-none');
     });
-    fd.append('tipo_comprobante', compSel.value);
+  });
 
-    const total = currentTotal();
-    if(splitToggle.checked){
-      // compilar pagos
+  // add product handlers
+  document.querySelectorAll('.catalog-item').forEach(card=>{
+    function add(n){
+      const id = card.dataset.id;
+      const precio = parseFloat(card.dataset.precio);
+      const nombre = card.dataset.nombre;
+      if(!map.has(id)) map.set(id,{id,nombre,precio,cant:0});
+      map.get(id).cant += n;
+      renderTicket();
+    }
+    card.addEventListener('click', (e)=>{
+      // evitar doble add al click de botones internos
+      if(e.target.classList.contains('add-1')) add(1);
+      else if(e.target.classList.contains('add-2')) add(2);
+      else add(1);
+    });
+    card.querySelector('.add-1').onclick = (ev)=>{ ev.stopPropagation(); add(1); };
+    card.querySelector('.add-2').onclick = (ev)=>{ ev.stopPropagation(); add(2); };
+  });
+
+  document.getElementById('btn-clear').onclick = ()=>{ map.clear(); renderTicket(); };
+
+  // ===== PAGO DIVIDIDO =====
+  const chDiv   = document.getElementById('pago-dividido');
+  const divWrap = document.getElementById('pagos-parciales');
+  const pagosList = document.getElementById('pagos-list');
+  chDiv.onchange = ()=>{ divWrap.style.display = chDiv.checked?'block':'none'; if(!chDiv.checked) pagosList.innerHTML=''; };
+
+  function addPagoRow(){
+    const row = document.createElement('div');
+    row.className='row g-2 align-items-end mb-1';
+    row.innerHTML = `
+      <div class="col-6">
+        <select class="form-select medio">
+          <option value="EFECTIVO">Efectivo</option>
+          <option value="QR_MP">QR / MercadoPago</option>
+          <option value="TARJETA">Tarjeta</option>
+          <option value="TRANSFERENCIA">Transferencia</option>
+          <option value="OTRO">Otro</option>
+        </select>
+      </div>
+      <div class="col-4">
+        <input class="form-control monto" type="number" step="0.01" min="0" placeholder="Monto">
+      </div>
+      <div class="col-2 text-end">
+        <button class="btn btn-outline-danger btn-sm del">x</button>
+      </div>
+    `;
+    row.querySelector('.del').onclick = ()=>{ row.remove(); };
+    pagosList.appendChild(row);
+  }
+  document.getElementById('btn-add-pago').onclick = addPagoRow;
+
+  // ===== COBRAR =====
+  document.getElementById('btn-cobrar').onclick = async ()=>{
+    if(map.size===0){ alert('Agregá al menos un producto.'); return; }
+
+    const fd = new FormData();
+    for(const [,item] of map){
+      fd.append('item_producto', item.id);
+      fd.append('item_cantidad', String(item.cant));
+    }
+    fd.append('tipo_comprobante', document.getElementById('tipo-comp').value);
+
+    if(chDiv.checked){
       const pagos=[];
-      splitList.querySelectorAll('.split-row').forEach(r=>{
-        const medio = r.querySelector('.split-medio').value;
-        const monto = parseFloat(r.querySelector('.split-monto').value||'0');
+      pagosList.querySelectorAll('.row').forEach(r=>{
+        const medio = r.querySelector('.medio').value;
+        const monto = parseFloat(r.querySelector('.monto').value||'0');
         if(monto>0) pagos.push({medio, monto});
       });
-      const suma = pagos.reduce((a,p)=>a+p.monto,0);
-      if(pagos.length===0){ alert('Cargá al menos un pago.'); return; }
-      if(Math.abs(suma-total)>0.01){ alert('La suma de pagos ($'+fmt(suma)+') debe coincidir con el total ($'+fmt(total)+').'); return; }
+      if(!pagos.length){ alert('Ingresá al menos un pago.'); return; }
       fd.append('pagos_json', JSON.stringify(pagos));
     }else{
-      fd.append('medio_pago', medioSel.value); // pago único por el total
+      fd.append('medio_pago', document.getElementById('medio-pago').value);
     }
 
-    btnVender.disabled=true; btnVender.textContent='Cobrando…';
+    const btn = document.getElementById('btn-cobrar');
+    btn.disabled = true; btn.textContent = 'Cobrando…';
+
     try{
-      const res = await fetch("{% url 'pos_vender' %}", {method:'POST', headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'}, body:fd});
-      const text = await res.text(); // <- para mostrar errores reales si no es JSON
-      let data=null; try{ data = JSON.parse(text);}catch(_){}
+      const res = await fetch("{% url 'pos_vender' %}", {
+        method:'POST',
+        headers:{'X-CSRFToken': CSRF, 'X-Requested-With':'XMLHttpRequest'},
+        body: fd
+      });
+      const data = await res.json().catch(()=>null);
       if(res.ok && data && data.ok){ location.reload(); }
       else{
-        alert((data && data.error) || text || 'No se pudo registrar la venta');
+        // si por algún motivo vino html, mostrar primer trozo
+        const msg = (data && (data.error||data.detail)) || 'No se pudo registrar la venta';
+        alert(msg);
         location.reload();
       }
     }catch(e){
-      alert('Error de red'); location.reload();
+      location.reload();
     }
-  });
+  };
 
-  // ===== Movimiento manual =====
-  document.getElementById('btn-mov').addEventListener('click', async ()=>{
-    const params=new URLSearchParams();
+  // ===== MOVIMIENTO =====
+  document.getElementById('btn-mov').onclick = async ()=>{
+    const params = new URLSearchParams();
     params.append('tipo', document.getElementById('mov-tipo').value);
     params.append('medio_pago', document.getElementById('mov-medio').value);
     params.append('monto', document.getElementById('mov-monto').value||'0');
     params.append('descripcion', document.getElementById('mov-desc').value||'');
-    try{
-      const res=await fetch("{% url 'pos_movimiento' %}", {
-        method:'POST',
-        headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest','Content-Type':'application/x-www-form-urlencoded'},
-        body:params.toString()
-      });
-      const d=await res.json().catch(()=>null);
-      if(res.ok && d && d.ok){ location.reload(); }
-      else{ alert((d && d.error) || 'No se pudo registrar el movimiento'); }
-    }catch(e){ alert('Error de red'); }
-  });
 
-  // ===== Cierre / conteo =====
+    try{
+      const res = await fetch("{% url 'pos_movimiento' %}", {
+        method:'POST',
+        headers:{
+          'X-CSRFToken': CSRF,
+          'X-Requested-With':'XMLHttpRequest',
+          'Content-Type':'application/x-www-form-urlencoded'
+        },
+        body: params.toString()
+      });
+      const data = await res.json().catch(()=>null);
+      if(res.ok && data && data.ok){ location.reload(); }
+      else{ alert((data && data.error) || 'No se pudo registrar el movimiento'); }
+    }catch(e){ location.reload(); }
+  };
+
+  // ===== CERRAR / CONTEO =====
   function postCloseWithAmount(){
-    const monto = prompt('Ingresá el monto contado en EFECTIVO (puede ser 0):','0');
+    const monto = prompt('Ingresá el monto contado en EFECTIVO (puede ser 0):', '0');
     if(monto===null) return;
     document.getElementById('saldo-cierre-input').value = String(monto||'0');
     document.getElementById('close-form').submit();
   }
-  document.getElementById('btn-count-cash').addEventListener('click', postCloseWithAmount);
-  document.getElementById('btn-close-cash').addEventListener('click', ()=>{ if(confirm('¿Cerrar caja ahora?')) postCloseWithAmount(); });
+  document.getElementById('btn-count-cash').onclick = postCloseWithAmount;
+  document.getElementById('btn-close-cash').onclick = ()=>{ if(confirm('¿Cerrar caja ahora?')) postCloseWithAmount(); };
+  const btn2 = document.getElementById('btn-close-cash-2'); if(btn2) btn2.onclick = ()=>{ if(confirm('¿Cerrar caja ahora?')) postCloseWithAmount(); };
 
-  // barra rápida
-  document.getElementById('quick-retirar').addEventListener('click', ()=>{
-    document.getElementById('mov-tipo').value='RETIRO';
-    document.getElementById('mov-medio').value='EFECTIVO';
-    document.getElementById('mov-monto').focus();
-  });
-  document.getElementById('quick-depositar').addEventListener('click', ()=>{
-    document.getElementById('mov-tipo').value='INGRESO';
-    document.getElementById('mov-medio').value='EFECTIVO';
-    document.getElementById('mov-monto').focus();
-  });
-  document.getElementById('quick-cerrar').addEventListener('click', ()=>{ if(confirm('¿Cerrar caja ahora?')) postCloseWithAmount(); });
-  document.getElementById('quick-impresion').addEventListener('click', ()=>{ window.print(); });
+  // accesos rápidos retirar/depositar (rellenan y disparan)
+  const btnRet = document.getElementById('btn-retirar'); if(btnRet) btnRet.onclick=()=>{ document.getElementById('mov-tipo').value='RETIRO'; document.getElementById('mov-medio').value='EFECTIVO'; document.getElementById('mov-monto').focus(); };
+  const btnDep = document.getElementById('btn-depositar'); if(btnDep) btnDep.onclick=()=>{ document.getElementById('mov-tipo').value='INGRESO'; document.getElementById('mov-medio').value='EFECTIVO'; document.getElementById('mov-monto').focus(); };
 
-  // fila inicial
-  addItem(); recalcTotal();
+  // inicia
+  renderTicket();
 })();
 </script>
+{% endblock %}
 {% else %}
+{% block extra_js %}
 <script>
 (function(){
-  function getCookie(n){const v=`; ${document.cookie}`.split(`; ${n}=`);if(v.length===2)return v.pop().split(';').shift();}
-  const csrftoken=getCookie('csrftoken');
-  const form=document.getElementById('abrir-form');
-  const btn=document.getElementById('btn-abrir');
-  form?.addEventListener('submit', async (ev)=>{
-    ev.preventDefault(); btn.disabled=true; btn.textContent='Abriendo…';
-    const body=new URLSearchParams(new FormData(form)).toString();
-    try{
-      const res=await fetch(form.action,{method:'POST',headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest','Content-Type':'application/x-www-form-urlencoded'},body});
-      const d=await res.json().catch(()=>null);
-      if(res.ok && d && d.ok){ location.reload(); } else { alert((d && d.error)||'No se pudo abrir la caja'); location.reload(); }
-    }catch(e){ location.reload(); }
-  });
+  function getCookie(n){const m=document.cookie.match(new RegExp('(^| )'+n+'=([^;]+)'));return m?m[2]:null;}
+  const CSRF=getCookie('csrftoken');
+  const form=document.getElementById('abrir-form'), btn=document.getElementById('btn-abrir');
+  if(form){
+    form.addEventListener('submit', async (ev)=>{
+      ev.preventDefault(); btn.disabled=true; btn.textContent='Abriendo…';
+      const body = new URLSearchParams(new FormData(form)).toString();
+      try{
+        const res = await fetch(form.action,{method:'POST',headers:{'X-CSRFToken':CSRF,'X-Requested-With':'XMLHttpRequest','Content-Type':'application/x-www-form-urlencoded'},body});
+        const data = await res.json().catch(()=>null);
+        if(res.ok && data && data.ok){ location.reload(); } else { alert((data && data.error) || 'No se pudo abrir la caja'); location.reload(); }
+      }catch(e){ location.reload(); }
+    });
+  }
 })();
 </script>
-{% endif %}
 {% endblock %}
+{% endif %}
