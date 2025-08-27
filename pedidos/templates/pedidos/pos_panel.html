@@ -291,8 +291,8 @@
 </div>
 {% endblock %}
 
-{% if caja %}
 {% block extra_js %}
+{% if caja %}
 <script>
 (function(){
   // ===== CSRF =====
@@ -449,7 +449,6 @@
       const data = await res.json().catch(()=>null);
       if(res.ok && data && data.ok){ location.reload(); }
       else{
-        // si por algún motivo vino html, mostrar primer trozo
         const msg = (data && (data.error||data.detail)) || 'No se pudo registrar la venta';
         alert(msg);
         location.reload();
@@ -502,9 +501,7 @@
   renderTicket();
 })();
 </script>
-{% endblock %}
 {% else %}
-{% block extra_js %}
 <script>
 (function(){
   function getCookie(n){const m=document.cookie.match(new RegExp('(^| )'+n+'=([^;]+)'));return m?m[2]:null;}
@@ -523,5 +520,5 @@
   }
 })();
 </script>
-{% endblock %}
 {% endif %}
+{% endblock %}
