@@ -8,8 +8,12 @@ from django.utils import timezone
 from django.http import HttpResponseForbidden, JsonResponse, HttpResponseRedirect
 from django.db.models import Sum
 from django.urls import reverse
+import json
+import logging
 
 from .models import Caja, ProductoPOS, VentaPOS, VentaPOSItem, MovimientoCaja
+
+logger = logging.getLogger(__name__)
 
 # ---- Helpers de permisos
 def es_staff(user):
@@ -24,6 +28,7 @@ def es_manager(user):
     return user.groups.filter(name='Gerencia').exists()
 
 def _caja_abierta():
+    # Toma la última caja en estado ABIERTA
     return Caja.objects.filter(estado='ABIERTA').order_by('-id').first()
 
 # =======================
@@ -40,7 +45,8 @@ def pos_panel(request):
     teorico = None
 
     if caja:
-        ventas = VentaPOS.objects.filter(caja=caja).order_by('-id')[:15]  # <-- SOLO de la caja abierta
+        # SOLO ventas de la caja abierta
+        ventas = VentaPOS.objects.filter(caja=caja).order_by('-id')[:15]
         totales_medio = caja.total_ventas_por_medio() or {}
         totales_tipo = caja.total_por_tipo_mov() or {}
         teorico = caja.saldo_efectivo_teorico()
@@ -64,7 +70,6 @@ def pos_abrir_caja(request):
     if request.method != 'POST':
         return HttpResponseForbidden('Método no permitido')
     if _caja_abierta():
-        # Si ya hay abierta, devolvemos JSON (porque en panel usamos fetch)
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             return JsonResponse({'ok': False, 'error': 'Ya hay una caja ABIERTA.'}, status=400)
         messages.warning(request, 'Ya hay una caja ABIERTA.')
@@ -93,115 +98,105 @@ def pos_abrir_caja(request):
 @login_required
 @transaction.atomic
 def pos_vender(request):
-    if request.method != 'POST':
-        return HttpResponseForbidden('Método no permitido')
+    # El front usa fetch + AJAX
+    if request.method != 'POST' or request.headers.get('x-requested-with') != 'XMLHttpRequest':
+        return JsonResponse({'ok': False, 'error': 'Solicitud inválida'}, status=400)
 
     caja = _caja_abierta()
     if not caja:
-        return JsonResponse({'ok': False, 'error': 'Abrí una caja antes de vender.'}, status=400)
+        return JsonResponse({'ok': False, 'error': 'No hay caja abierta.'}, status=400)
 
-    tipo_comp = request.POST.get('tipo_comprobante') or 'COMANDA'
+    # Ítems enviados como campos repetidos: item_producto / item_cantidad
+    prod_ids = request.POST.getlist('item_producto')
+    cantidades = request.POST.getlist('item_cantidad')
+    if not prod_ids:
+        return JsonResponse({'ok': False, 'error': 'Sin ítems.'}, status=400)
 
-    # Ítems
-    ids = request.POST.getlist('item_producto')
-    cants = request.POST.getlist('item_cantidad')
+    # Armar ítems y calcular total
+    items = []
+    total = Decimal('0')
+    try:
+        for pid, cant in zip(prod_ids, cantidades):
+            prod = ProductoPOS.objects.get(pk=int(pid))
+            q = Decimal(str(cant or '1'))
+            precio = prod.precio or Decimal('0')
+            subtotal = precio * q
+            items.append((prod, q, precio, subtotal))
+            total += subtotal
+    except ProductoPOS.DoesNotExist:
+        return JsonResponse({'ok': False, 'error': 'Producto inexistente.'}, status=400)
+    except Exception:
+        logger.exception('Error procesando ítems')
+        return JsonResponse({'ok': False, 'error': 'Ítems inválidos.'}, status=400)
 
-    lineas = []
-    for pid, cnt in zip(ids, cants):
-        pid = (pid or '').strip()
-        cnt = (cnt or '').strip()
-        if not pid:
-            continue
+    tipo_comp   = request.POST.get('tipo_comprobante', 'COMANDA')
+    medio_unico = request.POST.get('medio_pago')  # usado si NO hay pagos_json
+    pagos_json  = request.POST.get('pagos_json')  # string JSON opcional
+
+    # Si vienen pagos parciales, validamos su suma
+    pagos = None
+    if pagos_json:
         try:
-            q = int(cnt) if cnt else 1
-            if q < 1:
-                q = 1
+            pagos = json.loads(pagos_json) or []
+            suma = sum(Decimal(str(p.get('monto', 0) or '0')) for p in pagos)
+            if abs(suma - total) > Decimal('0.01'):
+                return JsonResponse({'ok': False, 'error': 'La suma de pagos no coincide con el total.'}, status=400)
         except Exception:
-            q = 1
-        lineas.append((pid, q))
+            return JsonResponse({'ok': False, 'error': 'Formato de pagos inválido.'}, status=400)
 
-    if not lineas:
-        return JsonResponse({'ok': False, 'error': 'Elegí al menos un producto.'}, status=400)
-
-    # Crear venta base
-    venta = VentaPOS.objects.create(
-        usuario=request.user,
-        caja=caja,
-        tipo_comprobante=tipo_comp,
-        medio_pago='MIXTO',  # informativo cuando es multi-medio
-        total=Decimal('0'),
-        estado='COMPLETADA',
-    )
-
-    # Ítems + total
-    total_venta = Decimal('0')
-    for pid, q in lineas:
-        prod = get_object_or_404(ProductoPOS, pk=pid)
-        precio = prod.precio or Decimal('0')
-        subtotal = (precio or Decimal('0')) * Decimal(q)
-        total_venta += subtotal
-
-        VentaPOSItem.objects.create(
-            venta=venta,
-            producto=prod,
-            descripcion=prod.nombre,
-            cantidad=q,
-            precio_unitario=precio,
-            subtotal=subtotal,
+    # Crear Venta + Items + Movimientos
+    try:
+        venta = VentaPOS.objects.create(
+            usuario=request.user,
+            caja=caja,
+            tipo_comprobante=tipo_comp,
+            medio_pago=('MIXTO' if pagos else (medio_unico or 'EFECTIVO')),
+            total=total,
+            estado='COMPLETADA',
         )
 
-    # Pagos
-    pagos_medios = request.POST.getlist('pago_medio')  # puede venir 1 o varios
-    pagos_montos = request.POST.getlist('pago_monto')
+        # Detalles
+        for prod, q, precio, subtotal in items:
+            VentaPOSItem.objects.create(
+                venta=venta,
+                producto=prod,
+                descripcion=prod.nombre,
+                cantidad=q,
+                precio_unitario=precio,
+                subtotal=subtotal,
+            )
 
-    movimientos_creados = []
-    if pagos_medios:
-        # Validar sumatoria
-        suma = Decimal('0')
-        pagos = []
-        for medio, monto in zip(pagos_medios, pagos_montos):
-            try:
-                m = Decimal(monto or '0')
-            except Exception:
-                m = Decimal('0')
-            if m > 0:
-                pagos.append((medio, m))
-                suma += m
-
-        # Tolerancia de 1 centavo
-        if abs(suma - total_venta) > Decimal('0.01'):
-            return JsonResponse({'ok': False, 'error': 'La suma de pagos no coincide con el total.'}, status=400)
-
-        for medio, m in pagos:
-            mov = MovimientoCaja.objects.create(
+        # Movimientos de caja: usamos tipo='VENTA' (KPI "VENTAS (hoy)")
+        if pagos:
+            for p in pagos:
+                monto = Decimal(str(p.get('monto', 0) or '0'))
+                medio = p.get('medio') or 'EFECTIVO'
+                if monto > 0:
+                    MovimientoCaja.objects.create(
+                        caja=caja,
+                        tipo='VENTA',
+                        medio_pago=medio,
+                        monto=monto,
+                        descripcion=f'VentaPOS #{venta.id}',
+                        venta=venta,
+                        usuario=request.user
+                    )
+        else:
+            MovimientoCaja.objects.create(
                 caja=caja,
                 tipo='VENTA',
-                medio_pago=medio,
-                monto=m,
+                medio_pago=medio_unico or 'EFECTIVO',
+                monto=total,
                 descripcion=f'VentaPOS #{venta.id}',
                 venta=venta,
                 usuario=request.user
             )
-            movimientos_creados.append(mov)
-    else:
-        # Fallback: un único pago "medio_pago" por el total
-        medio_pago = request.POST.get('medio_pago') or 'EFECTIVO'
-        mov = MovimientoCaja.objects.create(
-            caja=caja,
-            tipo='VENTA',
-            medio_pago=medio_pago,
-            monto=total_venta,
-            descripcion=f'VentaPOS #{venta.id}',
-            venta=venta,
-            usuario=request.user
-        )
-        movimientos_creados.append(mov)
 
-    # Setear total una sola vez
-    venta.total = total_venta
-    venta.save(update_fields=['total'])
+        return JsonResponse({'ok': True, 'venta_id': venta.id})
 
-    return JsonResponse({'ok': True, 'venta_id': venta.id})
+    except Exception:
+        logger.exception('Error en pos_vender')
+        return JsonResponse({'ok': False, 'error': 'Error registrando la venta.'}, status=500)
 
 # =======================
 # Movimiento manual
