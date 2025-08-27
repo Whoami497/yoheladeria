@@ -1,0 +1,36 @@
+{% extends 'pedidos/base.html' %}
+{% block content %}
+<div class="container my-4">
+  <h3>Panel de Cajas (Gerencia)</h3>
+  <div class="table-responsive mt-3">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>#</th><th>Estado</th><th>Apertura</th><th>Usuario</th>
+          <th>Cierre</th><th>Usuario</th><th>Saldo inicial</th><th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in cajas %}
+        <tr>
+          <td>{{ c.id }}</td>
+          <td><span class="badge {% if c.estado == 'ABIERTA' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+            {{ c.estado }}</span></td>
+          <td>{{ c.fecha_apertura|date:"d/m/Y H:i" }}</td>
+          <td>{{ c.usuario_apertura.username }}</td>
+          <td>{% if c.fecha_cierre %}{{ c.fecha_cierre|date:"d/m/Y H:i" }}{% else %}-{% endif %}</td>
+          <td>{% if c.usuario_cierre %}{{ c.usuario_cierre.username }}{% else %}-{% endif %}</td>
+          <td>${{ c.saldo_inicial_efectivo|default:"0.00" }}</td>
+          <td class="d-flex gap-2">
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'pos_caja_detalle' c.id %}">Detalle</a>
+            <a class="btn btn-sm btn-outline-dark" href="{% url 'pos_ticket_cierre' c.id %}" target="_blank">Ticket</a>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8" class="text-center text-muted">Sin cajas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

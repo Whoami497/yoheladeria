@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Ticket Cierre Caja #{{ caja.id }}</title>
+<style>
+  /* Formato 80mm aprox */
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+  .ticket { width: 280px; padding: 10px 12px; }
+  .center { text-align: center; }
+  .right { text-align: right; }
+  .line { border-top: 1px dashed #000; margin: 6px 0; }
+  .row { display: flex; justify-content: space-between; }
+  .small { font-size: 12px; }
+  .bold  { font-weight: 700; }
+  @media print {
+    @page { size: 80mm auto; margin: 0; }
+    body { margin: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="ticket">
+  <div class="center bold">CIERRE DE CAJA</div>
+  <div class="center small">Caja #{{ caja.id }}</div>
+  <div class="line"></div>
+
+  <div class="small">
+    <div>Apertura: {{ caja.fecha_apertura|date:'d/m/Y H:i' }} ({{ caja.usuario_apertura.username }})</div>
+    <div>Cierre: {{ caja.fecha_cierre|date:'d/m/Y H:i' }} ({{ caja.usuario_cierre.username }})</div>
+  </div>
+
+  <div class="line"></div>
+  <div class="small">Saldo inicial EFECTIVO: ${{ caja.saldo_inicial_efectivo|default:"0.00" }}</div>
+
+  <div class="line"></div>
+  <div class="bold small">VENTAS por medio</div>
+  {% if totales_medio %}
+    {% for k,v in totales_medio.items %}
+      <div class="row small"><span>{{ k }}</span><span>${{ v|default:"0.00" }}</span></div>
+    {% endfor %}
+  {% else %}
+    <div class="small">Sin ventas</div>
+  {% endif %}
+
+  <div class="line"></div>
+  <div class="bold small">Movimientos por tipo</div>
+  {% if totales_tipo %}
+    {% for k,v in totales_tipo.items %}
+      <div class="row small"><span>{{ k }}</span><span>${{ v|default:"0.00" }}</span></div>
+    {% endfor %}
+  {% else %}
+    <div class="small">Sin movimientos</div>
+  {% endif %}
+
+  <div class="line"></div>
+  <div class="row small"><span>Ventas (cant)</span><span>{{ ventas_count }}</span></div>
+  <div class="row small"><span>Ventas (total)</span><span>${{ ventas_total|default:"0.00" }}</span></div>
+
+  <div class="line"></div>
+  <div class="row small"><span>Saldo teórico EFECTIVO</span><span>${{ saldo_teorico|default:"0.00" }}</span></div>
+  <div class="row small"><span>Conteo EFECTIVO</span><span>${{ caja.saldo_cierre_efectivo|default:"0.00" }}</span></div>
+  <div class="row small bold"><span>DIFERENCIA</span><span>
+    {% if diferencia is not None %}${{ diferencia }}{% else %}-{% endif %}
+  </span></div>
+
+  <div class="line"></div>
+  <div class="center small">Gracias</div>
+</div>
+
+<script>
+  // Imprime y vuelve al panel POS
+  window.onload = function(){
+    window.print();
+    setTimeout(function(){ window.location.href = "{% url 'pos_panel' %}"; }, 1000);
+  }
+  window.onafterprint = function(){
+    window.location.href = "{% url 'pos_panel' %}";
+  }
+</script>
+</body>
+</html>

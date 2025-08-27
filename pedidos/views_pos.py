@@ -5,30 +5,45 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.db import transaction
 from django.utils import timezone
-from django.http import HttpResponseForbidden, JsonResponse
+from django.http import HttpResponseForbidden, JsonResponse, HttpResponseRedirect
+from django.db.models import Sum
+from django.urls import reverse
 
 from .models import Caja, ProductoPOS, VentaPOS, VentaPOSItem, MovimientoCaja
 
+# ---- Helpers de permisos
 def es_staff(user):
     return user.is_authenticated and user.is_staff
+
+def es_manager(user):
+    # Superusuarios o quienes estén en el grupo "Gerencia"
+    if not user.is_authenticated:
+        return False
+    if user.is_superuser:
+        return True
+    return user.groups.filter(name='Gerencia').exists()
 
 def _caja_abierta():
     return Caja.objects.filter(estado='ABIERTA').order_by('-id').first()
 
-def _is_ajax(request):
-    # Django 5 ya no tiene request.is_ajax()
-    return request.headers.get('x-requested-with') == 'XMLHttpRequest'
-
+# =======================
+# Panel POS
+# =======================
 @user_passes_test(es_staff)
 @login_required
 def pos_panel(request):
     caja = _caja_abierta()
     productos = ProductoPOS.objects.filter(activo=True).order_by('nombre')
-    ventas = VentaPOS.objects.order_by('-id')[:15]
+    ventas = []
+    totales_medio = {}
+    totales_tipo = {}
+    teorico = None
 
-    totales_medio = caja.total_ventas_por_medio() if caja else {}
-    totales_tipo = caja.total_por_tipo_mov() if caja else {}
-    teorico = caja.saldo_efectivo_teorico() if caja else None
+    if caja:
+        ventas = VentaPOS.objects.filter(caja=caja).order_by('-id')[:15]  # <-- SOLO de la caja abierta
+        totales_medio = caja.total_ventas_por_medio() or {}
+        totales_tipo = caja.total_por_tipo_mov() or {}
+        teorico = caja.saldo_efectivo_teorico()
 
     return render(request, 'pedidos/pos_panel.html', {
         'caja': caja,
@@ -39,6 +54,9 @@ def pos_panel(request):
         'saldo_teorico': teorico,
     })
 
+# =======================
+# Abrir caja
+# =======================
 @user_passes_test(es_staff)
 @login_required
 @transaction.atomic
@@ -46,7 +64,8 @@ def pos_abrir_caja(request):
     if request.method != 'POST':
         return HttpResponseForbidden('Método no permitido')
     if _caja_abierta():
-        if _is_ajax(request):
+        # Si ya hay abierta, devolvemos JSON (porque en panel usamos fetch)
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             return JsonResponse({'ok': False, 'error': 'Ya hay una caja ABIERTA.'}, status=400)
         messages.warning(request, 'Ya hay una caja ABIERTA.')
         return redirect('pos_panel')
@@ -61,43 +80,36 @@ def pos_abrir_caja(request):
         saldo_inicial_efectivo=inicial,
         estado='ABIERTA',
     )
-    if _is_ajax(request):
+
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest':
         return JsonResponse({'ok': True})
     messages.success(request, 'Caja ABIERTA correctamente.')
     return redirect('pos_panel')
 
+# =======================
+# Vender (multi items + multi medio)
+# =======================
 @user_passes_test(es_staff)
 @login_required
 @transaction.atomic
 def pos_vender(request):
-    """
-    Soporta múltiples ítems y múltiples medios de pago.
-    - Si vienen arrays pago_medio[] y pago_monto[], crea un MovimientoCaja por cada pago.
-    - Si no, usa el campo medio_pago único (compatibilidad).
-    - Devuelve JSON si la petición es AJAX (fetch), o redirige con mensajes si es navegación normal.
-    """
-    is_ajax = request.headers.get('x-requested-with') == 'XMLHttpRequest'
-
     if request.method != 'POST':
         return HttpResponseForbidden('Método no permitido')
 
     caja = _caja_abierta()
     if not caja:
-        msg = 'Abrí una caja antes de vender.'
-        if is_ajax:
-            return JsonResponse({'ok': False, 'error': msg}, status=400)
-        messages.error(request, msg)
-        return redirect('pos_panel')
+        return JsonResponse({'ok': False, 'error': 'Abrí una caja antes de vender.'}, status=400)
 
-    tipo_comp = (request.POST.get('tipo_comprobante') or 'COMANDA').strip()
+    tipo_comp = request.POST.get('tipo_comprobante') or 'COMANDA'
 
-    # ---- Ítems (producto + cantidad)
+    # Ítems
     ids = request.POST.getlist('item_producto')
     cants = request.POST.getlist('item_cantidad')
 
     lineas = []
     for pid, cnt in zip(ids, cants):
         pid = (pid or '').strip()
+        cnt = (cnt or '').strip()
         if not pid:
             continue
         try:
@@ -109,56 +121,26 @@ def pos_vender(request):
         lineas.append((pid, q))
 
     if not lineas:
-        msg = 'Elegí al menos un producto.'
-        if is_ajax:
-            return JsonResponse({'ok': False, 'error': msg}, status=400)
-        messages.error(request, msg)
-        return redirect('pos_panel')
+        return JsonResponse({'ok': False, 'error': 'Elegí al menos un producto.'}, status=400)
 
-    # Preparamos datos de ítems y calculamos total (aún no grabamos venta)
-    items_data = []
+    # Crear venta base
+    venta = VentaPOS.objects.create(
+        usuario=request.user,
+        caja=caja,
+        tipo_comprobante=tipo_comp,
+        medio_pago='MIXTO',  # informativo cuando es multi-medio
+        total=Decimal('0'),
+        estado='COMPLETADA',
+    )
+
+    # Ítems + total
     total_venta = Decimal('0')
     for pid, q in lineas:
         prod = get_object_or_404(ProductoPOS, pk=pid)
         precio = prod.precio or Decimal('0')
         subtotal = (precio or Decimal('0')) * Decimal(q)
-        items_data.append((prod, q, precio, subtotal))
         total_venta += subtotal
 
-    # ---- Pagos múltiples (opcional)
-    pagos_medios = request.POST.getlist('pago_medio')
-    pagos_montos = request.POST.getlist('pago_monto')
-    pagos = []
-    for m, amt in zip(pagos_medios, pagos_montos):
-        m = (m or '').strip() or 'EFECTIVO'
-        try:
-            d = Decimal(str(amt).replace(',', '.'))
-        except Exception:
-            d = Decimal('0')
-        if d > 0:
-            pagos.append((m, d))
-
-    # Validamos suma de pagos si se usó modo múltiple
-    if pagos:
-        suma = sum((d for _, d in pagos), Decimal('0'))
-        if (suma - total_venta).copy_abs() > Decimal('0.01'):
-            msg = f'La suma de pagos (${suma}) no coincide con el total (${total_venta}).'
-            if is_ajax:
-                return JsonResponse({'ok': False, 'error': msg}, status=400)
-            messages.error(request, msg)
-            return redirect('pos_panel')
-
-    # ---- Creamos la venta y sus ítems
-    venta = VentaPOS.objects.create(
-        usuario=request.user,
-        caja=caja,
-        tipo_comprobante=tipo_comp,
-        medio_pago='PEND',  # lo fijamos más abajo
-        total=Decimal('0'),
-        estado='COMPLETADA',
-    )
-
-    for prod, q, precio, subtotal in items_data:
         VentaPOSItem.objects.create(
             venta=venta,
             producto=prod,
@@ -168,57 +150,72 @@ def pos_vender(request):
             subtotal=subtotal,
         )
 
-    venta.total = total_venta
+    # Pagos
+    pagos_medios = request.POST.getlist('pago_medio')  # puede venir 1 o varios
+    pagos_montos = request.POST.getlist('pago_monto')
 
-    # ---- Movimientos de caja según pagos
-    if pagos:
-        venta.medio_pago = 'MIXTO' if len(pagos) > 1 else pagos[0][0]
-        venta.save(update_fields=['total', 'medio_pago'])
-        for medio, monto in pagos:
-            MovimientoCaja.objects.create(
+    movimientos_creados = []
+    if pagos_medios:
+        # Validar sumatoria
+        suma = Decimal('0')
+        pagos = []
+        for medio, monto in zip(pagos_medios, pagos_montos):
+            try:
+                m = Decimal(monto or '0')
+            except Exception:
+                m = Decimal('0')
+            if m > 0:
+                pagos.append((medio, m))
+                suma += m
+
+        # Tolerancia de 1 centavo
+        if abs(suma - total_venta) > Decimal('0.01'):
+            return JsonResponse({'ok': False, 'error': 'La suma de pagos no coincide con el total.'}, status=400)
+
+        for medio, m in pagos:
+            mov = MovimientoCaja.objects.create(
                 caja=caja,
                 tipo='VENTA',
                 medio_pago=medio,
-                monto=monto,
-                descripcion=f'VentaPOS #{venta.id} ({len(items_data)} ítem/s)',
+                monto=m,
+                descripcion=f'VentaPOS #{venta.id}',
                 venta=venta,
-                usuario=request.user,
+                usuario=request.user
             )
+            movimientos_creados.append(mov)
     else:
-        # Compatibilidad: un solo medio de pago tradicional
-        medio_pago = (request.POST.get('medio_pago') or 'EFECTIVO').strip()
-        venta.medio_pago = medio_pago
-        venta.save(update_fields=['total', 'medio_pago'])
-        MovimientoCaja.objects.create(
+        # Fallback: un único pago "medio_pago" por el total
+        medio_pago = request.POST.get('medio_pago') or 'EFECTIVO'
+        mov = MovimientoCaja.objects.create(
             caja=caja,
             tipo='VENTA',
             medio_pago=medio_pago,
             monto=total_venta,
-            descripcion=f'VentaPOS #{venta.id} ({len(items_data)} ítem/s)',
+            descripcion=f'VentaPOS #{venta.id}',
             venta=venta,
-            usuario=request.user,
+            usuario=request.user
         )
+        movimientos_creados.append(mov)
 
-    if is_ajax:
-        return JsonResponse({'ok': True, 'venta_id': venta.id, 'total': str(total_venta)})
+    # Setear total una sola vez
+    venta.total = total_venta
+    venta.save(update_fields=['total'])
 
-    messages.success(request, f'Venta #{venta.id} registrada (${total_venta}).')
-    return redirect('pos_panel')
+    return JsonResponse({'ok': True, 'venta_id': venta.id})
 
-
+# =======================
+# Movimiento manual
+# =======================
 @user_passes_test(es_staff)
 @login_required
 @transaction.atomic
 def pos_movimiento(request):
     if request.method != 'POST':
         return HttpResponseForbidden('Método no permitido')
+
     caja = _caja_abierta()
     if not caja:
-        msg = 'Abrí una caja antes de registrar movimientos.'
-        if _is_ajax(request):
-            return JsonResponse({'ok': False, 'error': msg}, status=400)
-        messages.error(request, msg)
-        return redirect('pos_panel')
+        return JsonResponse({'ok': False, 'error': 'Abrí una caja antes de registrar movimientos.'}, status=400)
 
     tipo = request.POST.get('tipo')  # INGRESO / EGRESO / AJUSTE / RETIRO
     medio = request.POST.get('medio_pago') or 'EFECTIVO'
@@ -229,17 +226,9 @@ def pos_movimiento(request):
     desc = (request.POST.get('descripcion') or '').strip()
 
     if tipo not in ['INGRESO', 'EGRESO', 'AJUSTE', 'RETIRO']:
-        msg = 'Tipo de movimiento inválido.'
-        if _is_ajax(request):
-            return JsonResponse({'ok': False, 'error': msg}, status=400)
-        messages.error(request, msg)
-        return redirect('pos_panel')
+        return JsonResponse({'ok': False, 'error': 'Tipo inválido.'}, status=400)
     if monto <= 0:
-        msg = 'El monto debe ser mayor a 0.'
-        if _is_ajax(request):
-            return JsonResponse({'ok': False, 'error': msg}, status=400)
-        messages.error(request, msg)
-        return redirect('pos_panel')
+        return JsonResponse({'ok': False, 'error': 'El monto debe ser mayor a 0.'}, status=400)
 
     MovimientoCaja.objects.create(
         caja=caja,
@@ -249,12 +238,11 @@ def pos_movimiento(request):
         descripcion=desc,
         usuario=request.user
     )
+    return JsonResponse({'ok': True})
 
-    if _is_ajax(request):
-        return JsonResponse({'ok': True})
-    messages.success(request, f'Movimiento {tipo} registrado por ${monto}.')
-    return redirect('pos_panel')
-
+# =======================
+# Cerrar caja  ->  Ticket
+# =======================
 @user_passes_test(es_staff)
 @login_required
 @transaction.atomic
@@ -263,8 +251,6 @@ def pos_cerrar_caja(request):
         return HttpResponseForbidden('Método no permitido')
     caja = _caja_abierta()
     if not caja:
-        if _is_ajax(request):
-            return JsonResponse({'ok': False, 'error': 'No hay caja ABIERTA.'}, status=400)
         messages.warning(request, 'No hay caja ABIERTA.')
         return redirect('pos_panel')
 
@@ -279,7 +265,57 @@ def pos_cerrar_caja(request):
     caja.saldo_cierre_efectivo = contado
     caja.save(update_fields=['estado','usuario_cierre','fecha_cierre','saldo_cierre_efectivo'])
 
-    if _is_ajax(request):
-        return JsonResponse({'ok': True})
-    messages.success(request, 'Caja CERRADA. Podés revisar la diferencia de efectivo en el listado.')
-    return redirect('pos_panel')
+    # Al cerrar, llevamos directo al ticket para imprimir
+    return HttpResponseRedirect(reverse('pos_ticket_cierre', args=[caja.id]))
+
+# =======================
+# Ticket de cierre (imprimible 80mm)
+# =======================
+@user_passes_test(es_staff)
+@login_required
+def pos_ticket_cierre(request, caja_id):
+    caja = get_object_or_404(Caja, pk=caja_id)
+
+    totales_medio = caja.total_ventas_por_medio() or {}
+    totales_tipo  = caja.total_por_tipo_mov() or {}
+    teorico = caja.saldo_efectivo_teorico()
+    diff = caja.diferencia_efectivo()
+
+    ventas_qs = VentaPOS.objects.filter(caja=caja, estado='COMPLETADA')
+    ventas_count = ventas_qs.count()
+    ventas_total = ventas_qs.aggregate(s=Sum('total'))['s'] or Decimal('0')
+
+    return render(request, 'pedidos/pos_ticket_cierre.html', {
+        'caja': caja,
+        'totales_medio': totales_medio,
+        'totales_tipo': totales_tipo,
+        'saldo_teorico': teorico,
+        'diferencia': diff,
+        'ventas_count': ventas_count,
+        'ventas_total': ventas_total,
+    })
+
+# =======================
+# Panel de Cajas (Gerencia)
+# =======================
+@user_passes_test(es_manager)
+@login_required
+def pos_cajas(request):
+    cajas = Caja.objects.order_by('-id')[:100]
+    return render(request, 'pedidos/pos_cajas.html', {'cajas': cajas})
+
+@user_passes_test(es_manager)
+@login_required
+def pos_caja_detalle(request, caja_id):
+    caja = get_object_or_404(Caja, pk=caja_id)
+    ventas = VentaPOS.objects.filter(caja=caja).order_by('fecha')
+    movs   = MovimientoCaja.objects.filter(caja=caja).order_by('fecha')
+    return render(request, 'pedidos/pos_caja_detalle.html', {
+        'caja': caja,
+        'ventas': ventas,
+        'movimientos': movs,
+        'totales_medio': caja.total_ventas_por_medio() or {},
+        'totales_tipo': caja.total_por_tipo_mov() or {},
+        'saldo_teorico': caja.saldo_efectivo_teorico(),
+        'diferencia': caja.diferencia_efectivo(),
+    })
