@@ -1,6 +1,7 @@
 # pedidos/views_pos.py
 from decimal import Decimal
 import json
+from django.conf import settings
 
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.shortcuts import render, redirect, get_object_or_404
@@ -96,128 +97,115 @@ def pos_abrir_caja(request):
 # =======================
 # Vender (multi-ítems + multi-medio)
 # =======================
-@user_passes_test(es_staff)
-@login_required
+@require_POST
 @transaction.atomic
 def pos_vender(request):
-    # Solo AJAX POST
-    if request.method != 'POST' or request.headers.get('x-requested-with') != 'XMLHttpRequest':
+    # Debe venir por AJAX
+    if request.headers.get('x-requested-with') != 'XMLHttpRequest':
         return JsonResponse({'ok': False, 'error': 'Solicitud inválida'}, status=400)
 
-    caja = _caja_abierta()
-    if not caja:
-        return JsonResponse({'ok': False, 'error': 'No hay caja abierta.'}, status=400)
+    try:
+        caja = Caja.objects.filter(estado='ABIERTA').order_by('-id').first()
+        if not caja:
+            return JsonResponse({'ok': False, 'error': 'No hay caja abierta.'}, status=400)
 
-    # 1) Ítems
-    prod_ids = request.POST.getlist('item_producto')
-    cantidades = request.POST.getlist('item_cantidad')
-    if not prod_ids:
-        return JsonResponse({'ok': False, 'error': 'Sin ítems.'}, status=400)
+        prod_ids    = request.POST.getlist('item_producto')
+        cantidades  = request.POST.getlist('item_cantidad')
+        if not prod_ids:
+            return JsonResponse({'ok': False, 'error': 'Sin ítems.'}, status=400)
 
-    # 2) Construir ítems y total
-    items = []
-    total = Decimal('0')
-    for pid, cant in zip(prod_ids, cantidades):
-        prod = get_object_or_404(ProductoPOS, pk=int(pid))
-        q = Decimal(str(cant or '1'))
-        precio = prod.precio or Decimal('0')
-        subtotal = precio * q
-        items.append((prod, q, precio, subtotal))
-        total += subtotal
+        # Armo ítems
+        items = []
+        total = Decimal('0')
+        for pid, cant in zip(prod_ids, cantidades):
+            p = ProductoPOS.objects.get(pk=int(pid))
+            q = Decimal(str(cant or '1'))
+            precio = p.precio or Decimal('0')
+            subtotal = precio * q
+            items.append((p, q, precio, subtotal))
+            total += subtotal
 
-    tipo_comp = request.POST.get('tipo_comprobante', 'COMANDA')
-    pagos_json = request.POST.get('pagos_json')  # si viene, es pago dividido
-    medio_pago_unico = request.POST.get('medio_pago')  # si NO hay pagos_json
+        tipo_comp = request.POST.get('tipo_comprobante', 'COMANDA')
+        pagos_json = request.POST.get('pagos_json')
+        medio_unico = request.POST.get('medio_pago')  # si NO hay pagos_json
 
-    # 3) Crear venta (medio = MIXTO si hay pagos divididos)
-    venta = VentaPOS.objects.create(
-        usuario=request.user,
-        caja=caja,
-        tipo_comprobante=tipo_comp,
-        medio_pago=('MIXTO' if pagos_json else (medio_pago_unico or 'EFECTIVO')),
-        total=Decimal('0'),   # seteo después
-        estado='COMPLETADA',
-    )
-
-    # 4) Detalles
-    total_venta = Decimal('0')
-    for prod, q, precio, subtotal in items:
-        VentaPOSItem.objects.create(
-            venta=venta,
-            producto=prod,
-            descripcion=prod.nombre,
-            cantidad=q,
-            precio_unitario=precio,
-            subtotal=subtotal,
+        # Creo la venta (medio MIXTO solo si hay pagos parciales)
+        venta = VentaPOS.objects.create(
+            usuario=request.user,
+            caja=caja,
+            tipo_comprobante=tipo_comp,
+            medio_pago=('MIXTO' if pagos_json else (medio_unico or 'EFECTIVO')),
+            total=Decimal('0'),
+            estado='COMPLETADA',
         )
-        total_venta += subtotal
 
-    # 5) Movimientos de caja -> SIEMPRE tipo 'VENTA' (uno por cada pago)
-    movimientos_creados = []
-    if pagos_json:
-        try:
-            pagos = json.loads(pagos_json) or []
-        except Exception:
-            pagos = []
-        suma = Decimal('0')
-        pagos_ok = []
-        for p in pagos:
-            medio = (p.get('medio') or 'EFECTIVO').upper()
+        # Detalles
+        total_venta = Decimal('0')
+        for p, q, precio, subtotal in items:
+            VentaPOSItem.objects.create(
+                venta=venta,
+                producto=p,
+                descripcion=p.nombre,
+                cantidad=q,
+                precio_unitario=precio,
+                subtotal=subtotal,
+            )
+            total_venta += subtotal
+
+        # Movimientos (siempre tipo VENTA para no duplicar contabilidad)
+        if pagos_json:
             try:
-                m = Decimal(str(p.get('monto', 0)))
+                pagos = json.loads(pagos_json) or []
             except Exception:
-                m = Decimal('0')
-            if m > 0:
-                pagos_ok.append((medio, m))
-                suma += m
+                pagos = []
+            suma = Decimal('0')
+            pagos_ok = []
+            for pago in pagos:
+                medio = (pago.get('medio') or 'EFECTIVO').upper()
+                try:
+                    m = Decimal(str(pago.get('monto', 0)))
+                except Exception:
+                    m = Decimal('0')
+                if m > 0:
+                    pagos_ok.append((medio, m))
+                    suma += m
 
-        # Validamos que la suma coincida (tolerancia 0.01)
-        if abs(suma - total_venta) > Decimal('0.01'):
-            return JsonResponse({'ok': False, 'error': 'La suma de pagos no coincide con el total.'}, status=400)
+            if abs(suma - total_venta) > Decimal('0.01'):
+                return JsonResponse({'ok': False, 'error': 'La suma de pagos no coincide con el total.'}, status=400)
 
-        for medio, monto in pagos_ok:
-            mov = MovimientoCaja.objects.create(
+            for medio, monto in pagos_ok:
+                MovimientoCaja.objects.create(
+                    caja=caja,
+                    tipo='VENTA',
+                    medio_pago=medio,
+                    monto=monto,
+                    descripcion=f'VentaPOS #{venta.id} (parcial)',
+                    venta=venta,
+                    usuario=request.user
+                )
+        else:
+            MovimientoCaja.objects.create(
                 caja=caja,
                 tipo='VENTA',
-                medio_pago=medio,
-                monto=monto,
-                descripcion=f'VentaPOS #{venta.id} (parcial)',
+                medio_pago=(medio_unico or 'EFECTIVO'),
+                monto=total_venta,
+                descripcion=f'VentaPOS #{venta.id}',
                 venta=venta,
                 usuario=request.user
             )
-            movimientos_creados.append(mov)
-    else:
-        # pago único por el total
-        mov = MovimientoCaja.objects.create(
-            caja=caja,
-            tipo='VENTA',
-            medio_pago=(medio_pago_unico or 'EFECTIVO'),
-            monto=total_venta,
-            descripcion=f'VentaPOS #{venta.id}',
-            venta=venta,
-            usuario=request.user
-        )
-        movimientos_creados.append(mov)
 
-    # 6) Asignar total a la venta
-    venta.total = total_venta
-    venta.save(update_fields=['total'])
+        venta.total = total_venta
+        venta.save(update_fields=['total'])
 
-    return JsonResponse({'ok': True, 'venta_id': venta.id})
+        return JsonResponse({'ok': True, 'venta_id': venta.id})
 
-# =======================
-# Movimiento manual
-# =======================
-@user_passes_test(es_staff)
-@login_required
-@transaction.atomic
-def pos_movimiento(request):
-    if request.method != 'POST':
-        return HttpResponseForbidden('Método no permitido')
-
-    caja = _caja_abierta()
-    if not caja:
-        return JsonResponse({'ok': False, 'error': 'Abrí una caja antes de registrar movimientos.'}, status=400)
+    except ProductoPOS.DoesNotExist:
+        msg = 'Producto inexistente.'
+        return JsonResponse({'ok': False, 'error': msg}, status=400)
+    except Exception as e:
+        # Con DEBUG=True te manda la causa exacta
+        msg = str(e) if settings.DEBUG else 'Error registrando la venta.'
+        return JsonResponse({'ok': False, 'error': msg}, status=500)
 
     tipo = request.POST.get('tipo')  # INGRESO / EGRESO / AJUSTE / RETIRO
     medio = request.POST.get('medio_pago') or 'EFECTIVO'
