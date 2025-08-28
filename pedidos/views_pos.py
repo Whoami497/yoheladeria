@@ -1,5 +1,7 @@
 # pedidos/views_pos.py
 from decimal import Decimal
+import json
+
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
@@ -8,12 +10,14 @@ from django.utils import timezone
 from django.http import HttpResponseForbidden, JsonResponse, HttpResponseRedirect
 from django.db.models import Sum
 from django.urls import reverse
-import json
-import logging
 
-from .models import Caja, ProductoPOS, VentaPOS, VentaPOSItem, MovimientoCaja
-
-logger = logging.getLogger(__name__)
+from .models import (
+    Caja,
+    ProductoPOS,
+    VentaPOS,
+    VentaPOSItem,
+    MovimientoCaja,
+)
 
 # ---- Helpers de permisos
 def es_staff(user):
@@ -43,35 +47,11 @@ def pos_panel(request):
     teorico = None
 
     if caja:
-        # Listado de últimas ventas (solo para la tabla)
+        # SOLO ventas de la caja abierta
         ventas = VentaPOS.objects.filter(caja=caja).order_by('-id')[:15]
-
-        # === Fuente única de verdad: MovimientoCaja ===
-        movs = MovimientoCaja.objects.filter(caja=caja)
-
-        # Ventas por medio (solo tipo VENTA)
-        m_venta = (
-            movs.filter(tipo='VENTA')
-                .values('medio_pago')
-                .annotate(total=Sum('monto'))
-        )
-        totales_medio = {r['medio_pago']: r['total'] or Decimal('0') for r in m_venta}
-
-        # Totales por tipo de movimiento
-        m_tipo = movs.values('tipo').annotate(total=Sum('monto'))
-        totales_tipo = {r['tipo']: r['total'] or Decimal('0') for r in m_tipo}
-
-        # Efectivo teórico = saldo inicial + (VENTA/INGRESO/AJUSTE en EFECTIVO) - (EGRESO/RETIRO en EFECTIVO)
-        efectivo_inicial = caja.saldo_inicial_efectivo or Decimal('0')
-        eff_add = movs.filter(
-            medio_pago='EFECTIVO',
-            tipo__in=['VENTA', 'INGRESO', 'AJUSTE'],
-        ).aggregate(s=Sum('monto'))['s'] or Decimal('0')
-        eff_sub = movs.filter(
-            medio_pago='EFECTIVO',
-            tipo__in=['EGRESO', 'RETIRO'],
-        ).aggregate(s=Sum('monto'))['s'] or Decimal('0')
-        teorico = efectivo_inicial + eff_add - eff_sub
+        totales_medio = caja.total_ventas_por_medio() or {}
+        totales_tipo = caja.total_por_tipo_mov() or {}
+        teorico = caja.saldo_efectivo_teorico()
 
     return render(request, 'pedidos/pos_panel.html', {
         'caja': caja,
@@ -114,13 +94,13 @@ def pos_abrir_caja(request):
     return redirect('pos_panel')
 
 # =======================
-# Vender (multi items + multi medio)
+# Vender (multi-ítems + multi-medio)
 # =======================
 @user_passes_test(es_staff)
 @login_required
 @transaction.atomic
 def pos_vender(request):
-    # El front usa fetch (AJAX)
+    # Solo AJAX POST
     if request.method != 'POST' or request.headers.get('x-requested-with') != 'XMLHttpRequest':
         return JsonResponse({'ok': False, 'error': 'Solicitud inválida'}, status=400)
 
@@ -128,95 +108,102 @@ def pos_vender(request):
     if not caja:
         return JsonResponse({'ok': False, 'error': 'No hay caja abierta.'}, status=400)
 
-    # Ítems
+    # 1) Ítems
     prod_ids = request.POST.getlist('item_producto')
     cantidades = request.POST.getlist('item_cantidad')
     if not prod_ids:
         return JsonResponse({'ok': False, 'error': 'Sin ítems.'}, status=400)
 
+    # 2) Construir ítems y total
     items = []
     total = Decimal('0')
-    try:
-        for pid, cant in zip(prod_ids, cantidades):
-            prod = ProductoPOS.objects.get(pk=int(pid))
-            q = Decimal(str(cant or '1'))
-            precio = prod.precio or Decimal('0')
-            subtotal = precio * q
-            items.append((prod, q, precio, subtotal))
-            total += subtotal
-    except ProductoPOS.DoesNotExist:
-        return JsonResponse({'ok': False, 'error': 'Producto inexistente.'}, status=400)
-    except Exception:
-        logger.exception('Error procesando ítems')
-        return JsonResponse({'ok': False, 'error': 'Ítems inválidos.'}, status=400)
+    for pid, cant in zip(prod_ids, cantidades):
+        prod = get_object_or_404(ProductoPOS, pk=int(pid))
+        q = Decimal(str(cant or '1'))
+        precio = prod.precio or Decimal('0')
+        subtotal = precio * q
+        items.append((prod, q, precio, subtotal))
+        total += subtotal
 
-    tipo_comp   = request.POST.get('tipo_comprobante', 'COMANDA')
-    medio_unico = request.POST.get('medio_pago')  # si NO hay pagos_json
-    pagos_json  = request.POST.get('pagos_json')
+    tipo_comp = request.POST.get('tipo_comprobante', 'COMANDA')
+    pagos_json = request.POST.get('pagos_json')  # si viene, es pago dividido
+    medio_pago_unico = request.POST.get('medio_pago')  # si NO hay pagos_json
 
-    # Pagos parciales (si llegan)
-    pagos = None
+    # 3) Crear venta (medio = MIXTO si hay pagos divididos)
+    venta = VentaPOS.objects.create(
+        usuario=request.user,
+        caja=caja,
+        tipo_comprobante=tipo_comp,
+        medio_pago=('MIXTO' if pagos_json else (medio_pago_unico or 'EFECTIVO')),
+        total=Decimal('0'),   # seteo después
+        estado='COMPLETADA',
+    )
+
+    # 4) Detalles
+    total_venta = Decimal('0')
+    for prod, q, precio, subtotal in items:
+        VentaPOSItem.objects.create(
+            venta=venta,
+            producto=prod,
+            descripcion=prod.nombre,
+            cantidad=q,
+            precio_unitario=precio,
+            subtotal=subtotal,
+        )
+        total_venta += subtotal
+
+    # 5) Movimientos de caja -> SIEMPRE tipo 'VENTA' (uno por cada pago)
+    movimientos_creados = []
     if pagos_json:
         try:
             pagos = json.loads(pagos_json) or []
-            suma = sum(Decimal(str(p.get('monto', 0) or '0')) for p in pagos)
-            if abs(suma - total) > Decimal('0.01'):
-                return JsonResponse({'ok': False, 'error': 'La suma de pagos no coincide con el total.'}, status=400)
         except Exception:
-            return JsonResponse({'ok': False, 'error': 'Formato de pagos inválido.'}, status=400)
+            pagos = []
+        suma = Decimal('0')
+        pagos_ok = []
+        for p in pagos:
+            medio = (p.get('medio') or 'EFECTIVO').upper()
+            try:
+                m = Decimal(str(p.get('monto', 0)))
+            except Exception:
+                m = Decimal('0')
+            if m > 0:
+                pagos_ok.append((medio, m))
+                suma += m
 
-    try:
-        # Venta
-        venta = VentaPOS.objects.create(
-            usuario=request.user,
-            caja=caja,
-            tipo_comprobante=tipo_comp,
-            medio_pago=('MIXTO' if pagos else (medio_unico or 'EFECTIVO')),
-            total=total,
-            estado='COMPLETADA',
-        )
+        # Validamos que la suma coincida (tolerancia 0.01)
+        if abs(suma - total_venta) > Decimal('0.01'):
+            return JsonResponse({'ok': False, 'error': 'La suma de pagos no coincide con el total.'}, status=400)
 
-        # Detalles
-        for prod, q, precio, subtotal in items:
-            VentaPOSItem.objects.create(
-                venta=venta,
-                producto=prod,
-                descripcion=prod.nombre,
-                cantidad=q,
-                precio_unitario=precio,
-                subtotal=subtotal,
-            )
-
-        # Movimientos (única fuente para la caja)
-        if pagos:
-            for p in pagos:
-                monto = Decimal(str(p.get('monto', 0) or '0'))
-                medio = p.get('medio') or 'EFECTIVO'
-                if monto > 0:
-                    MovimientoCaja.objects.create(
-                        caja=caja,
-                        tipo='VENTA',
-                        medio_pago=medio,
-                        monto=monto,
-                        descripcion=f'VentaPOS #{venta.id}',
-                        venta=venta,
-                        usuario=request.user
-                    )
-        else:
-            MovimientoCaja.objects.create(
+        for medio, monto in pagos_ok:
+            mov = MovimientoCaja.objects.create(
                 caja=caja,
                 tipo='VENTA',
-                medio_pago=medio_unico or 'EFECTIVO',
-                monto=total,
-                descripcion=f'VentaPOS #{venta.id}',
+                medio_pago=medio,
+                monto=monto,
+                descripcion=f'VentaPOS #{venta.id} (parcial)',
                 venta=venta,
                 usuario=request.user
             )
+            movimientos_creados.append(mov)
+    else:
+        # pago único por el total
+        mov = MovimientoCaja.objects.create(
+            caja=caja,
+            tipo='VENTA',
+            medio_pago=(medio_pago_unico or 'EFECTIVO'),
+            monto=total_venta,
+            descripcion=f'VentaPOS #{venta.id}',
+            venta=venta,
+            usuario=request.user
+        )
+        movimientos_creados.append(mov)
 
-        return JsonResponse({'ok': True, 'venta_id': venta.id})
-    except Exception:
-        logger.exception('Error en pos_vender')
-        return JsonResponse({'ok': False, 'error': 'Error registrando la venta.'}, status=500)
+    # 6) Asignar total a la venta
+    venta.total = total_venta
+    venta.save(update_fields=['total'])
+
+    return JsonResponse({'ok': True, 'venta_id': venta.id})
 
 # =======================
 # Movimiento manual
@@ -264,6 +251,7 @@ def pos_movimiento(request):
 def pos_cerrar_caja(request):
     if request.method != 'POST':
         return HttpResponseForbidden('Método no permitido')
+
     caja = _caja_abierta()
     if not caja:
         messages.warning(request, 'No hay caja ABIERTA.')
@@ -283,27 +271,17 @@ def pos_cerrar_caja(request):
     return HttpResponseRedirect(reverse('pos_ticket_cierre', args=[caja.id]))
 
 # =======================
-# Ticket de cierre (imprimible 80mm)
+# Ticket de cierre
 # =======================
 @user_passes_test(es_staff)
 @login_required
 def pos_ticket_cierre(request, caja_id):
     caja = get_object_or_404(Caja, pk=caja_id)
 
-    # Igual que en el panel: basarse en MovimientoCaja
-    movs = MovimientoCaja.objects.filter(caja=caja)
-    totales_medio = {
-        r['medio_pago']: r['total'] or Decimal('0')
-        for r in movs.filter(tipo='VENTA').values('medio_pago').annotate(total=Sum('monto'))
-    }
-    totales_tipo = {
-        r['tipo']: r['total'] or Decimal('0')
-        for r in movs.values('tipo').annotate(total=Sum('monto'))
-    }
-    efectivo_inicial = caja.saldo_inicial_efectivo or Decimal('0')
-    eff_add = movs.filter(medio_pago='EFECTIVO', tipo__in=['VENTA','INGRESO','AJUSTE']).aggregate(s=Sum('monto'))['s'] or Decimal('0')
-    eff_sub = movs.filter(medio_pago='EFECTIVO', tipo__in=['EGRESO','RETIRO']).aggregate(s=Sum('monto'))['s'] or Decimal('0')
-    teorico = efectivo_inicial + eff_add - eff_sub
+    totales_medio = caja.total_ventas_por_medio() or {}
+    totales_tipo  = caja.total_por_tipo_mov() or {}
+    teorico = caja.saldo_efectivo_teorico()
+    diff = caja.diferencia_efectivo()
 
     ventas_qs = VentaPOS.objects.filter(caja=caja, estado='COMPLETADA')
     ventas_count = ventas_qs.count()
@@ -314,7 +292,7 @@ def pos_ticket_cierre(request, caja_id):
         'totales_medio': totales_medio,
         'totales_tipo': totales_tipo,
         'saldo_teorico': teorico,
-        'diferencia': caja.diferencia_efectivo() if hasattr(caja, 'diferencia_efectivo') else None,
+        'diferencia': diff,
         'ventas_count': ventas_count,
         'ventas_total': ventas_total,
     })
@@ -334,26 +312,12 @@ def pos_caja_detalle(request, caja_id):
     caja = get_object_or_404(Caja, pk=caja_id)
     ventas = VentaPOS.objects.filter(caja=caja).order_by('fecha')
     movs   = MovimientoCaja.objects.filter(caja=caja).order_by('fecha')
-    # Totales coherentes con el resto:
-    totales_medio = {
-        r['medio_pago']: r['total'] or Decimal('0')
-        for r in movs.filter(tipo='VENTA').values('medio_pago').annotate(total=Sum('monto'))
-    }
-    totales_tipo = {
-        r['tipo']: r['total'] or Decimal('0')
-        for r in movs.values('tipo').annotate(total=Sum('monto'))
-    }
-    efectivo_inicial = caja.saldo_inicial_efectivo or Decimal('0')
-    eff_add = movs.filter(medio_pago='EFECTIVO', tipo__in=['VENTA','INGRESO','AJUSTE']).aggregate(s=Sum('monto'))['s'] or Decimal('0')
-    eff_sub = movs.filter(medio_pago='EFECTIVO', tipo__in=['EGRESO','RETIRO']).aggregate(s=Sum('monto'))['s'] or Decimal('0')
-    teorico = efectivo_inicial + eff_add - eff_sub
-
     return render(request, 'pedidos/pos_caja_detalle.html', {
         'caja': caja,
         'ventas': ventas,
         'movimientos': movs,
-        'totales_medio': totales_medio,
-        'totales_tipo': totales_tipo,
-        'saldo_teorico': teorico,
-        'diferencia': caja.diferencia_efectivo() if hasattr(caja, 'diferencia_efectivo') else None,
+        'totales_medio': caja.total_ventas_por_medio() or {},
+        'totales_tipo': caja.total_por_tipo_mov() or {},
+        'saldo_teorico': caja.saldo_efectivo_teorico(),
+        'diferencia': caja.diferencia_efectivo(),
     })
