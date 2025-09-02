@@ -1,7 +1,6 @@
 # pedidos/urls.py
 from django.urls import path
 from . import views
-from . import views_pos
 
 urlpatterns = [
     # --- Tienda / catálogo ---
@@ -49,19 +48,7 @@ urlpatterns = [
     path('pagos/mp/webhook/', views.mp_webhook_view, name='mp_webhook'),
     path('pagos/mp/success/', views.mp_success, name='mp_success'),
 
+    # --- Otros ---
     path('sw.js', views.service_worker, name='service_worker'),
-
     path('pedido/en-curso/', views.pedido_en_curso, name='pedido_en_curso'),
-
-    # --- POS ---
-    path('pos/', views_pos.pos_panel, name='pos_panel'),
-    path('pos/abrir/', views_pos.pos_abrir_caja, name='pos_abrir_caja'),
-    path('pos/vender/', views_pos.pos_vender, name='pos_vender'),
-    path('pos/movimiento/', views_pos.pos_movimiento, name='pos_movimiento'),
-    path('pos/cerrar/', views_pos.pos_cerrar_caja, name='pos_cerrar_caja'),
-
-    # NUEVO: ticket de cierre e informes de caja
-    path('pos/cierre/<int:caja_id>/ticket/', views_pos.pos_ticket_cierre, name='pos_ticket_cierre'),
-    path('pos/cajas/', views_pos.pos_cajas, name='pos_cajas'),
-    path('pos/cajas/<int:caja_id>/', views_pos.pos_caja_detalle, name='pos_caja_detalle'),
 ]

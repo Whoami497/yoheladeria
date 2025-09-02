@@ -11,8 +11,6 @@ from .models import (
     # Online
     Categoria, Producto, OpcionProducto, Sabor,
     Pedido, DetallePedido, ClienteProfile, ProductoCanje, ZonaEnvio, CadeteProfile,
-    # POS / Caja
-    ProductoPOS, Caja, VentaPOS, VentaPOSItem, MovimientoCaja
 )
 
 # =========================
@@ -199,70 +197,3 @@ class ZonaEnvioAdmin(admin.ModelAdmin):
     list_filter = ('disponible',)
     search_fields = ('nombre',)
     ordering = ('nombre',)
-
-
-# =========================
-# POS / Caja
-# =========================
-
-@admin.register(ProductoPOS)
-class ProductoPOSAdmin(admin.ModelAdmin):
-    list_display = ('nombre', 'precio', 'codigo_sku', 'activo')
-    list_editable = ('precio', 'activo')
-    search_fields = ('nombre', 'codigo_sku')
-    list_filter = ('activo',)
-
-
-class VentaPOSItemInline(admin.TabularInline):
-    model = VentaPOSItem
-    extra = 1
-    fields = ('producto', 'descripcion', 'cantidad', 'precio_unitario', 'subtotal')
-    readonly_fields = ('subtotal',)
-
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs.order_by('id')
-
-
-@admin.register(VentaPOS)
-class VentaPOSAdmin(admin.ModelAdmin):
-    list_display = (
-        'id', 'fecha', 'caja', 'usuario', 'tipo_comprobante',
-        'medio_pago', 'total', 'estado', 'numero_comprobante'
-    )
-    list_filter = ('tipo_comprobante', 'medio_pago', 'estado', 'caja')
-    search_fields = ('numero_comprobante', 'notas')
-    inlines = [VentaPOSItemInline]
-    readonly_fields = ('fecha',)
-
-    def save_model(self, request, obj, form, change):
-        super().save_model(request, obj, form, change)
-        obj.recomputar_total(save=True)
-
-    def save_related(self, request, form, formsets, change):
-        super().save_related(request, form, formsets, change)
-        form.instance.recomputar_total(save=True)
-
-
-@admin.register(Caja)
-class CajaAdmin(admin.ModelAdmin):
-    list_display = (
-        'id', 'estado', 'fecha_apertura', 'usuario_apertura',
-        'fecha_cierre', 'usuario_cierre',
-        'saldo_inicial_efectivo', 'saldo_cierre_efectivo', 'diff_calc'
-    )
-    list_filter = ('estado', 'usuario_apertura')
-    search_fields = ('observaciones',)
-    readonly_fields = ('fecha_apertura', 'fecha_cierre')
-
-    def diff_calc(self, obj):
-        d = obj.diferencia_efectivo()
-        return '—' if d is None else f"${d}"
-    diff_calc.short_description = 'Diferencia efectivo'
-
-
-@admin.register(MovimientoCaja)
-class MovimientoCajaAdmin(admin.ModelAdmin):
-    list_display = ('fecha', 'caja', 'tipo', 'medio_pago', 'monto', 'usuario', 'venta', 'descripcion')
-    list_filter = ('tipo', 'medio_pago', 'caja')
-    search_fields = ('descripcion',)
