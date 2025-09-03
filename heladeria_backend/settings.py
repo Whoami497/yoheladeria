@@ -117,30 +117,25 @@ CHANNEL_LAYERS = {
     },
 }
 
-# --- INICIO: CONFIGURACIÓN DE DJANGO WEBPUSH ---
-WEBPUSH_SETTINGS = {
-    "VAPID_PUBLIC_KEY": os.environ.get('VAPID_PUBLIC_KEY'),
-    "VAPID_PRIVATE_KEY": os.environ.get('VAPID_PRIVATE_KEY'),
-    "VAPID_ADMIN_EMAIL": "lucas548_888@hotmail.com"
-}
-# --- FIN: CONFIGURACIÓN DE DJANGO WEBPUSH ---
-
-# --- INICIO: MERCADO PAGO ---
+# --- MERCADO PAGO ---
 MERCADO_PAGO_ACCESS_TOKEN = os.environ.get('MERCADO_PAGO_ACCESS_TOKEN', '')
 MERCADO_PAGO_PUBLIC_KEY = os.environ.get('MERCADO_PAGO_PUBLIC_KEY', '')
-# --- FIN: MERCADO PAGO ---
 
-# (esta segunda definición sobrescribe la anterior; la dejo tal cual la tenías)
+# --- WEBPUSH ---
+# Preferimos variables de entorno; si no están, usamos tus claves actuales.
+_VAPID_PUBLIC_ENV = os.environ.get('VAPID_PUBLIC_KEY')
+_VAPID_PRIVATE_ENV = os.environ.get('VAPID_PRIVATE_KEY')
+_VAPID_ADMIN_ENV = os.environ.get('VAPID_ADMIN_EMAIL')  # sin "mailto:"
+
 WEBPUSH_SETTINGS = {
-    "VAPID_PUBLIC_KEY": "BDp_wB1ExvnVF_GXHbCY_nCuFeixaDcMOW2-x9PrXcA6bKaWku1bjn4QyMZxORPJUpZNYBznZUQ3lSXxKGjLvUc",  # pega tu publicKey
-    "VAPID_PRIVATE_KEY": "rc3tobb6ie6JWXwLf9YUFvkcb2yn1FV0VKxMq38ri5E",   # pega tu privateKey
-    "VAPID_ADMIN_EMAIL": "mailto:lucasxlo89@gmail.com"          # poné tu correo
+    "VAPID_PUBLIC_KEY": _VAPID_PUBLIC_ENV or "BDp_wB1ExvnVF_GXHbCY_nCuFeixaDcMOW2-x9PrXcA6bKaWku1bjn4QyMZxORPJUpZNYBznZUQ3lSXxKGjLvUc",
+    "VAPID_PRIVATE_KEY": _VAPID_PRIVATE_ENV or "rc3tobb6ie6JWXwLf9YUFvkcb2yn1FV0VKxMq38ri5E",
+    # guardar sin 'mailto:' porque en la vista se agrega 'mailto:' automáticamente
+    "VAPID_ADMIN_EMAIL": (_VAPID_ADMIN_ENV or "lucasxlo89@gmail.com"),
 }
 
-# --- INICIO: GOOGLE MAPS (Distance Matrix / Geocoding) ---
-# Estas variables son usadas por la vista de costo de envío.
+# --- GOOGLE MAPS (Distance Matrix / Geocoding) ---
 GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
 SUCURSAL_DIRECCION = os.environ.get('SUCURSAL_DIRECCION', 'San Martín 123, Catamarca, Argentina')
 MAPS_LANGUAGE = os.environ.get('MAPS_LANGUAGE', 'es')
 MAPS_REGION   = os.environ.get('MAPS_REGION', 'AR')
-# --- FIN: GOOGLE MAPS ---

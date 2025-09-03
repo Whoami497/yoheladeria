@@ -7,7 +7,7 @@
   <p class="text-muted text-center">Aceptá pedidos disponibles y actualizá el estado de tus entregas.</p>
   <hr>
 
-  <!-- Estado / sonido -->
+  <!-- Estado / sonido / notificaciones -->
   <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
     <span id="avail-badge" class="badge bg-secondary">Estado: No disponible</span>
     <span class="text-muted small">La disponibilidad se cambia desde el botón <strong>“Disponible”</strong> de la barra inferior.</span>
@@ -15,6 +15,10 @@
     <div class="ms-auto"></div>
     <button id="enable-sound" class="btn btn-outline-primary">🔔 Habilitar sonido</button>
     <span id="sound-warning" class="badge bg-warning text-dark d-none">Tocá “Habilitar sonido” para oír alertas</span>
+
+    <!-- NUEVO: Notificaciones push -->
+    <button id="enable-push" class="btn btn-outline-success">🛎️ Activar notificaciones</button>
+    <span id="push-status" class="badge bg-secondary">Push: sin configurar</span>
   </div>
 
   <!-- Mis pedidos en curso -->
@@ -82,8 +86,16 @@
   let audioReady    = false;
 
   function tryUnlockAudio(){
-    audioEl.play().then(()=>{ audioEl.pause(); audioEl.currentTime=0; audioReady=true; enableBtn.classList.replace('btn-outline-primary','btn-outline-success'); enableBtn.textContent='🔔 Sonido habilitado'; soundWarn.classList.add('d-none'); })
-                  .catch(()=>{ audioReady=false; soundWarn.classList.remove('d-none'); });
+    audioEl.play().then(()=>{
+      audioEl.pause(); audioEl.currentTime=0;
+      audioReady=true;
+      enableBtn.classList.replace('btn-outline-primary','btn-outline-success');
+      enableBtn.textContent='🔔 Sonido habilitado';
+      soundWarn.classList.add('d-none');
+    }).catch(()=>{
+      audioReady=false;
+      soundWarn.classList.remove('d-none');
+    });
   }
   function playSound(){
     if(!soundEnabled) return;
@@ -95,11 +107,118 @@
     localStorage.setItem('cadete_sound_enabled','1');
     tryUnlockAudio();
   });
-  // hint para iOS/Android: primer gesto del usuario
   ['touchstart','click','keydown'].forEach(evt=>{
-    document.addEventListener(evt, function once(){ if(soundEnabled && !audioReady) tryUnlockAudio(); document.removeEventListener(evt, once, {passive:true}); }, {passive:true});
+    document.addEventListener(evt, function once(){
+      if(soundEnabled && !audioReady) tryUnlockAudio();
+      document.removeEventListener(evt, once, {passive:true});
+    }, {passive:true});
   });
   if(!soundEnabled){ soundWarn.classList.remove('d-none'); }
+
+  // ===== NUEVO: Notificaciones Push =====
+  const VAPID_PUBLIC_KEY = '{{ vapid_public_key|default:""|escapejs }}'; // viene del contexto de la vista
+  const btnPush   = document.getElementById('enable-push');
+  const pushBadge = document.getElementById('push-status');
+
+  function setPushBadge(text, ok){
+    pushBadge.textContent = text;
+    pushBadge.className = 'badge ' + (ok ? 'bg-success' : 'bg-secondary');
+  }
+
+  function urlBase64ToUint8Array(base64String){
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64  = (base64String + padding).replace(/-/g,'+').replace(/_/g,'/');
+    const rawData = atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for(let i=0;i<rawData.length;i++){ outputArray[i]=rawData.charCodeAt(i); }
+    return outputArray;
+  }
+
+  async function saveSubscription(sub){
+    const res = await fetch("{% url 'save_subscription' %}", {
+      method: 'POST',
+      headers: {'Content-Type':'application/json', 'X-CSRFToken': csrftoken, 'X-Requested-With':'XMLHttpRequest'},
+      body: JSON.stringify(sub)
+    });
+    return res.ok;
+  }
+
+  async function ensureServiceWorker(){
+    if(!('serviceWorker' in navigator)){ throw new Error('SW no soportado'); }
+    // Registramos /sw.js que ya sirve el backend con scope raíz
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    return reg;
+  }
+
+  async function getOrCreateSubscription(reg){
+    const existing = await reg.pushManager.getSubscription();
+    if(existing) return existing;
+    const appKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+    return await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey: appKey});
+  }
+
+  async function activatePush(){
+    if(!VAPID_PUBLIC_KEY){
+      setPushBadge('Push: sin VAPID', false);
+      alert('No hay VAPID_PUBLIC_KEY configurada en el servidor.');
+      return;
+    }
+    if(!('Notification' in window)){
+      setPushBadge('Push no disponible', false);
+      return;
+    }
+
+    // permiso
+    let perm = Notification.permission; // 'default' | 'granted' | 'denied'
+    if(perm === 'default'){ perm = await Notification.requestPermission(); }
+    if(perm !== 'granted'){
+      setPushBadge('Push: permiso denegado', false);
+      return;
+    }
+
+    try{
+      const reg  = await ensureServiceWorker();
+      const sub  = await getOrCreateSubscription(reg);
+      const ok   = await saveSubscription(sub.toJSON ? sub.toJSON() : sub);
+      if(ok){
+        setPushBadge('Push: activo', true);
+        btnPush.classList.replace('btn-outline-success','btn-success');
+        btnPush.textContent = '🛎️ Notificaciones activas';
+      }else{
+        setPushBadge('Push: error al guardar', false);
+      }
+    }catch(e){
+      console.error(e);
+      setPushBadge('Push: error', false);
+    }
+  }
+
+  // Estado inicial de push
+  (async ()=>{
+    try{
+      if(!VAPID_PUBLIC_KEY){ setPushBadge('Push: sin VAPID', false); return; }
+      if(!('serviceWorker' in navigator) || !('Notification' in window)){
+        setPushBadge('Push no disponible', false); return;
+      }
+      // Si ya está concedido, intentamos suscribir silenciosamente
+      if(Notification.permission === 'granted'){
+        const reg = await ensureServiceWorker();
+        const sub = await getOrCreateSubscription(reg);
+        const ok  = await saveSubscription(sub.toJSON ? sub.toJSON() : sub);
+        setPushBadge(ok ? 'Push: activo' : 'Push: error al guardar', !!ok);
+        if(ok){
+          btnPush.classList.replace('btn-outline-success','btn-success');
+          btnPush.textContent = '🛎️ Notificaciones activas';
+        }
+      }else{
+        setPushBadge('Push: requiere permiso', false);
+      }
+    }catch(e){
+      setPushBadge('Push: error', false);
+    }
+  })();
+
+  btnPush.addEventListener('click', activatePush);
 
   // ===== Disponibilidad (solo visualizar) & Feed =====
   const availBadge   = document.getElementById('avail-badge');
@@ -243,7 +362,7 @@
     }
   });
 
-  // init + refresco periódico (rápido para que suene a tiempo)
+  // init + refresco periódico
   fetchFeed();
   setInterval(()=>{ fetchFeed(); }, 7000);
 </script>

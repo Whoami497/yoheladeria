@@ -63,26 +63,18 @@
             <strong id="subtotal-amount">${{ total|floatformat:2 }}</strong>
           </div>
 
-          <div class="d-flex align-items-start justify-content-between mb-2">
-            <div class="me-2" style="min-width:220px">
-              <div class="text-muted">Envío (estimado)</div>
-
-              <!-- Modo manual (fallback) -->
-              <select id="envio" class="form-select form-select-sm mt-1">
-                <option value="0">Retiro en local — $0</option>
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <div class="me-2">
+              <div class="text-muted">Envío</div>
+              <select id="envio" class="form-select form-select-sm mt-1" style="min-width:220px">
+                <option value="0" selected>Retiro en local — $0</option>
                 <option value="1500">Zona cercana — $1.500</option>
                 <option value="2500">Zona media — $2.500</option>
                 <option value="3500">Zona lejana — $3.500</option>
+                <!-- se agrega dinámicamente una opción “Auto” cuando calculemos -->
               </select>
-
-              <!-- Switch para usar cálculo automático -->
-              <div class="form-check form-switch mt-2">
-                <input class="form-check-input" type="checkbox" id="auto-envio-switch" checked>
-                <label class="form-check-label small" for="auto-envio-switch">Usar cálculo automático (Google)</label>
-              </div>
-              <div id="auto-envio-status" class="small text-muted mt-1"></div>
+              <div class="small text-muted mt-1" id="envio-info" style="min-height:1.25rem;"></div>
             </div>
-
             <div class="text-end">
               <div class="small text-muted">Costo de envío</div>
               <div class="fw-semibold" id="envio-amount">$0.00</div>
@@ -97,7 +89,8 @@
           </div>
 
           <div class="small text-muted mt-1">
-            *El envío mostrado es estimado. El total real lo calcula el sistema según tu dirección.
+            *Si elegís “Calcular automáticamente”, usamos Google para estimar costo/distancia
+            desde tu dirección o tu ubicación actual. El valor podrá ajustarse levemente.
           </div>
         </div>
       </div>
@@ -110,7 +103,7 @@
           <form method="post">
             {% csrf_token %}
 
-            <!-- guardamos lo elegido en el selector de envío solo para referencia -->
+            <!-- guardamos lo elegido en el selector de envío solo a modo informativo -->
             <input type="hidden" name="envio_visual_opcion" id="envio-visual-opcion" value="Retiro en local — $0">
             <input type="hidden" name="envio_visual_costo" id="envio-visual-costo" value="0">
 
@@ -120,10 +113,17 @@
                      value="{{ request.user.get_full_name|default:request.user.username }}" required>
             </div>
 
-            <div class="mb-3">
-              <label class="form-label">Dirección de Envío:</label>
-              <input type="text" class="form-control" name="cliente_direccion" placeholder="Calle, número, referencia">
-              <div class="form-text">Mientras escribís, calculamos el envío automáticamente.</div>
+            <div class="mb-2">
+              <label class="form-label mb-1">Dirección de Envío:</label>
+              <div class="input-group">
+                <input id="dir-input" type="text" class="form-control" name="cliente_direccion" placeholder="Calle, número, referencia">
+                <button class="btn btn-outline-secondary" type="button" id="btn-calc-dir" title="Calcular con esta dirección">Calcular</button>
+              </div>
+              <div class="form-text">Podés calcular envío con esta dirección o con tu ubicación actual.</div>
+            </div>
+
+            <div class="mb-3 d-grid gap-2">
+              <button type="button" class="btn btn-outline-primary" id="btn-geo">📍 Calcular con mi ubicación</button>
             </div>
 
             <div class="mb-3">
@@ -131,7 +131,7 @@
               <input type="text" class="form-control" name="cliente_telefono" placeholder="Ej: 3834 123456">
             </div>
 
-            <!-- NUEVO: una sola aclaración general -->
+            <!-- Aclaración general -->
             <div class="mb-3">
               <label class="form-label">Aclaraciones para tu pedido (opcional)</label>
               <textarea class="form-control" name="nota_pedido" rows="3"
@@ -162,7 +162,7 @@
   </div>
 </div>
 
-<!-- JS: cálculo visual envío/total (automático + manual fallback) -->
+<!-- JS: cálculo visual envío/total + cálculo automático (dirección / geolocalización) -->
 <script>
 (function(){
   const fmt = (n) => '$' + Number(n).toFixed(2);
@@ -174,92 +174,91 @@
   const subEl    = document.getElementById('subtotal-amount');
   const envioLabelHidden = document.getElementById('envio-visual-opcion');
   const envioCostHidden  = document.getElementById('envio-visual-costo');
+  const envioInfo = document.getElementById('envio-info');
 
-  const autoSwitch = document.getElementById('auto-envio-switch');
-  const autoStatus = document.getElementById('auto-envio-status');
-  const dirInput   = document.querySelector('input[name="cliente_direccion"]');
+  const dirInput = document.getElementById('dir-input');
+  const btnCalcDir = document.getElementById('btn-calc-dir');
+  const btnGeo = document.getElementById('btn-geo');
 
-  let debounceTimer = null;
-
-  function updateTotals(costoEnvio, label){
-    envioEl.textContent = fmt(costoEnvio);
-    totalEl.textContent = fmt(subtotal + costoEnvio);
-    subEl.textContent   = fmt(subtotal);
-    envioLabelHidden.value = label || 'Envío';
-    envioCostHidden.value  = String(costoEnvio);
-  }
-
-  function recalcManual(){
+  function recalc(){
     const envio = parseFloat(envioSel.value || '0') || 0;
-    const label = envioSel.options[envioSel.selectedIndex]?.text || 'Envío manual';
-    updateTotals(envio, label);
-    autoStatus.textContent = 'Modo manual seleccionado.';
+    envioEl.textContent  = fmt(envio);
+    totalEl.textContent  = fmt(subtotal + envio);
+    subEl.textContent    = fmt(subtotal);
+    envioLabelHidden.value = envioSel.options[envioSel.selectedIndex]?.text || '';
+    envioCostHidden.value  = String(envio);
+  }
+  envioSel.addEventListener('change', recalc);
+  recalc();
+
+  // crea/actualiza la opción automática del select
+  function setAutoOption(costo, km){
+    let opt = document.getElementById('opt-auto-envio');
+    const label = `Auto (≈ ${km.toFixed(2)} km) — ${fmt(costo)}`;
+    if(!opt){
+      opt = document.createElement('option');
+      opt.id = 'opt-auto-envio';
+      envioSel.appendChild(opt);
+    }
+    opt.value = String(costo);
+    opt.textContent = label;
+    envioSel.value = String(costo);
+    envioInfo.textContent = 'Estimado con Google (Distance Matrix)';
+    recalc();
   }
 
-  async function recalcAuto(){
-    const dir = (dirInput.value || '').trim();
-    if (!dir){
-      autoStatus.textContent = 'Ingresá una dirección para estimar con Google.';
-      envioSel.disabled = false;
-      recalcManual();
+  // helper de fetch con manejo simple
+  async function getJSON(url){
+    const r = await fetch(url, {headers: {'X-Requested-With': 'XMLHttpRequest'}});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return await r.json();
+  }
+
+  async function calcularConDireccion(){
+    const d = (dirInput.value || '').trim();
+    if(!d){ envioInfo.textContent = 'Ingresá una dirección para calcular.'; return; }
+    envioInfo.textContent = 'Calculando...';
+    try{
+      const data = await getJSON(`/api/costo-envio/?direccion=${encodeURIComponent(d)}`);
+      if(data && data.ok){
+        setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0));
+      }else{
+        envioInfo.textContent = 'No se pudo calcular. Probá otra dirección.';
+      }
+    }catch(e){
+      envioInfo.textContent = 'No se pudo calcular. Verificá tu conexión.';
+    }
+  }
+
+  async function calcularConGeolocalizacion(){
+    envioInfo.textContent = 'Obteniendo tu ubicación...';
+    if(!navigator.geolocation){
+      envioInfo.textContent = 'Tu navegador no permite geolocalización.';
       return;
     }
-
-    try{
-      autoStatus.textContent = 'Calculando costo de envío…';
-      const url = `/api/costo-envio/?direccion=${encodeURIComponent(dir)}`;
-      const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
-      const data = await r.json().catch(()=> ({}));
-
-      if (data && data.ok){
-        const costo   = parseFloat(data.costo_envio) || 0;
-        const kmLabel = (typeof data.distancia_km !== 'undefined')
-                        ? ` (${Number(data.distancia_km).toFixed(1)} km)`
-                        : '';
-        updateTotals(costo, `Automático (Google)${kmLabel}`);
-        autoStatus.textContent = `Estimado automático activo${kmLabel}.`;
-      } else {
-        autoStatus.textContent = 'No se pudo estimar automáticamente. Usando modo manual.';
-        envioSel.disabled = false;
-        recalcManual();
+    navigator.geolocation.getCurrentPosition(async (pos)=>{
+      const lat = pos.coords.latitude.toFixed(6);
+      const lng = pos.coords.longitude.toFixed(6);
+      envioInfo.textContent = 'Calculando...';
+      try{
+        // Distance Matrix acepta "lat,lng" como destino
+        const data = await getJSON(`/api/costo-envio/?direccion=${lat},${lng}`);
+        if(data && data.ok){
+          setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0));
+        }else{
+          envioInfo.textContent = 'No se pudo calcular con tu ubicación.';
+        }
+      }catch(e){
+        envioInfo.textContent = 'Error al calcular con tu ubicación.';
       }
-    } catch(e){
-      autoStatus.textContent = 'Error de red al estimar. Usando modo manual.';
-      envioSel.disabled = false;
-      recalcManual();
-    }
+    }, (err)=>{
+      const map = {1:'Permiso denegado',2:'Posición no disponible',3:'Tiempo agotado'};
+      envioInfo.textContent = map[err.code] || 'No se pudo obtener la ubicación.';
+    }, {enableHighAccuracy:true, timeout:10000, maximumAge:0});
   }
 
-  function scheduleAuto(){
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(()=>{
-      if (autoSwitch.checked){
-        envioSel.disabled = true;
-        recalcAuto();
-      }
-    }, 600);
-  }
-
-  // Listeners
-  envioSel.addEventListener('change', recalcManual);
-  autoSwitch.addEventListener('change', ()=>{
-    if (autoSwitch.checked){
-      envioSel.disabled = true;
-      recalcAuto();
-    } else {
-      envioSel.disabled = false;
-      recalcManual();
-    }
-  });
-  dirInput.addEventListener('input', scheduleAuto);
-
-  // Init
-  if (autoSwitch.checked){
-    envioSel.disabled = true;
-    recalcAuto();
-  } else {
-    recalcManual();
-  }
+  btnCalcDir.addEventListener('click', calcularConDireccion);
+  btnGeo.addEventListener('click', calcularConGeolocalizacion);
 })();
 </script>
 

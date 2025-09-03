@@ -14,6 +14,9 @@ urlpatterns = [
     path('carrito/nota/', views.carrito_set_nota, name='carrito_set_nota'),
     path('pedido_exitoso/', views.pedido_exitoso, name='pedido_exitoso'),
 
+    # === API: costo de envío dinámico (usa Google Distance Matrix) ===
+    path('api/costo-envio/', views.api_costo_envio, name='api_costo_envio'),
+
     # --- Autenticación y perfil de clientes ---
     path('register/', views.register_cliente, name='register_cliente'),
     path('perfil/', views.perfil_cliente, name='perfil_cliente'),
@@ -47,9 +50,6 @@ urlpatterns = [
     # --- Mercado Pago ---
     path('pagos/mp/webhook/', views.mp_webhook_view, name='mp_webhook'),
     path('pagos/mp/success/', views.mp_success, name='mp_success'),
-
-    # --- API: costo de envío dinámico ---
-    path('api/costo-envio/', views.api_costo_envio, name='api_costo_envio'),
 
     # --- Otros ---
     path('sw.js', views.service_worker, name='service_worker'),
