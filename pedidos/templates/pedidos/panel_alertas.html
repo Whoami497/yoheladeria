@@ -25,7 +25,18 @@
                 Cliente: <span class="fw-semibold">{{ p.cliente_nombre|default:"N/A" }}</span>
                 · {{ p.cliente_telefono|default:"—" }} · {{ p.cliente_direccion|default:"—" }}
               </div>
-              <div class="small">
+
+              {# ==== NUEVO: bloque informativo de envío (no rompe nada si no hay datos) ==== #}
+              <div class="small text-muted">
+                Envío:
+                {% if p.costo_envio %}
+                  ${{ p.costo_envio|floatformat:2 }}
+                {% else %}
+                  a calcular
+                {% endif %}
+              </div>
+
+              <div class="small mt-1">
                 Cadete:
                 <span class="fw-semibold cadete-name">
                   {% if p.cadete_asignado %}
@@ -100,6 +111,10 @@
                   {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
                 {% else %}—{% endif %}
               </span>
+              {# opcional: mini info de envío #}
+              {% if p.costo_envio %}
+                <span class="small text-muted">· Envío ${{ p.costo_envio|floatformat:2 }}</span>
+              {% endif %}
             </div>
             <div class="dropdown">
               <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
@@ -136,6 +151,9 @@
                   {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
                 {% else %}—{% endif %}
               </span>
+              {% if p.costo_envio %}
+                <span class="small text-muted">· Envío ${{ p.costo_envio|floatformat:2 }}</span>
+              {% endif %}
             </div>
             <div class="dropdown">
               <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
@@ -195,7 +213,6 @@
     btnToggleSound.classList.toggle('btn-outline-secondary', !soundEnabled);
   }
   function unlockAudio(){
-    // intento reproducir y pausar para “desbloquear” por gesto del usuario
     audioEl.play().then(()=>{
       audioEl.pause(); audioEl.currentTime = 0;
       audioUnlocked = true;
@@ -211,7 +228,6 @@
     try{ audioEl.currentTime = 0; audioEl.play().catch(()=>{}); }catch(e){}
   }
 
-  // listeners
   btnToggleSound.addEventListener('click', ()=>{
     soundEnabled = !soundEnabled;
     localStorage.setItem('panel_sound', soundEnabled ? 'on' : 'off');
@@ -223,7 +239,6 @@
     if(soundEnabled){ try{ audioEl.currentTime=0; audioEl.play().catch(()=>{});}catch(e){} }
   });
 
-  // desbloqueo por primer gesto de usuario
   ['click','touchstart','keydown'].forEach(evt=>{
     document.addEventListener(evt, function once(){
       if(!audioUnlocked) unlockAudio();
@@ -244,13 +259,8 @@
     return document.getElementById(`order-${id}`) || document.getElementById(`chip-${id}`) || document.getElementById(`chip-hoy-${id}`);
   }
 
-  // ……………………… (todo el JS restante del panel se mantiene IGUAL que el tuyo) ………………………
-  // Construcción de tarjetas/chips, confirmación, cambio de estado, limpiar, WebSocket, etc.
-  // (Si ya pegaste mi versión anterior completa, NO necesitas tocar nada extra abajo.)
+  /* ===== Construcción de tarjetas/chips (se mantiene igual, solo agrego mini-bloques de envío si llegan datos) ===== */
 
-  /* ===== A partir de aquí pega sin cambios lo que ya tenías ===== */
-
-  // Construye tarjeta (HOY activos)
   function buildCard(order){
     const wrapper=document.createElement('div');
     wrapper.className='order-card alert alert-primary alert-dismissible fade show mb-3 p-3';
@@ -260,6 +270,14 @@
     const cadeteTxt = order.cadete || '—';
     const total = parseFloat(order.total_pedido||0).toFixed(2);
     const estado = order.estado||'RECIBIDO';
+
+    const envioCosto = (order.costo_envio!==undefined && order.costo_envio!==null && order.costo_envio!=='')
+      ? Number(order.costo_envio) : null;
+    const envioInfo  = order.envio_info || '';
+
+    const envioHtml = (envioCosto!==null && !Number.isNaN(envioCosto))
+      ? `<div class="small text-muted">Envío: $${envioCosto.toFixed(2)}${envioInfo?` <span class="text-muted">(${envioInfo})</span>`:''}</div>`
+      : `<div class="small text-muted">Envío: a calcular</div>`;
 
     const detailsHtml = (order.detalles||[]).map(d=>{
       const name=d.opcion_nombre ? `${d.producto_nombre} - ${d.opcion_nombre}` : d.producto_nombre;
@@ -298,6 +316,7 @@
             Cliente: <span class="fw-semibold">${order.cliente_nombre||'N/A'}</span>
             · ${order.cliente_telefono||'—'} · ${order.cliente_direccion||'—'}
           </div>
+          ${envioHtml}
           <div class="small">Cadete: <span class="fw-semibold cadete-name">${cadeteTxt}</span></div>
           <details class="mt-2"><summary>Ver productos</summary><ul class="mb-0 small mt-2">${detailsHtml}</ul></details>
         </div>
@@ -315,6 +334,12 @@
     chip.className='order-chip d-flex align-items-center justify-content-between';
     chip.id= inTodayFinalizados ? `chip-hoy-${order.id}` : `chip-${order.id}`;
     chip.dataset.orderId=order.id;
+
+    const envioCosto = (order.costo_envio!==undefined && order.costo_envio!==null && order.costo_envio!=='')
+      ? Number(order.costo_envio) : null;
+    const envioMini = (envioCosto!==null && !Number.isNaN(envioCosto))
+      ? `<span class="small text-muted">· Envío $${envioCosto.toFixed(2)}</span>` : '';
+
     chip.innerHTML=`
       <div class="d-flex align-items-center gap-2 flex-wrap">
         <span class="chip-id">#${order.id}</span>
@@ -322,6 +347,7 @@
         <span class="text-muted small">$${parseFloat(order.total_pedido||0).toFixed(2)}</span>
         <span class="small text-truncate chip-client">${order.cliente_nombre||'N/A'}</span>
         <span class="small text-muted">· Cadete: ${order.cadete||'—'}</span>
+        ${envioMini}
       </div>
       <div class="dropdown">
         <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
@@ -459,7 +485,7 @@
     if(kind==='nuevo_pedido'){
       if(!orderExists(orderId)){
         orderData.id=orderId;
-        const card=buildCard(orderData);
+        const card=buildCard(orderData);   // mostrará envío si vino en orderData
         alertsHoy.prepend(card);
         playSound();
       }

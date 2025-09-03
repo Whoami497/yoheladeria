@@ -55,20 +55,55 @@ def cadete_esta_ocupado(cadete_profile) -> bool:
     ).exists()
 
 
+def _serialize_pedido_for_panel(pedido, include_details=True):
+    """
+    Serializa un Pedido para mandarlo al panel por WS/JSON.
+    Incluye costo_envio como float (para que el front lo formatee).
+    """
+    data = {
+        'id': pedido.id,
+        'estado': pedido.estado,
+        'cliente_nombre': pedido.cliente_nombre,
+        'cliente_direccion': pedido.cliente_direccion,
+        'cliente_telefono': pedido.cliente_telefono,
+        'metodo_pago': pedido.metodo_pago,
+        'total_pedido': str(pedido.total_pedido or 0),
+        'costo_envio': float(pedido.costo_envio or 0),
+        'cadete': (
+            pedido.cadete_asignado.user.get_full_name() or pedido.cadete_asignado.user.username
+        ) if getattr(pedido, 'cadete_asignado', None) else None,
+    }
+    if include_details:
+        data['detalles'] = [{
+            'producto_nombre': d.producto.nombre,
+            'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
+            'cantidad': d.cantidad,
+            'sabores_nombres': [s.nombre for s in d.sabores.all()],
+        } for d in pedido.detalles.all()]
+    return data
+
+
 def _notify_panel_update(pedido, message='actualizacion_pedido'):
     """
     Broadcast para que el panel de alertas (tienda) refresque automáticamente.
     Reusa el mismo grupo 'pedidos_new_orders'.
+    - Para 'nuevo_pedido' enviamos datos completos.
+    - Para cualquier otro mensaje, mandamos sólo el estado para ser livianos.
     """
     try:
         channel_layer = get_channel_layer()
+        if message == 'nuevo_pedido':
+            order_data = _serialize_pedido_for_panel(pedido, include_details=True)
+        else:
+            order_data = {'estado': pedido.estado}
+
         async_to_sync(channel_layer.group_send)(
             'pedidos_new_orders',
             {
                 'type': 'send_order_notification',
                 'message': message,
                 'order_id': pedido.id,
-                'order_data': {'estado': pedido.estado}
+                'order_data': order_data,
             }
         )
     except Exception as e:
@@ -471,8 +506,9 @@ def ver_carrito(request):
 
         # Cálculo de envío ANTES de crear el pedido (si hay dirección tipeada)
         costo_envio_decimal = Decimal('0.00')
+        distancia_km = 0.0
         if direccion_para_maps:
-            costo_envio_decimal, _km = _calcular_costo_envio(direccion_para_maps)
+            costo_envio_decimal, distancia_km = _calcular_costo_envio(direccion_para_maps)
 
         pedido_kwargs = {
             'cliente_nombre': nombre,
@@ -492,7 +528,7 @@ def ver_carrito(request):
                     pedido_kwargs['cliente_direccion'] = profile.direccion
                     # Podés calcular envío contra la del perfil si querés:
                     if not direccion_para_maps:
-                        costo_envio_decimal, _km = _calcular_costo_envio(profile.direccion)
+                        costo_envio_decimal, distancia_km = _calcular_costo_envio(profile.direccion)
                         pedido_kwargs['costo_envio'] = costo_envio_decimal
                 if not telefono and profile.telefono:
                     pedido_kwargs['cliente_telefono'] = profile.telefono
@@ -553,7 +589,7 @@ def ver_carrito(request):
                     del request.session['carrito']
                     request.session.modified = True
 
-                messages.info(request, f"Redirigiendo a Mercado Pago para completar el pago del pedido #{nuevo_pedido.id}.")
+                messages.info(request, f"Redirigiendo a Mercado Pago para completar el pago del pedido #{nuevo_pido.id}.")
                 return redirect(init_point)
             except Exception as e:
                 messages.error(request, f"No pudimos iniciar el pago con Mercado Pago. Probá de nuevo o elegí otro método. Detalle: {e}")
@@ -566,7 +602,7 @@ def ver_carrito(request):
             request.user.clienteprofile.save()
             messages.success(request, f"¡Has ganado {puntos_ganados} puntos de fidelidad con este pedido!")
 
-        # Aviso a panel (incluimos la nota general en el payload)
+        # Aviso a panel (incluimos costo_envio y, si lo calculamos, distancia)
         try:
             channel_layer = get_channel_layer()
             async_to_sync(channel_layer.group_send)(
@@ -581,6 +617,8 @@ def ver_carrito(request):
                         'cliente_telefono': nuevo_pedido.cliente_telefono,
                         'metodo_pago': nuevo_pedido.metodo_pago,
                         'total_pedido': str(nuevo_pedido.total_pedido),
+                        'costo_envio': float(nuevo_pedido.costo_envio or 0),
+                        'distancia_km': float(distancia_km or 0),
                         'nota_pedido': (nota_pedido or None),
                         'detalles': detalles_para_notificacion,
                     }
@@ -823,7 +861,7 @@ def panel_alertas_data(request):
         qs = Pedido.objects.filter(fecha_pedido__date=fecha).order_by('-fecha_pedido')
 
     def serialize(p):
-        return {
+        data = {
             'id': p.id,
             'estado': p.estado,
             'cliente_nombre': p.cliente_nombre,
@@ -831,6 +869,7 @@ def panel_alertas_data(request):
             'cliente_telefono': p.cliente_telefono,
             'metodo_pago': p.metodo_pago,
             'total_pedido': str(p.total_pedido or 0),
+            'costo_envio': float(p.costo_envio or 0),
             'cadete': (p.cadete_asignado.user.get_full_name() or p.cadete_asignado.user.username)
                     if getattr(p, 'cadete_asignado', None) else None,
             'detalles': [{
@@ -840,6 +879,7 @@ def panel_alertas_data(request):
                 'sabores_nombres': [s.nombre for s in d.sabores.all()],
             } for d in p.detalles.all()],
         }
+        return data
 
     return JsonResponse({'pedidos': [serialize(p) for p in qs]})
 
@@ -982,7 +1022,7 @@ def confirmar_pedido(request, pedido_id):
     except Exception as e:
         print(f"Notify cadetes error: {e}")
 
-    # Notificar al panel para que refresque listas
+    # Notificar al panel para que refresque listas (enviará info completa por ser 'nuevo_pedido')
     _notify_panel_update(pedido, message='nuevo_pedido')
 
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
@@ -1030,7 +1070,7 @@ def aceptar_pedido(request, pedido_id):
     request.session['cadete_disponible'] = False
     request.session.modified = True
 
-    # Notificar al panel para refresco automático
+    # Notificar a panel para refresco automático
     _notify_panel_update(pedido)
 
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
@@ -1382,6 +1422,7 @@ def mp_webhook_view(request):
                         'cliente_telefono': pedido.cliente_telefono,
                         'metodo_pago': pedido.metodo_pago,
                         'total_pedido': str(pedido.total_pedido),
+                        'costo_envio': float(pedido.costo_envio or 0),
                         'detalles': detalles_para_notificacion,
                     }
                 }
@@ -1424,6 +1465,7 @@ def mp_success(request):
                         'cliente_telefono': pedido.cliente_telefono,
                         'metodo_pago': 'MERCADOPAGO',
                         'total_pedido': str(pedido.total_pedido),
+                        'costo_envio': float(pedido.costo_envio or 0),
                         'detalles': detalles_para_notificacion,
                     }
                 }
