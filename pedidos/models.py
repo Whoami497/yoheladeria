@@ -139,6 +139,9 @@ class Pedido(models.Model):
     metodo_pago = models.CharField(max_length=20, choices=METODO_PAGO_CHOICES, default='EFECTIVO')
     zona_envio = models.ForeignKey(ZonaEnvio, on_delete=models.SET_NULL, null=True, blank=True, related_name='pedidos_en_zona')
 
+    # 🆕 Campo para guardar costo real de envío (API o manual)
+    costo_envio = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, help_text="Costo calculado del envío (ej: por Google Maps).")
+
     cadete_asignado = models.ForeignKey(
         CadeteProfile,
         on_delete=models.SET_NULL,
@@ -163,6 +166,8 @@ class Pedido(models.Model):
             total += precio_unitario * detalle.cantidad
         if self.zona_envio and self.zona_envio.costo:
             total += self.zona_envio.costo
+        if self.costo_envio:
+            total += self.costo_envio
         return total
 
 

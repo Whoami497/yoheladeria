@@ -63,16 +63,26 @@
             <strong id="subtotal-amount">${{ total|floatformat:2 }}</strong>
           </div>
 
-          <div class="d-flex align-items-center justify-content-between mb-2">
-            <div class="me-2">
+          <div class="d-flex align-items-start justify-content-between mb-2">
+            <div class="me-2" style="min-width:220px">
               <div class="text-muted">Envío (estimado)</div>
-              <select id="envio" class="form-select form-select-sm mt-1" style="min-width:220px">
+
+              <!-- Modo manual (fallback) -->
+              <select id="envio" class="form-select form-select-sm mt-1">
                 <option value="0">Retiro en local — $0</option>
                 <option value="1500">Zona cercana — $1.500</option>
                 <option value="2500">Zona media — $2.500</option>
                 <option value="3500">Zona lejana — $3.500</option>
               </select>
+
+              <!-- Switch para usar cálculo automático -->
+              <div class="form-check form-switch mt-2">
+                <input class="form-check-input" type="checkbox" id="auto-envio-switch" checked>
+                <label class="form-check-label small" for="auto-envio-switch">Usar cálculo automático (Google)</label>
+              </div>
+              <div id="auto-envio-status" class="small text-muted mt-1"></div>
             </div>
+
             <div class="text-end">
               <div class="small text-muted">Costo de envío</div>
               <div class="fw-semibold" id="envio-amount">$0.00</div>
@@ -87,7 +97,7 @@
           </div>
 
           <div class="small text-muted mt-1">
-            *El envío se muestra a modo informativo y puede ajustarse según dirección/horario.
+            *El envío mostrado es estimado. El total real lo calcula el sistema según tu dirección.
           </div>
         </div>
       </div>
@@ -113,6 +123,7 @@
             <div class="mb-3">
               <label class="form-label">Dirección de Envío:</label>
               <input type="text" class="form-control" name="cliente_direccion" placeholder="Calle, número, referencia">
+              <div class="form-text">Mientras escribís, calculamos el envío automáticamente.</div>
             </div>
 
             <div class="mb-3">
@@ -151,7 +162,7 @@
   </div>
 </div>
 
-<!-- JS: cálculo visual envío/total -->
+<!-- JS: cálculo visual envío/total (automático + manual fallback) -->
 <script>
 (function(){
   const fmt = (n) => '$' + Number(n).toFixed(2);
@@ -164,16 +175,91 @@
   const envioLabelHidden = document.getElementById('envio-visual-opcion');
   const envioCostHidden  = document.getElementById('envio-visual-costo');
 
-  function recalc(){
-    const envio = parseFloat(envioSel.value || '0') || 0;
-    envioEl.textContent  = fmt(envio);
-    totalEl.textContent  = fmt(subtotal + envio);
-    subEl.textContent    = fmt(subtotal);
-    envioLabelHidden.value = envioSel.options[envioSel.selectedIndex].text;
-    envioCostHidden.value  = String(envio);
+  const autoSwitch = document.getElementById('auto-envio-switch');
+  const autoStatus = document.getElementById('auto-envio-status');
+  const dirInput   = document.querySelector('input[name="cliente_direccion"]');
+
+  let debounceTimer = null;
+
+  function updateTotals(costoEnvio, label){
+    envioEl.textContent = fmt(costoEnvio);
+    totalEl.textContent = fmt(subtotal + costoEnvio);
+    subEl.textContent   = fmt(subtotal);
+    envioLabelHidden.value = label || 'Envío';
+    envioCostHidden.value  = String(costoEnvio);
   }
-  envioSel.addEventListener('change', recalc);
-  recalc();
+
+  function recalcManual(){
+    const envio = parseFloat(envioSel.value || '0') || 0;
+    const label = envioSel.options[envioSel.selectedIndex]?.text || 'Envío manual';
+    updateTotals(envio, label);
+    autoStatus.textContent = 'Modo manual seleccionado.';
+  }
+
+  async function recalcAuto(){
+    const dir = (dirInput.value || '').trim();
+    if (!dir){
+      autoStatus.textContent = 'Ingresá una dirección para estimar con Google.';
+      envioSel.disabled = false;
+      recalcManual();
+      return;
+    }
+
+    try{
+      autoStatus.textContent = 'Calculando costo de envío…';
+      const url = `/api/costo-envio/?direccion=${encodeURIComponent(dir)}`;
+      const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      const data = await r.json().catch(()=> ({}));
+
+      if (data && data.ok){
+        const costo   = parseFloat(data.costo_envio) || 0;
+        const kmLabel = (typeof data.distancia_km !== 'undefined')
+                        ? ` (${Number(data.distancia_km).toFixed(1)} km)`
+                        : '';
+        updateTotals(costo, `Automático (Google)${kmLabel}`);
+        autoStatus.textContent = `Estimado automático activo${kmLabel}.`;
+      } else {
+        autoStatus.textContent = 'No se pudo estimar automáticamente. Usando modo manual.';
+        envioSel.disabled = false;
+        recalcManual();
+      }
+    } catch(e){
+      autoStatus.textContent = 'Error de red al estimar. Usando modo manual.';
+      envioSel.disabled = false;
+      recalcManual();
+    }
+  }
+
+  function scheduleAuto(){
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(()=>{
+      if (autoSwitch.checked){
+        envioSel.disabled = true;
+        recalcAuto();
+      }
+    }, 600);
+  }
+
+  // Listeners
+  envioSel.addEventListener('change', recalcManual);
+  autoSwitch.addEventListener('change', ()=>{
+    if (autoSwitch.checked){
+      envioSel.disabled = true;
+      recalcAuto();
+    } else {
+      envioSel.disabled = false;
+      recalcManual();
+    }
+  });
+  dirInput.addEventListener('input', scheduleAuto);
+
+  // Init
+  if (autoSwitch.checked){
+    envioSel.disabled = true;
+    recalcAuto();
+  } else {
+    recalcManual();
+  }
 })();
 </script>
 

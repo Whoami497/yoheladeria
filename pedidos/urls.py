@@ -48,6 +48,9 @@ urlpatterns = [
     path('pagos/mp/webhook/', views.mp_webhook_view, name='mp_webhook'),
     path('pagos/mp/success/', views.mp_success, name='mp_success'),
 
+    # --- API: costo de envío dinámico ---
+    path('api/costo-envio/', views.api_costo_envio, name='api_costo_envio'),
+
     # --- Otros ---
     path('sw.js', views.service_worker, name='service_worker'),
     path('pedido/en-curso/', views.pedido_en_curso, name='pedido_en_curso'),

@@ -129,8 +129,18 @@ WEBPUSH_SETTINGS = {
 MERCADO_PAGO_ACCESS_TOKEN = os.environ.get('MERCADO_PAGO_ACCESS_TOKEN', '')
 MERCADO_PAGO_PUBLIC_KEY = os.environ.get('MERCADO_PAGO_PUBLIC_KEY', '')
 # --- FIN: MERCADO PAGO ---
+
+# (esta segunda definición sobrescribe la anterior; la dejo tal cual la tenías)
 WEBPUSH_SETTINGS = {
     "VAPID_PUBLIC_KEY": "BDp_wB1ExvnVF_GXHbCY_nCuFeixaDcMOW2-x9PrXcA6bKaWku1bjn4QyMZxORPJUpZNYBznZUQ3lSXxKGjLvUc",  # pega tu publicKey
     "VAPID_PRIVATE_KEY": "rc3tobb6ie6JWXwLf9YUFvkcb2yn1FV0VKxMq38ri5E",   # pega tu privateKey
     "VAPID_ADMIN_EMAIL": "mailto:lucasxlo89@gmail.com"          # poné tu correo
 }
+
+# --- INICIO: GOOGLE MAPS (Distance Matrix / Geocoding) ---
+# Estas variables son usadas por la vista de costo de envío.
+GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
+SUCURSAL_DIRECCION = os.environ.get('SUCURSAL_DIRECCION', 'San Martín 123, Catamarca, Argentina')
+MAPS_LANGUAGE = os.environ.get('MAPS_LANGUAGE', 'es')
+MAPS_REGION   = os.environ.get('MAPS_REGION', 'AR')
+# --- FIN: GOOGLE MAPS ---

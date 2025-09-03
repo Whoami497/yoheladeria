@@ -19,6 +19,7 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 import json
 import mercadopago
+import requests  # <- NUEVO
 
 from .forms import ClienteRegisterForm, ClienteProfileForm
 from .models import (
@@ -99,9 +100,9 @@ def _notify_cadetes_new_order(request, pedido):
     )
 
     cadetes = (CadeteProfile.objects
-               .exclude(subscription_info__isnull=True)
-               .annotate(tiene_activo=Exists(activos_qs))
-               .filter(tiene_activo=False))
+            .exclude(subscription_info__isnull=True)
+            .annotate(tiene_activo=Exists(activos_qs))
+            .filter(tiene_activo=False))
 
     # Respetar “disponible=True” si el modelo lo trae
     cadetes = [c for c in cadetes if not hasattr(c, 'disponible') or c.disponible]
@@ -125,6 +126,72 @@ def _notify_cadetes_new_order(request, pedido):
             )
         except Exception as e:
             print(f"WEBPUSH cadete {cp.user_id} error: {e}")
+
+
+# =========================
+# === ENVÍO (Google Maps)
+# =========================
+def _calcular_costo_envio(direccion_cliente: str):
+    """
+    Devuelve (costo_envio_decimal, distancia_km_float) usando Distance Matrix.
+    Reglas:
+      - dirección vacía => 0 (retiro en local)
+      - fallback si falla API => base 300 ARS
+      - costo = 300 + 50 * km
+    """
+    direccion_cliente = (direccion_cliente or '').strip()
+    if not direccion_cliente:
+        return (Decimal('0.00'), 0.0)
+
+    api_key = getattr(settings, 'GOOGLE_MAPS_API_KEY', None)
+    origen = getattr(settings, 'SUCURSAL_DIRECCION', None)
+    language = getattr(settings, 'MAPS_LANGUAGE', 'es')
+    region = getattr(settings, 'MAPS_REGION', 'AR')
+
+    if not api_key or not origen:
+        # sin config -> fallback
+        return (Decimal('300.00'), 0.0)
+
+    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+    params = {
+        'origins': origen,
+        'destinations': direccion_cliente,
+        'key': api_key,
+        'mode': 'driving',
+        'units': 'metric',
+        'language': language,
+        'region': region,
+    }
+    try:
+        r = requests.get(url, params=params, timeout=8)
+        r.raise_for_status()
+        data = r.json()
+        rows = data.get('rows', [])
+        if not rows:
+            return (Decimal('300.00'), 0.0)
+        el = (rows[0].get('elements') or [{}])[0]
+        if el.get('status') != 'OK':
+            return (Decimal('300.00'), 0.0)
+        metros = el['distance']['value']  # int (m)
+        km = round(metros / 1000.0, 2)
+        costo = Decimal('300.00') + (Decimal('50.00') * Decimal(str(km)))
+        return (costo.quantize(Decimal('0.01')), km)
+    except Exception as e:
+        print(f"MAPS ERROR: {e}")
+        return (Decimal('300.00'), 0.0)
+
+
+@require_GET
+def api_costo_envio(request):
+    """
+    Endpoint liviano para estimar costo/ distancia desde el formulario del carrito.
+    GET ?direccion=...
+    """
+    direccion = (request.GET.get('direccion') or '').strip()
+    if not direccion:
+        return JsonResponse({'ok': True, 'costo_envio': 0.0, 'distancia_km': 0.0, 'mode': 'pickup'})
+    costo, km = _calcular_costo_envio(direccion)
+    return JsonResponse({'ok': True, 'costo_envio': float(costo), 'distancia_km': float(km), 'mode': 'maps'})
 
 
 # =========================
@@ -157,12 +224,12 @@ def index(request):
     categorias = Categoria.objects.filter(disponible=True).order_by('orden')
 
     contexto = {
-        'productos': productos,
-        'categorias': categorias,
-        'q': q,
-        'cat': int(cat) if cat else None,
-        'sort': sort,
-    }
+            'productos': productos,
+            'categorias': categorias,
+            'q': q,
+            'cat': int(cat) if cat else None,
+            'sort': sort,
+        }
     return render(request, 'pedidos/index.html', contexto)
 
 
@@ -389,20 +456,30 @@ def ver_carrito(request):
 
     if request.method == 'POST':
         nombre = request.POST.get('cliente_nombre')
-        direccion = (request.POST.get('cliente_direccion') or '').strip()
+        direccion_input = (request.POST.get('cliente_direccion') or '').strip()
         telefono = request.POST.get('cliente_telefono')
         metodo_pago = request.POST.get('metodo_pago')
         nota_pedido = (request.POST.get('nota_pedido') or '').strip()
 
+        # Copia limpia para Maps (sin la nota)
+        direccion_para_maps = direccion_input
+
         # Si hay nota general, la anexamos a la dirección para que quede guardada en DB
+        direccion_a_guardar = direccion_input
         if nota_pedido:
-            direccion = (f"{direccion} — Nota: {nota_pedido}" if direccion else f"Nota: {nota_pedido}")
+            direccion_a_guardar = (f"{direccion_input} — Nota: {nota_pedido}" if direccion_input else f"Nota: {nota_pedido}")
+
+        # Cálculo de envío ANTES de crear el pedido (si hay dirección tipeada)
+        costo_envio_decimal = Decimal('0.00')
+        if direccion_para_maps:
+            costo_envio_decimal, _km = _calcular_costo_envio(direccion_para_maps)
 
         pedido_kwargs = {
             'cliente_nombre': nombre,
-            'cliente_direccion': direccion,
+            'cliente_direccion': direccion_a_guardar,
             'cliente_telefono': telefono,
-            'metodo_pago': metodo_pago
+            'metodo_pago': metodo_pago,
+            'costo_envio': costo_envio_decimal,  # persistimos
         }
         if request.user.is_authenticated:
             pedido_kwargs['user'] = request.user
@@ -410,8 +487,13 @@ def ver_carrito(request):
                 profile = request.user.clienteprofile
                 if not nombre and request.user.first_name and request.user.last_name:
                     pedido_kwargs['cliente_nombre'] = f"{request.user.first_name} {request.user.last_name}"
-                if not direccion and profile.direccion:
+                # Si no cargó dirección en el form y el perfil tiene una, usamos la del perfil
+                if not direccion_input and profile.direccion:
                     pedido_kwargs['cliente_direccion'] = profile.direccion
+                    # Podés calcular envío contra la del perfil si querés:
+                    if not direccion_para_maps:
+                        costo_envio_decimal, _km = _calcular_costo_envio(profile.direccion)
+                        pedido_kwargs['costo_envio'] = costo_envio_decimal
                 if not telefono and profile.telefono:
                     pedido_kwargs['cliente_telefono'] = profile.telefono
 
@@ -661,14 +743,14 @@ def pedido_en_curso(request):
     pedidos = []
     if hasattr(request.user, 'cadeteprofile'):
         pedidos = (Pedido.objects
-                   .filter(cadete_asignado=request.user.cadeteprofile,
-                           estado__in=['ASIGNADO', 'EN_CAMINO'])
-                   .order_by('-fecha_pedido'))
+                .filter(cadete_asignado=request.user.cadeteprofile,
+                        estado__in=['ASIGNADO', 'EN_CAMINO'])
+                .order_by('-fecha_pedido'))
     else:
         pedidos = (Pedido.objects
-                   .filter(user=request.user)
-                   .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
-                   .order_by('-fecha_pedido'))
+                .filter(user=request.user)
+                .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
+                .order_by('-fecha_pedido'))
 
     return render(request, 'pedidos/pedido_en_curso.html', {'pedidos': pedidos})
 
@@ -720,17 +802,17 @@ def panel_alertas_data(request):
 
     if scope == 'hoy':
         qs = (Pedido.objects
-              .filter(fecha_pedido__date=hoy)
-              .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
-              .order_by('-fecha_pedido'))
+            .filter(fecha_pedido__date=hoy)
+            .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
+            .order_by('-fecha_pedido'))
     elif scope == 'hoy_finalizados':
         qs = (Pedido.objects
-              .filter(fecha_pedido__date=hoy, estado__in=['ENTREGADO', 'CANCELADO'])
-              .order_by('-fecha_pedido'))
+            .filter(fecha_pedido__date=hoy, estado__in=['ENTREGADO', 'CANCELADO'])
+            .order_by('-fecha_pedido'))
     elif scope == 'ayer':
         qs = (Pedido.objects
-              .filter(fecha_pedido__date=hoy - timedelta(days=1))
-              .order_by('-fecha_pedido'))
+            .filter(fecha_pedido__date=hoy - timedelta(days=1))
+            .order_by('-fecha_pedido'))
     else:
         # scope como fecha YYYY-MM-DD
         try:
@@ -750,7 +832,7 @@ def panel_alertas_data(request):
             'metodo_pago': p.metodo_pago,
             'total_pedido': str(p.total_pedido or 0),
             'cadete': (p.cadete_asignado.user.get_full_name() or p.cadete_asignado.user.username)
-                      if getattr(p, 'cadete_asignado', None) else None,
+                    if getattr(p, 'cadete_asignado', None) else None,
             'detalles': [{
                 'producto_nombre': d.producto.nombre,
                 'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
@@ -771,8 +853,8 @@ def panel_alertas_anteriores(request):
     hoy = timezone.localdate()
     limite = hoy - timedelta(days=1)
     pedidos = (Pedido.objects
-               .filter(fecha_pedido__date__lt=limite)
-               .order_by('-fecha_pedido')[:300])
+            .filter(fecha_pedido__date__lt=limite)
+            .order_by('-fecha_pedido')[:300])
 
     filas = []
     for p in pedidos:
@@ -789,12 +871,12 @@ def panel_alertas_anteriores(request):
         )
     html = f"""
     <div style="padding:20px;font-family:system-ui;-webkit-font-smoothing:antialiased">
-      <h3>Pedidos anteriores</h3>
-      <p><a href="/panel-alertas/">Volver al panel</a></p>
-      <table border="1" cellpadding="6" cellspacing="0">
+    <h3>Pedidos anteriores</h3>
+    <p><a href="/panel-alertas/">Volver al panel</a></p>
+    <table border="1" cellpadding="6" cellspacing="0">
         <thead><tr><th>ID</th><th>Fecha</th><th>Estado</th><th>Cliente</th><th>Cadete</th><th>Total</th></tr></thead>
         <tbody>{''.join(filas) or '<tr><td colspan="6">Sin datos</td></tr>'}</tbody>
-      </table>
+    </table>
     </div>
     """
     return HttpResponse(html)
@@ -1174,8 +1256,8 @@ def cadete_feed(request):
         return JsonResponse({'ok': True, 'disponible': False, 'pedidos': []})
 
     pedidos = (Pedido.objects
-               .filter(estado='EN_PREPARACION', cadete_asignado__isnull=True)
-               .order_by('-fecha_pedido')[:50])
+            .filter(estado='EN_PREPARACION', cadete_asignado__isnull=True)
+            .order_by('-fecha_pedido')[:50])
 
     def ser(p):
         return {
