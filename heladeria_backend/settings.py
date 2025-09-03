@@ -139,3 +139,23 @@ GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
 SUCURSAL_DIRECCION = os.environ.get('SUCURSAL_DIRECCION', 'San Martín 123, Catamarca, Argentina')
 MAPS_LANGUAGE = os.environ.get('MAPS_LANGUAGE', 'es')
 MAPS_REGION   = os.environ.get('MAPS_REGION', 'AR')
+
+# --- ENVÍOS (calibrables) ---
+# Fórmula: costo = ENVIO_BASE + ENVIO_POR_KM * (km_efectivos)
+# donde km_efectivos = max(km, ENVIO_KM_MIN) + ENVIO_KM_OFFSET
+ENVIO_BASE = os.environ.get('ENVIO_BASE', '300')          # ARS
+ENVIO_POR_KM = os.environ.get('ENVIO_POR_KM', '50')       # ARS por km
+ENVIO_REDONDEO = os.environ.get('ENVIO_REDONDEO', '100')  # redondeo a múltiplos (0 = sin redondeo)
+ENVIO_MIN = os.environ.get('ENVIO_MIN', '0')              # costo mínimo (ARS)
+ENVIO_MAX = os.environ.get('ENVIO_MAX', '')               # costo máximo ('' = sin tope)
+
+# Ajustes finos
+ENVIO_KM_MIN = os.environ.get('ENVIO_KM_MIN', '0')        # mínimo de km cobrables (ej: 1)
+ENVIO_KM_OFFSET = os.environ.get('ENVIO_KM_OFFSET', '0')  # km fantasma para compensar
+
+# Origen en coordenadas (recomendado para precisión)
+ORIGEN_LAT = os.environ.get('ORIGEN_LAT', '')             # ej: -28.468500
+ORIGEN_LNG = os.environ.get('ORIGEN_LNG', '')             # ej: -65.779900
+
+# Sesgo para el geocoding (ayuda a mantenerlo en Catamarca/AR)
+MAPS_COMPONENTS = os.environ.get('MAPS_COMPONENTS', 'country:AR|administrative_area:Catamarca')

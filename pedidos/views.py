@@ -14,12 +14,13 @@ from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
 from django.views.decorators.csrf import csrf_exempt
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 import json
 import mercadopago
-import requests  # <- NUEVO
+import requests
+import re
 
 from .forms import ClienteRegisterForm, ClienteProfileForm
 from .models import (
@@ -164,69 +165,141 @@ def _notify_cadetes_new_order(request, pedido):
 
 
 # =========================
-# === ENVÍO (Google Maps)
+# === ENVÍO (Google Maps) — calibrable via settings.py
 # =========================
+_LATLNG_RE = re.compile(r'^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$')
+
+def _is_latlng(s: str) -> bool:
+    return bool(_LATLNG_RE.match((s or '').strip()))
+
+def _origin_from_settings() -> str:
+    """
+    Devuelve el origen para Distance Matrix:
+    - Si ORIGEN_LAT/LNG están definidos, usa 'lat,lng'
+    - Si no, usa SUCURSAL_DIRECCION
+    """
+    lat = (getattr(settings, 'ORIGEN_LAT', '') or '').strip()
+    lng = (getattr(settings, 'ORIGEN_LNG', '') or '').strip()
+    if lat and lng:
+        return f"{lat},{lng}"
+    return getattr(settings, 'SUCURSAL_DIRECCION', '')
+
 def _calcular_costo_envio(direccion_cliente: str):
     """
     Devuelve (costo_envio_decimal, distancia_km_float) usando Distance Matrix.
-    Reglas:
-      - dirección vacía => 0 (retiro en local)
-      - fallback si falla API => base 300 ARS
-      - costo = 300 + 50 * km
+
+    Usa variables de settings.py:
+      ENVIO_BASE (ARS), ENVIO_POR_KM (ARS/km), ENVIO_MIN, ENVIO_MAX
+      ENVIO_KM_MIN (piso km), ENVIO_KM_OFFSET (km fantasma)
+      ENVIO_REDONDEO (múltiplo ARS; '0' => sin redondeo)
+    Soporta destino como dirección o 'lat,lng'. Origen por ORIGEN_LAT/LNG si están definidos.
     """
-    direccion_cliente = (direccion_cliente or '').strip()
-    if not direccion_cliente:
-        return (Decimal('0.00'), 0.0)
+    dest = (direccion_cliente or '').strip()
+    if not dest:
+        return (Decimal('0.00'), 0.0)  # retiro en local
 
-    api_key = getattr(settings, 'GOOGLE_MAPS_API_KEY', None)
-    origen = getattr(settings, 'SUCURSAL_DIRECCION', None)
+    api_key = getattr(settings, 'GOOGLE_MAPS_API_KEY', '') or ''
     language = getattr(settings, 'MAPS_LANGUAGE', 'es')
-    region = getattr(settings, 'MAPS_REGION', 'AR')
+    region   = getattr(settings, 'MAPS_REGION', 'AR')
+    origen   = _origin_from_settings()
 
-    if not api_key or not origen:
-        # sin config -> fallback
-        return (Decimal('300.00'), 0.0)
+    # Config de costos (strings -> Decimal)
+    base     = Decimal(str(getattr(settings, 'ENVIO_BASE', '300')))
+    por_km   = Decimal(str(getattr(settings, 'ENVIO_POR_KM', '50')))
+    km_min   = Decimal(str(getattr(settings, 'ENVIO_KM_MIN', '0')))
+    km_off   = Decimal(str(getattr(settings, 'ENVIO_KM_OFFSET', '0')))
 
-    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
-    params = {
-        'origins': origen,
-        'destinations': direccion_cliente,
-        'key': api_key,
-        'mode': 'driving',
-        'units': 'metric',
-        'language': language,
-        'region': region,
-    }
+    # Mínimo/Máximo pueden venir como '' -> None
+    _min = str(getattr(settings, 'ENVIO_MIN', '0')).strip()
+    _max = str(getattr(settings, 'ENVIO_MAX', '')).strip()
+    costo_min = Decimal(_min) if _min and _min != '0' else None
+    costo_max = Decimal(_max) if _max else None
+
+    # Redondeo a múltiplos (0 => sin redondeo)
+    _mul = str(getattr(settings, 'ENVIO_REDONDEO', '0')).strip()
     try:
+        multiple = Decimal(_mul)
+    except Exception:
+        multiple = Decimal('0')
+
+    # Sin API o sin origen -> fallback al base
+    if not api_key or not origen:
+        return (base.quantize(Decimal('0.01')), 0.0)
+
+    # Destino puede ser 'lat,lng' o dirección (Distance Matrix acepta ambos)
+    destino = dest
+
+    # Llamada a Distance Matrix
+    try:
+        url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+        params = {
+            'origins': origen,
+            'destinations': destino,
+            'key': api_key,
+            'mode': 'driving',
+            'units': 'metric',
+            'language': language,
+            'region': region,
+        }
         r = requests.get(url, params=params, timeout=8)
         r.raise_for_status()
         data = r.json()
-        rows = data.get('rows', [])
-        if not rows:
-            return (Decimal('300.00'), 0.0)
-        el = (rows[0].get('elements') or [{}])[0]
+        el = ((data.get('rows') or [{}])[0].get('elements') or [{}])[0]
         if el.get('status') != 'OK':
-            return (Decimal('300.00'), 0.0)
-        metros = el['distance']['value']  # int (m)
-        km = round(metros / 1000.0, 2)
-        costo = Decimal('300.00') + (Decimal('50.00') * Decimal(str(km)))
-        return (costo.quantize(Decimal('0.01')), km)
+            # No se pudo resolver -> fallback
+            return (base.quantize(Decimal('0.01')), 0.0)
+
+        metros = int(el['distance']['value'])
+        km_reales = Decimal(metros) / Decimal('1000')
+
+        # km efectivos = max(km_reales, km_min) + km_off
+        km_efectivos = max(km_reales, km_min) + km_off
+
+        # costo base + por_km * km_efectivos
+        costo = base + (por_km * km_efectivos)
+
+        # Aplicar min/max si corresponde
+        if costo_min is not None:
+            costo = max(costo, costo_min)
+        if costo_max is not None:
+            costo = min(costo, costo_max)
+
+        # Redondeo a múltiplos (nearest)
+        if multiple > 0:
+            costo = (costo / multiple).to_integral_value(rounding=ROUND_HALF_UP) * multiple
+
+        return (costo.quantize(Decimal('0.01')), float(km_reales))
     except Exception as e:
         print(f"MAPS ERROR: {e}")
-        return (Decimal('300.00'), 0.0)
+        return (base.quantize(Decimal('0.01')), 0.0)
 
 
 @require_GET
 def api_costo_envio(request):
     """
-    Endpoint liviano para estimar costo/ distancia desde el formulario del carrito.
-    GET ?direccion=...
+    Endpoint para estimar costo/distancia desde el carrito.
+    GET ?direccion=...  (dirección o 'lat,lng')
     """
     direccion = (request.GET.get('direccion') or '').strip()
     if not direccion:
         return JsonResponse({'ok': True, 'costo_envio': 0.0, 'distancia_km': 0.0, 'mode': 'pickup'})
     costo, km = _calcular_costo_envio(direccion)
-    return JsonResponse({'ok': True, 'costo_envio': float(costo), 'distancia_km': float(km), 'mode': 'maps'})
+
+    payload = {'ok': True, 'costo_envio': float(costo), 'distancia_km': float(km), 'mode': 'maps'}
+    if settings.DEBUG:
+        payload['debug'] = {
+            'ENVIO_BASE': getattr(settings, 'ENVIO_BASE', '300'),
+            'ENVIO_POR_KM': getattr(settings, 'ENVIO_POR_KM', '50'),
+            'ENVIO_MIN': getattr(settings, 'ENVIO_MIN', '0'),
+            'ENVIO_MAX': getattr(settings, 'ENVIO_MAX', ''),
+            'ENVIO_KM_MIN': getattr(settings, 'ENVIO_KM_MIN', '0'),
+            'ENVIO_KM_OFFSET': getattr(settings, 'ENVIO_KM_OFFSET', '0'),
+            'ENVIO_REDONDEO': getattr(settings, 'ENVIO_REDONDEO', '0'),
+            'ORIGEN_LAT': getattr(settings, 'ORIGEN_LAT', ''),
+            'ORIGEN_LNG': getattr(settings, 'ORIGEN_LNG', ''),
+            'SUCURSAL_DIRECCION': getattr(settings, 'SUCURSAL_DIRECCION', ''),
+        }
+    return JsonResponse(payload)
 
 
 # =========================
@@ -589,7 +662,7 @@ def ver_carrito(request):
                     del request.session['carrito']
                     request.session.modified = True
 
-                messages.info(request, f"Redirigiendo a Mercado Pago para completar el pago del pedido #{nuevo_pido.id}.")
+                messages.info(request, f"Redirigiendo a Mercado Pago para completar el pago del pedido #{nuevo_pedido.id}.")
                 return redirect(init_point)
             except Exception as e:
                 messages.error(request, f"No pudimos iniciar el pago con Mercado Pago. Probá de nuevo o elegí otro método. Detalle: {e}")
