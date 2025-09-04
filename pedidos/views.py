@@ -1383,6 +1383,28 @@ def cadete_feed(request):
     return JsonResponse({'ok': True, 'disponible': True, 'pedidos': [ser(p) for p in pedidos]})
 
 
+# --- Historial del cadete (FALTABA) ---
+@login_required
+def cadete_historial(request):
+    """
+    Muestra SOLO pedidos ENTREGADOS/CANCELADOS del cadete logueado.
+    Nunca mezcla pedidos de otros cadetes.
+    """
+    if not hasattr(request.user, 'cadeteprofile'):
+        return redirect('index')
+
+    cp = request.user.cadeteprofile
+
+    pedidos = (
+        Pedido.objects
+        .filter(cadete_asignado=cp, estado__in=['ENTREGADO', 'CANCELADO'])
+        .select_related('cadete_asignado__user')
+        .order_by('-fecha_pedido')[:50]
+    )
+
+    return render(request, 'pedidos/cadete_historial.html', {'pedidos': pedidos})
+
+
 # =========================
 # === MERCADO PAGO (webhook + success)
 # =========================
