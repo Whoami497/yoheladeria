@@ -20,7 +20,6 @@ from asgiref.sync import async_to_sync
 import json
 import mercadopago
 import requests
-import re
 
 from .forms import ClienteRegisterForm, ClienteProfileForm
 from .models import (
@@ -165,24 +164,24 @@ def _notify_cadetes_new_order(request, pedido):
 
 
 # =========================
-# === ENVÍO (Google Maps) — calibrable via settings.py
+# === ENVÍO (Google Maps)
 # =========================
-_LATLNG_RE = re.compile(r'^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$')
-
-def _is_latlng(s: str) -> bool:
-    return bool(_LATLNG_RE.match((s or '').strip()))
-
 def _origin_from_settings() -> str:
     """
-    Devuelve el origen para Distance Matrix:
-    - Si ORIGEN_LAT/LNG están definidos, usa 'lat,lng'
-    - Si no, usa SUCURSAL_DIRECCION
+    Construye el origen para Distance Matrix.
+    Prioriza coordenadas ORIGEN_LAT/LNG; si no, usa SUCURSAL_DIRECCION.
     """
-    lat = (getattr(settings, 'ORIGEN_LAT', '') or '').strip()
-    lng = (getattr(settings, 'ORIGEN_LNG', '') or '').strip()
+    lat = str(getattr(settings, 'ORIGEN_LAT', '')).strip()
+    lng = str(getattr(settings, 'ORIGEN_LNG', '')).strip()
     if lat and lng:
-        return f"{lat},{lng}"
-    return getattr(settings, 'SUCURSAL_DIRECCION', '')
+        try:
+            lat_f = float(lat)
+            lng_f = float(lng)
+            return f"{lat_f},{lng_f}"
+        except Exception:
+            pass
+    return (getattr(settings, 'SUCURSAL_DIRECCION', '') or '').strip()
+
 
 def _calcular_costo_envio(direccion_cliente: str):
     """
@@ -226,8 +225,7 @@ def _calcular_costo_envio(direccion_cliente: str):
     if not api_key or not origen:
         return (base.quantize(Decimal('0.01')), 0.0)
 
-    # Destino puede ser 'lat,lng' o dirección (Distance Matrix acepta ambos)
-    destino = dest
+    destino = dest  # puede ser 'lat,lng' o dirección
 
     # Llamada a Distance Matrix
     try:
@@ -253,16 +251,16 @@ def _calcular_costo_envio(direccion_cliente: str):
         km_reales = Decimal(metros) / Decimal('1000')
 
         # km efectivos = max(km_reales, km_min) + km_off
-        km_efectivos = max(km_reales, km_min) + km_off
+        km_efectivos = (km_reales if km_reales > km_min else km_min) + km_off
 
         # costo base + por_km * km_efectivos
         costo = base + (por_km * km_efectivos)
 
         # Aplicar min/max si corresponde
-        if costo_min is not None:
-            costo = max(costo, costo_min)
-        if costo_max is not None:
-            costo = min(costo, costo_max)
+        if costo_min is not None and costo < costo_min:
+            costo = costo_min
+        if costo_max is not None and costo > costo_max:
+            costo = costo_max
 
         # Redondeo a múltiplos (nearest)
         if multiple > 0:
@@ -569,15 +567,18 @@ def ver_carrito(request):
         metodo_pago = request.POST.get('metodo_pago')
         nota_pedido = (request.POST.get('nota_pedido') or '').strip()
 
-        # Copia limpia para Maps (sin la nota)
-        direccion_para_maps = direccion_input
+        # <- NUEVO: si el front mandó un lat,lng confirmado, úsalo para calcular
+        geo_latlng = (request.POST.get('geo_latlng') or '').strip()
+        direccion_para_maps = geo_latlng if geo_latlng else direccion_input
 
-        # Si hay nota general, la anexamos a la dirección para que quede guardada en DB
+        # Lo que guardamos como "dirección" en el pedido (texto visible en cocina)
         direccion_a_guardar = direccion_input
+        if not direccion_a_guardar and geo_latlng:
+            direccion_a_guardar = f"GPS: {geo_latlng}"
         if nota_pedido:
-            direccion_a_guardar = (f"{direccion_input} — Nota: {nota_pedido}" if direccion_input else f"Nota: {nota_pedido}")
+            direccion_a_guardar = (f"{direccion_a_guardar} — Nota: {nota_pedido}").strip(" —")
 
-        # Cálculo de envío ANTES de crear el pedido (si hay dirección tipeada)
+        # Cálculo de envío ANTES de crear el pedido
         costo_envio_decimal = Decimal('0.00')
         distancia_km = 0.0
         if direccion_para_maps:
@@ -588,23 +589,22 @@ def ver_carrito(request):
             'cliente_direccion': direccion_a_guardar,
             'cliente_telefono': telefono,
             'metodo_pago': metodo_pago,
-            'costo_envio': costo_envio_decimal,  # persistimos
+            'costo_envio': costo_envio_decimal,  # persistimos lo calculado (con lat,lng si vino)
         }
+
         if request.user.is_authenticated:
             pedido_kwargs['user'] = request.user
             if hasattr(request.user, 'clienteprofile'):
                 profile = request.user.clienteprofile
                 if not nombre and request.user.first_name and request.user.last_name:
                     pedido_kwargs['cliente_nombre'] = f"{request.user.first_name} {request.user.last_name}"
-                # Si no cargó dirección en el form y el perfil tiene una, usamos la del perfil
-                if not direccion_input and profile.direccion:
-                    pedido_kwargs['cliente_direccion'] = profile.direccion
-                    # Podés calcular envío contra la del perfil si querés:
-                    if not direccion_para_maps:
-                        costo_envio_decimal, distancia_km = _calcular_costo_envio(profile.direccion)
-                        pedido_kwargs['costo_envio'] = costo_envio_decimal
                 if not telefono and profile.telefono:
                     pedido_kwargs['cliente_telefono'] = profile.telefono
+                # Si no tenemos ni dirección ni geo_latlng, podemos usar la del perfil para calcular
+                if not direccion_para_maps and profile.direccion:
+                    pedido_kwargs['cliente_direccion'] = profile.direccion
+                    costo_envio_decimal, distancia_km = _calcular_costo_envio(profile.direccion)
+                    pedido_kwargs['costo_envio'] = costo_envio_decimal
 
         nuevo_pedido = Pedido.objects.create(**pedido_kwargs)
 
@@ -647,35 +647,28 @@ def ver_carrito(request):
                 messages.error(request, f"Error al procesar el detalle del pedido para {item_data.get('producto_nombre', 'un producto')}: {e}")
                 continue
 
-        # Pago con Mercado Pago
         if metodo_pago == 'MERCADOPAGO':
             try:
                 nuevo_pedido.metodo_pago = 'MERCADOPAGO'
                 nuevo_pedido.save()
-
                 request.session['mp_last_order_id'] = nuevo_pedido.id
                 request.session.modified = True
-
                 init_point = crear_preferencia_mp(request, nuevo_pedido)
-
                 if 'carrito' in request.session:
                     del request.session['carrito']
                     request.session.modified = True
-
                 messages.info(request, f"Redirigiendo a Mercado Pago para completar el pago del pedido #{nuevo_pedido.id}.")
                 return redirect(init_point)
             except Exception as e:
                 messages.error(request, f"No pudimos iniciar el pago con Mercado Pago. Probá de nuevo o elegí otro método. Detalle: {e}")
                 return redirect('ver_carrito')
 
-        # Flujo efectivo
         if request.user.is_authenticated and hasattr(request.user, 'clienteprofile'):
             puntos_ganados = int(total_del_pedido_para_puntos / Decimal('500')) * 100
             request.user.clienteprofile.puntos_fidelidad += puntos_ganados
             request.user.clienteprofile.save()
             messages.success(request, f"¡Has ganado {puntos_ganados} puntos de fidelidad con este pedido!")
 
-        # Aviso a panel (incluimos costo_envio y, si lo calculamos, distancia)
         try:
             channel_layer = get_channel_layer()
             async_to_sync(channel_layer.group_send)(
@@ -702,7 +695,6 @@ def ver_carrito(request):
             print(f"ERROR al enviar notificación de pedido a Channels: {e}")
             messages.error(request, f"ERROR INTERNO: No se pudo enviar la alerta en tiempo real. Contacta a soporte. Error: {e}")
 
-        # limpiar carrito
         del request.session['carrito']
         request.session.modified = True
 
@@ -711,6 +703,7 @@ def ver_carrito(request):
 
     contexto = {'carrito_items': items_carrito_procesados, 'total': total}
     return render(request, 'pedidos/carrito.html', contexto)
+
 
 
 def eliminar_del_carrito(request, item_key):
@@ -1388,28 +1381,6 @@ def cadete_feed(request):
         }
 
     return JsonResponse({'ok': True, 'disponible': True, 'pedidos': [ser(p) for p in pedidos]})
-
-
-# pedidos/views.py
-@login_required
-def cadete_historial(request):
-    """
-    Muestra SOLO pedidos ENTREGADOS/CANCELADOS del cadete logueado.
-    Nunca mezcla pedidos de otros cadetes.
-    """
-    if not hasattr(request.user, 'cadeteprofile'):
-        return redirect('index')
-
-    cp = request.user.cadeteprofile
-
-    pedidos = (
-        Pedido.objects
-        .filter(cadete_asignado=cp, estado__in=['ENTREGADO', 'CANCELADO'])
-        .select_related('cadete_asignado__user')
-        .order_by('-fecha_pedido')[:50]
-    )
-
-    return render(request, 'pedidos/cadete_historial.html', {'pedidos': pedidos})
 
 
 # =========================

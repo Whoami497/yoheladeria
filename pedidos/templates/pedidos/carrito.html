@@ -106,6 +106,8 @@
             <!-- guardamos lo elegido en el selector de envío solo a modo informativo -->
             <input type="hidden" name="envio_visual_opcion" id="envio-visual-opcion" value="Retiro en local — $0">
             <input type="hidden" name="envio_visual_costo" id="envio-visual-costo" value="0">
+            <!-- NUEVO: si se usa GPS, enviamos el lat,lng real al backend -->
+            <input type="hidden" name="geo_latlng" id="geo-latlng" value="">
 
             <div class="mb-3">
               <label class="form-label">Nombre Completo:</label>
@@ -179,6 +181,7 @@
   const dirInput = document.getElementById('dir-input');
   const btnCalcDir = document.getElementById('btn-calc-dir');
   const btnGeo = document.getElementById('btn-geo');
+  const geoHidden = document.getElementById('geo-latlng'); // <- NUEVO
 
   function recalc(){
     const envio = parseFloat(envioSel.value || '0') || 0;
@@ -227,6 +230,7 @@
     const d = (dirInput.value || '').trim();
     if(!d){
       envioInfo.textContent = 'Ingresá una dirección para calcular.';
+      geoHidden.value = ''; // <- limpia GPS almacenado
       removeAutoOption();
       return;
     }
@@ -234,6 +238,7 @@
     try{
       const data = await getJSON(`/api/costo-envio/?direccion=${encodeURIComponent(d)}`);
       if(data && data.ok){
+        geoHidden.value = ''; // <- muy importante: forzamos uso de dirección
         setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0), 'Estimado con Google (dirección ingresada)');
       }else{
         envioInfo.textContent = 'No se pudo calcular. Probá otra dirección.';
@@ -252,13 +257,17 @@
     navigator.geolocation.getCurrentPosition(async (pos)=>{
       const lat = pos.coords.latitude.toFixed(6);
       const lng = pos.coords.longitude.toFixed(6);
-      // 👉 Escribimos lat,lng en el input para que el backend calcule exactamente igual
-      dirInput.value = `${lat},${lng}`;
-      envioInfo.textContent = 'Calculando...';
+      const acc = Math.round(pos.coords.accuracy || 0); // precisión en metros
+
+      // Guardamos el punto real para que el backend calcule exactamente contra la heladería
+      geoHidden.value = `${lat},${lng}`;
+
+      envioInfo.textContent = acc ? `Calculando... (precisión ±${acc} m)` : 'Calculando...';
       try{
         const data = await getJSON(`/api/costo-envio/?direccion=${lat},${lng}`);
         if(data && data.ok){
-          setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0), 'Estimado con Google (tu ubicación)');
+          setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0),
+            acc ? `Estimado con GPS (precisión ±${acc} m)` : 'Estimado con GPS');
         }else{
           envioInfo.textContent = 'No se pudo calcular con tu ubicación.';
         }
@@ -276,7 +285,7 @@
   dirInput.addEventListener('input', () => {
     const v = dirInput.value.trim();
     clearTimeout(t);
-    if(!v){ removeAutoOption(); return; }
+    if(!v){ geoHidden.value = ''; removeAutoOption(); return; }
     t = setTimeout(calcularConDireccion, 450);
   });
 
