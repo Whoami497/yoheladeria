@@ -90,7 +90,7 @@
 
           <div class="small text-muted mt-1">
             *Si elegís “Calcular automáticamente”, usamos Google para estimar costo/distancia
-            desde tu dirección o tu ubicación actual. El valor podrá ajustarse levemente.
+            desde tu dirección, tu ubicación actual o el punto que marques en el mapa.
           </div>
         </div>
       </div>
@@ -106,7 +106,7 @@
             <!-- guardamos lo elegido en el selector de envío solo a modo informativo -->
             <input type="hidden" name="envio_visual_opcion" id="envio-visual-opcion" value="Retiro en local — $0">
             <input type="hidden" name="envio_visual_costo" id="envio-visual-costo" value="0">
-            <!-- NUEVO: si se usa GPS, enviamos el lat,lng real al backend -->
+            <!-- NUEVO: si se usa GPS o mapa, enviamos el lat,lng real al backend -->
             <input type="hidden" name="geo_latlng" id="geo-latlng" value="">
 
             <div class="mb-3">
@@ -121,11 +121,11 @@
                 <input id="dir-input" type="text" class="form-control" name="cliente_direccion" placeholder="Calle, número, referencia">
                 <button class="btn btn-outline-secondary" type="button" id="btn-calc-dir" title="Calcular con esta dirección">Calcular</button>
               </div>
-              <div class="form-text">Podés calcular envío con esta dirección o con tu ubicación actual.</div>
-            </div>
-
-            <div class="mb-3 d-grid gap-2">
-              <button type="button" class="btn btn-outline-primary" id="btn-geo">📍 Calcular con mi ubicación</button>
+              <div class="d-flex gap-2 mt-2">
+                <button type="button" class="btn btn-outline-primary flex-fill" id="btn-geo">📍 Usar mi ubicación</button>
+                <button type="button" class="btn btn-outline-success flex-fill" id="btn-map">🗺️ Elegir en el mapa</button>
+              </div>
+              <div class="form-text">Podés calcular con tu dirección, con tu ubicación o seleccionando un punto exacto en el mapa.</div>
             </div>
 
             <div class="mb-3">
@@ -164,7 +164,34 @@
   </div>
 </div>
 
-<!-- JS: cálculo visual envío/total + cálculo automático (dirección / geolocalización) -->
+<!-- Modal del mapa (Leaflet) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<div class="modal fade" id="mapModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Elegí tu ubicación exacta</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div id="map" style="height:420px;"></div>
+        <div class="small text-muted mt-2">
+          Arrastrá el pin hasta donde querés recibir el pedido. Luego presioná “Usar esta ubicación”.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div class="me-auto small" id="map-coords">–</div>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-success" id="map-use">Usar esta ubicación</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+<!-- JS: cálculo visual envío/total + GPS + mapa -->
 <script>
 (function(){
   const fmt = (n) => '$' + Number(n).toFixed(2);
@@ -181,7 +208,8 @@
   const dirInput = document.getElementById('dir-input');
   const btnCalcDir = document.getElementById('btn-calc-dir');
   const btnGeo = document.getElementById('btn-geo');
-  const geoHidden = document.getElementById('geo-latlng'); // <- NUEVO
+  const btnMap = document.getElementById('btn-map');
+  const geoHidden = document.getElementById('geo-latlng');
 
   function recalc(){
     const envio = parseFloat(envioSel.value || '0') || 0;
@@ -194,7 +222,6 @@
   envioSel.addEventListener('change', recalc);
   recalc();
 
-  // crea/actualiza la opción automática del select
   function setAutoOption(costo, km, origenTexto){
     let opt = document.getElementById('opt-auto-envio');
     const label = `Auto (≈ ${Number(km||0).toFixed(2)} km) — ${fmt(costo)}`;
@@ -206,11 +233,9 @@
     opt.value = String(Number(costo).toFixed(2));
     opt.textContent = label;
     envioSel.value = opt.value;
-    envioInfo.textContent = origenTexto || 'Estimado con Google (Distance Matrix)';
+    envioInfo.textContent = origenTexto || 'Estimado automáticamente';
     recalc();
   }
-
-  // elimina la opción automática si existe
   function removeAutoOption(){
     const opt = document.getElementById('opt-auto-envio');
     if(opt) opt.remove();
@@ -219,7 +244,6 @@
     recalc();
   }
 
-  // helper de fetch con manejo simple
   async function getJSON(url){
     const r = await fetch(url, {headers: {'X-Requested-With': 'XMLHttpRequest'}});
     if(!r.ok) throw new Error('HTTP '+r.status);
@@ -230,7 +254,7 @@
     const d = (dirInput.value || '').trim();
     if(!d){
       envioInfo.textContent = 'Ingresá una dirección para calcular.';
-      geoHidden.value = ''; // <- limpia GPS almacenado
+      geoHidden.value = '';
       removeAutoOption();
       return;
     }
@@ -238,8 +262,8 @@
     try{
       const data = await getJSON(`/api/costo-envio/?direccion=${encodeURIComponent(d)}`);
       if(data && data.ok){
-        geoHidden.value = ''; // <- muy importante: forzamos uso de dirección
-        setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0), 'Estimado con Google (dirección ingresada)');
+        geoHidden.value = ''; // forzamos uso de dirección
+        setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0), 'Estimado con dirección ingresada');
       }else{
         envioInfo.textContent = 'No se pudo calcular. Probá otra dirección.';
       }
@@ -248,37 +272,121 @@
     }
   }
 
+  // GPS con “mejor de varios” (sirve para iOS)
+  function getPrecisePosition({desiredAcc=60, maxWait=20000} = {}){
+    return new Promise((resolve, reject)=>{
+      if(!navigator.geolocation) return reject(new Error('Geolocalización no disponible'));
+      let best = null;
+      const start = Date.now();
+      const id = navigator.geolocation.watchPosition(
+        (pos)=>{
+          const { latitude, longitude, accuracy } = pos.coords;
+          if(!best || accuracy < best.accuracy){
+            best = {lat: latitude.toFixed(6), lng: longitude.toFixed(6), acc: Math.round(accuracy)};
+          }
+          if(best.acc <= desiredAcc || (Date.now()-start) > maxWait){
+            navigator.geolocation.clearWatch(id);
+            resolve(best);
+          }else{
+            envioInfo.textContent = `Buscando mejor precisión... (actual: ±${best.acc} m)`;
+          }
+        },
+        (err)=>{
+          navigator.geolocation.clearWatch(id);
+          reject(err);
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: maxWait + 5000 }
+      );
+    });
+  }
+
   async function calcularConGeolocalizacion(){
     envioInfo.textContent = 'Obteniendo tu ubicación...';
     if(!navigator.geolocation){
       envioInfo.textContent = 'Tu navegador no permite geolocalización.';
       return;
     }
-    navigator.geolocation.getCurrentPosition(async (pos)=>{
-      const lat = pos.coords.latitude.toFixed(6);
-      const lng = pos.coords.longitude.toFixed(6);
-      const acc = Math.round(pos.coords.accuracy || 0); // precisión en metros
+    try{
+      const best = await getPrecisePosition({desiredAcc: 60, maxWait: 20000});
+      if(!best){ envioInfo.textContent = 'No se obtuvo posición.'; return; }
 
-      // Guardamos el punto real para que el backend calcule exactamente contra la heladería
+      const {lat, lng, acc} = best;
       geoHidden.value = `${lat},${lng}`;
+      dirInput.value = `${lat},${lng}`;
 
-      envioInfo.textContent = acc ? `Calculando... (precisión ±${acc} m)` : 'Calculando...';
-      try{
-        const data = await getJSON(`/api/costo-envio/?direccion=${lat},${lng}`);
-        if(data && data.ok){
-          setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0),
-            acc ? `Estimado con GPS (precisión ±${acc} m)` : 'Estimado con GPS');
-        }else{
-          envioInfo.textContent = 'No se pudo calcular con tu ubicación.';
-        }
-      }catch(e){
-        envioInfo.textContent = 'Error al calcular con tu ubicación.';
+      envioInfo.textContent = `Calculando... (precisión ±${acc} m)`;
+      const data = await getJSON(`/api/costo-envio/?direccion=${lat},${lng}`);
+      if(data && data.ok){
+        setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0),
+          `Estimado con GPS (±${acc} m)`);
+      }else{
+        envioInfo.textContent = 'No se pudo calcular con tu ubicación.';
       }
-    }, (err)=>{
+    }catch(e){
       const map = {1:'Permiso denegado',2:'Posición no disponible',3:'Tiempo agotado'};
-      envioInfo.textContent = map[err.code] || 'No se pudo obtener la ubicación.';
-    }, {enableHighAccuracy:true, timeout:10000, maximumAge:0});
+      envioInfo.textContent = map[e.code] || 'No se pudo obtener la ubicación.';
+    }
   }
+
+  // ---- MAPA (Leaflet) ----
+  let map, marker, mapModal, mapReady = false;
+  const DEFAULT_CENTER = [-28.470523, -65.793752]; // Catamarca (cerca sucursal). Podés ajustar.
+
+  function ensureMap(){
+    if(mapReady) { setTimeout(()=>map.invalidateSize(), 300); return; }
+    map = L.map('map').setView(DEFAULT_CENTER, 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    marker = L.marker(DEFAULT_CENTER, {draggable:true}).addTo(map);
+    const coordsEl = document.getElementById('map-coords');
+    function updateCoords(latlng){
+      coordsEl.textContent = `Lat: ${latlng.lat.toFixed(6)}  Lng: ${latlng.lng.toFixed(6)}`;
+    }
+    updateCoords(marker.getLatLng());
+    marker.on('drag', (e)=> updateCoords(e.target.getLatLng()));
+
+    // Intento de centrar en el usuario para comodidad (si falla, queda en Catamarca)
+    if(navigator.geolocation){
+      navigator.geolocation.getCurrentPosition((pos)=>{
+        const lat = pos.coords.latitude, lng = pos.coords.longitude;
+        const here = [lat, lng];
+        map.setView(here, 16);
+        marker.setLatLng(here);
+        updateCoords({lat, lng});
+        setTimeout(()=>map.invalidateSize(), 300);
+      });
+    }
+    mapReady = true;
+    setTimeout(()=>map.invalidateSize(), 300);
+  }
+
+  btnMap.addEventListener('click', ()=>{
+    mapModal = new bootstrap.Modal(document.getElementById('mapModal'));
+    mapModal.show();
+    ensureMap();
+  });
+
+  document.getElementById('map-use').addEventListener('click', async ()=>{
+    const p = marker.getLatLng();
+    const lat = p.lat.toFixed(6), lng = p.lng.toFixed(6);
+    geoHidden.value = `${lat},${lng}`;
+    dirInput.value = `${lat},${lng}`;
+    envioInfo.textContent = 'Calculando... (punto elegido en el mapa)';
+    try{
+      const data = await getJSON(`/api/costo-envio/?direccion=${lat},${lng}`);
+      if(data && data.ok){
+        setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0), 'Estimado con punto del mapa');
+      }else{
+        envioInfo.textContent = 'No se pudo calcular desde el mapa.';
+      }
+    }catch(e){
+      envioInfo.textContent = 'Error al calcular desde el mapa.';
+    }
+    if(mapModal) mapModal.hide();
+  });
 
   // Debounce al tipear dirección
   let t;
@@ -286,7 +394,7 @@
     const v = dirInput.value.trim();
     clearTimeout(t);
     if(!v){ geoHidden.value = ''; removeAutoOption(); return; }
-    t = setTimeout(calcularConDireccion, 450);
+    t = setTimeout(calcularConDireccion, 500);
   });
 
   // Enter en dirección -> calcula (no envía formulario)
@@ -319,5 +427,8 @@
   }
   .summary{ position:sticky; top:.75rem; }
   @media (min-width: 992px){ .summary{ position:sticky; top:1rem; } }
+
+  /* Modal mapa */
+  #map { min-height: 360px; border-radius: 8px; }
 </style>
 {% endblock %}
