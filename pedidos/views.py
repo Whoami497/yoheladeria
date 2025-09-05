@@ -58,6 +58,22 @@ def cadete_esta_ocupado(cadete_profile) -> bool:
     ).exists()
 
 
+def _compute_total(pedido) -> Decimal:
+    """
+    Suma segura del total con el envío PERSISTIDO (pedido.costo_envio).
+    Evita recalcular envío en propiedades o señales.
+    """
+    total = Decimal('0.00')
+    for d in pedido.detalles.all():
+        precio = d.producto.precio
+        if d.opcion_seleccionada:
+            precio += d.opcion_seleccionada.precio_adicional
+        total += (precio * d.cantidad)
+    if pedido.costo_envio:
+        total += pedido.costo_envio
+    return total.quantize(Decimal('0.01'))
+
+
 def _serialize_pedido_for_panel(pedido, include_details=True):
     """
     Serializa un Pedido para mandarlo al panel por WS/JSON.
@@ -67,14 +83,13 @@ def _serialize_pedido_for_panel(pedido, include_details=True):
         'id': pedido.id,
         'estado': pedido.estado,
         'cliente_nombre': pedido.cliente_nombre,
-        # mostramos la cadena completa guardada:
         'cliente_direccion': pedido.cliente_direccion,
-        # además exponemos una versión legible y la url de mapa:
         'direccion_legible': getattr(pedido, 'direccion_legible', None) or _direccion_legible_from_text(pedido.cliente_direccion),
         'map_url': _map_url_from_text(pedido.cliente_direccion),
         'cliente_telefono': pedido.cliente_telefono,
         'metodo_pago': pedido.metodo_pago,
-        'total_pedido': str(pedido.total_pedido or 0),
+        # ⚠️ Usamos el total calculado con envío persistido
+        'total_pedido': str(_compute_total(pedido)),
         'costo_envio': float(pedido.costo_envio or 0),
         'cadete': (
             pedido.cadete_asignado.user.get_full_name() or pedido.cadete_asignado.user.username
@@ -106,6 +121,9 @@ def _notify_panel_update(pedido, message='actualizacion_pedido'):
                 'estado': pedido.estado,
                 'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
                 'map_url': _map_url_from_text(pedido.cliente_direccion),
+                # En actualizaciones conviene también enviar el total recalculado con envío persistido.
+                'total_pedido': str(_compute_total(pedido)),
+                'costo_envio': float(pedido.costo_envio or 0),
             }
 
         async_to_sync(channel_layer.group_send)(
@@ -375,64 +393,6 @@ def api_costo_envio(request):
             'SUCURSAL_DIRECCION': getattr(settings, 'SUCURSAL_DIRECCION', ''),
         }
     return JsonResponse(payload)
-
-
-# =========================
-# === util de WS para NUEVO PEDIDO (refactor)
-# =========================
-def _order_details_payload(pedido, distancia_km=None, nota_pedido=None):
-    """
-    Construye el payload estándar de 'nuevo_pedido' (usado en varias vistas).
-    """
-    detalles = []
-    for d in pedido.detalles.all().select_related('producto', 'opcion_seleccionada').prefetch_related('sabores'):
-        detalles.append({
-            'producto_nombre': d.producto.nombre,
-            'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
-            'cantidad': d.cantidad,
-            'sabores_nombres': [s.nombre for s in d.sabores.all()],
-        })
-
-    payload = {
-        'cliente_nombre': pedido.cliente_nombre,
-        'cliente_direccion': pedido.cliente_direccion,
-        'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
-        'map_url': _map_url_from_text(pedido.cliente_direccion),
-        'cliente_telefono': pedido.cliente_telefono,
-        'metodo_pago': pedido.metodo_pago,
-        'total_pedido': str(pedido.total_pedido),
-        'costo_envio': float(pedido.costo_envio or 0),
-        'detalles': detalles,
-    }
-    if distancia_km is not None:
-        payload['distancia_km'] = float(distancia_km or 0)
-    if nota_pedido:
-        payload['nota_pedido'] = nota_pedido
-    return payload
-
-
-def _send_new_order_notification(pedido, extra_payload=None):
-    """
-    Envía al grupo 'pedidos_new_orders' el mensaje 'nuevo_pedido' con payload estándar,
-    permitiendo 'extra_payload' para agregar campos como distancia_km o nota_pedido.
-    """
-    try:
-        channel_layer = get_channel_layer()
-        order_data = _order_details_payload(pedido)
-        if extra_payload:
-            order_data.update(extra_payload)
-        async_to_sync(channel_layer.group_send)(
-            'pedidos_new_orders',
-            {
-                'type': 'send_order_notification',
-                'message': 'nuevo_pedido',
-                'order_id': pedido.id,
-                'order_data': order_data,
-            }
-        )
-        print(f"WS: notificación 'nuevo_pedido' enviada para pedido #{pedido.id}")
-    except Exception as e:
-        print(f"ERROR al enviar notificación de nuevo pedido: {e}")
 
 
 # =========================
@@ -739,6 +699,8 @@ def ver_carrito(request):
             'costo_envio': costo_envio_decimal,  # persistimos lo calculado (con lat,lng si vino)
         }
 
+        # 🔴 Importante: NO forzar dirección del perfil si el usuario no ingresó ninguna.
+        # Antes acá se tomaba profile.direccion y se recalculaba envío, lo que cobraba envío en retiros.
         if request.user.is_authenticated:
             pedido_kwargs['user'] = request.user
             if hasattr(request.user, 'clienteprofile'):
@@ -747,18 +709,14 @@ def ver_carrito(request):
                     pedido_kwargs['cliente_nombre'] = f"{request.user.first_name} {request.user.last_name}"
                 if not telefono and profile.telefono:
                     pedido_kwargs['cliente_telefono'] = profile.telefono
-                # Si no tenemos ni dirección ni geo_latlng, podemos usar la del perfil para calcular
-                if not direccion_para_maps and profile.direccion:
-                    pedido_kwargs['cliente_direccion'] = profile.direccion
-                    costo_envio_decimal, distancia_km = _calcular_costo_envio(profile.direccion)
-                    pedido_kwargs['costo_envio'] = costo_envio_decimal
+                # 👇 YA NO usamos automáticamente profile.direccion para costo/envío.
 
         nuevo_pedido = Pedido.objects.create(**pedido_kwargs)
 
         puntos_ganados = 0
         total_del_pedido_para_puntos = Decimal('0.00')
+        detalles_para_notificacion = []
 
-        # Guardar detalles
         for key, item_data in carrito.items():
             try:
                 producto = Producto.objects.get(id=item_data['producto_id'])
@@ -779,6 +737,13 @@ def ver_carrito(request):
 
                 precio_unitario_item = Decimal(item_data['precio'])
                 total_del_pedido_para_puntos += precio_unitario_item * item_data['cantidad']
+
+                detalles_para_notificacion.append({
+                    'producto_nombre': producto.nombre,
+                    'opcion_nombre': opcion_obj_pedido.nombre_opcion if opcion_obj_pedido else None,
+                    'cantidad': item_data['cantidad'],
+                    'sabores_nombres': [s.nombre for s in sabores_seleccionados],
+                })
 
             except (Producto.DoesNotExist, OpcionProducto.DoesNotExist) as e:
                 messages.warning(request, f"Advertencia: Un ítem no pudo ser añadido al pedido final porque ya no existe. Error: {e}")
@@ -809,15 +774,31 @@ def ver_carrito(request):
             request.user.clienteprofile.save()
             messages.success(request, f"¡Has ganado {puntos_ganados} puntos de fidelidad con este pedido!")
 
-        # Notificación a panel (con distancia y nota si corresponde)
+        # Notificación a panel (con direccion_legible y map_url incluidos)
         try:
-            _send_new_order_notification(
-                nuevo_pedido,
-                extra_payload={
-                    'distancia_km': float(distancia_km or 0),
-                    'nota_pedido': (nota_pedido or None),
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                'pedidos_new_orders',
+                {
+                    'type': 'send_order_notification',
+                    'message': 'nuevo_pedido',
+                    'order_id': nuevo_pedido.id,
+                    'order_data': {
+                        'cliente_nombre': nuevo_pedido.cliente_nombre,
+                        'cliente_direccion': nuevo_pedido.cliente_direccion,
+                        'direccion_legible': _direccion_legible_from_text(nuevo_pedido.cliente_direccion),
+                        'map_url': _map_url_from_text(nuevo_pedido.cliente_direccion),
+                        'cliente_telefono': nuevo_pedido.cliente_telefono,
+                        'metodo_pago': nuevo_pedido.metodo_pago,
+                        'total_pedido': str(_compute_total(nuevo_pedido)),
+                        'costo_envio': float(nuevo_pedido.costo_envio or 0),
+                        'distancia_km': float(distancia_km or 0),
+                        'nota_pedido': (nota_pedido or None),
+                        'detalles': detalles_para_notificacion,
+                    }
                 }
             )
+            print(f"Notificación de pedido #{nuevo_pedido.id} enviada a Channels.")
         except Exception as e:
             print(f"ERROR al enviar notificación de pedido a Channels: {e}")
             messages.error(request, f"ERROR INTERNO: No se pudo enviar la alerta en tiempo real. Contacta a soporte. Error: {e}")
@@ -948,10 +929,7 @@ def perfil_cliente(request):
 
 @login_required
 def historial_pedidos_cliente(request):
-    pedidos = (Pedido.objects
-               .filter(user=request.user)
-               .order_by('-fecha_pedido')
-               .prefetch_related('detalles__producto', 'detalles__sabores', 'detalles__opcion_seleccionada'))
+    pedidos = Pedido.objects.filter(user=request.user).order_by('-fecha_pedido')
 
     cliente_profile = None
     if hasattr(request.user, 'clienteprofile'):
@@ -974,18 +952,17 @@ def pedido_en_curso(request):
     - Cliente: sus pedidos que NO estén ENTREGADO/CANCELADO.
     - Cadete: pedidos ASIGNADO/EN_CAMINO donde él es el cadete.
     """
+    pedidos = []
     if hasattr(request.user, 'cadeteprofile'):
         pedidos = (Pedido.objects
                 .filter(cadete_asignado=request.user.cadeteprofile,
                         estado__in=['ASIGNADO', 'EN_CAMINO'])
-                .order_by('-fecha_pedido')
-                .prefetch_related('detalles__producto', 'detalles__sabores', 'detalles__opcion_seleccionada'))
+                .order_by('-fecha_pedido'))
     else:
         pedidos = (Pedido.objects
                 .filter(user=request.user)
                 .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
-                .order_by('-fecha_pedido')
-                .prefetch_related('detalles__producto', 'detalles__sabores', 'detalles__opcion_seleccionada'))
+                .order_by('-fecha_pedido'))
 
     return render(request, 'pedidos/pedido_en_curso.html', {'pedidos': pedidos})
 
@@ -1002,33 +979,21 @@ def panel_alertas(request):
     hoy = timezone.localdate()
     ayer = hoy - timedelta(days=1)
 
-    base_prefetch = [
-        'detalles__producto',
-        'detalles__sabores',
-        'detalles__opcion_seleccionada',
-    ]
-
     pedidos_hoy = (
         Pedido.objects
         .filter(fecha_pedido__date=hoy)
         .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
         .order_by('-fecha_pedido')
-        .select_related('cadete_asignado__user')
-        .prefetch_related(*base_prefetch)
     )
     pedidos_ayer = (
         Pedido.objects
         .filter(fecha_pedido__date=ayer)
         .order_by('-fecha_pedido')[:120]
-        .select_related('cadete_asignado__user')
-        .prefetch_related(*base_prefetch)
     )
     entregados_hoy = (
         Pedido.objects
         .filter(fecha_pedido__date=hoy, estado='ENTREGADO')
         .order_by('-fecha_pedido')[:200]
-        .select_related('cadete_asignado__user')
-        .prefetch_related(*base_prefetch)
     )
 
     def enrich(qs):
@@ -1077,10 +1042,6 @@ def panel_alertas_data(request):
             fecha = hoy
         qs = Pedido.objects.filter(fecha_pedido__date=fecha).order_by('-fecha_pedido')
 
-    qs = qs.select_related('cadete_asignado__user').prefetch_related(
-        'detalles__producto', 'detalles__sabores', 'detalles__opcion_seleccionada'
-    )
-
     def serialize(p):
         data = {
             'id': p.id,
@@ -1091,7 +1052,8 @@ def panel_alertas_data(request):
             'map_url': _map_url_from_text(p.cliente_direccion),
             'cliente_telefono': p.cliente_telefono,
             'metodo_pago': p.metodo_pago,
-            'total_pedido': str(p.total_pedido or 0),
+            # ⚠️ Total con envío PERSISTIDO
+            'total_pedido': str(_compute_total(p)),
             'costo_envio': float(p.costo_envio or 0),
             'cadete': (p.cadete_asignado.user.get_full_name() or p.cadete_asignado.user.username)
                     if getattr(p, 'cadete_asignado', None) else None,
@@ -1117,8 +1079,7 @@ def panel_alertas_anteriores(request):
     limite = hoy - timedelta(days=1)
     pedidos = (Pedido.objects
             .filter(fecha_pedido__date__lt=limite)
-            .order_by('-fecha_pedido')[:300]
-            .select_related('cadete_asignado__user'))
+            .order_by('-fecha_pedido')[:300])
 
     filas = []
     for p in pedidos:
@@ -1131,7 +1092,7 @@ def panel_alertas_anteriores(request):
         filas.append(
             f"<tr><td>#{p.id}</td><td>{p.fecha_pedido:%Y-%m-%d %H:%M}</td>"
             f"<td>{p.estado}</td><td>{_direccion_legible_from_text(p.cliente_direccion) or 'N/A'}</td>"
-            f"<td>{cad}</td><td>${p.total_pedido or 0}</td></tr>"
+            f"<td>{cad}</td><td>${_compute_total(p)}</td></tr>"
         )
     html = f"""
     <div style="padding:20px;font-family:system-ui;-webkit-font-smoothing:antialiased">
@@ -1215,7 +1176,24 @@ def confirmar_pedido(request, pedido_id):
     try:
         channel_layer = get_channel_layer()
 
-        order_data = _order_details_payload(pedido)
+        detalles_para_notificacion = []
+        for detalle in pedido.detalles.all():
+            detalles_para_notificacion.append({
+                'producto_nombre': detalle.producto.nombre,
+                'opcion_nombre': detalle.opcion_seleccionada.nombre_opcion if detalle.opcion_seleccionada else None,
+                'cantidad': detalle.cantidad,
+                'sabores_nombres': [s.nombre for s in detalle.sabores.all()],
+            })
+
+        order_data = {
+            'id': pedido.id,
+            'cliente_nombre': pedido.cliente_nombre,
+            'cliente_direccion': pedido.cliente_direccion,
+            'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
+            'map_url': _map_url_from_text(pedido.cliente_direccion),
+            'total_pedido': str(_compute_total(pedido)),
+            'detalles': detalles_para_notificacion
+        }
 
         async_to_sync(channel_layer.group_send)(
             'cadetes_disponibles',
@@ -1326,12 +1304,10 @@ def panel_cadete(request):
 
     pedidos_en_curso = []
     if hasattr(request.user, 'cadeteprofile'):
-        pedidos_en_curso = (Pedido.objects.filter(
+        pedidos_en_curso = Pedido.objects.filter(
             cadete_asignado=request.user.cadeteprofile,
             estado__in=['ASIGNADO', 'EN_CAMINO']
-        )
-        .order_by('fecha_pedido')
-        .prefetch_related('detalles__producto', 'detalles__sabores', 'detalles__opcion_seleccionada'))
+        ).order_by('fecha_pedido')
 
     # Enriquecer con direccion_legible y map_url (para template)
     for p in pedidos_en_curso:
@@ -1355,8 +1331,7 @@ def cadete_historial(request):
 
     pedidos = (Pedido.objects
                .filter(cadete_asignado=request.user.cadeteprofile)
-               .order_by('-fecha_pedido')[:300]
-               .prefetch_related('detalles__producto', 'detalles__sabores', 'detalles__opcion_seleccionada'))
+               .order_by('-fecha_pedido')[:300])
 
     ctx = {'pedidos': pedidos}
     try:
@@ -1372,7 +1347,7 @@ def cadete_historial(request):
                 f"<td>{p.estado}</td>"
                 f"<td>{p.cliente_nombre or ''}</td>"
                 f"<td>{_direccion_legible_from_text(p.cliente_direccion) or ''}</td>"
-                f"<td>${p.total_pedido or 0}</td>"
+                f"<td>${_compute_total(p)}</td>"
                 f"</tr>"
             )
         link = reverse('panel_cadete')
@@ -1560,8 +1535,7 @@ def cadete_feed(request):
 
     pedidos = (Pedido.objects
             .filter(estado='EN_PREPARACION', cadete_asignado__isnull=True)
-            .order_by('-fecha_pedido')
-            .prefetch_related('detalles__producto', 'detalles__sabores', 'detalles__opcion_seleccionada')[:50])
+            .order_by('-fecha_pedido')[:50])
 
     def ser(p):
         return {
@@ -1571,7 +1545,8 @@ def cadete_feed(request):
             'direccion_legible': _direccion_legible_from_text(p.cliente_direccion),
             'map_url': _map_url_from_text(p.cliente_direccion),
             'cliente_telefono': p.cliente_telefono or '',
-            'total': str(p.total_pedido or 0),
+            # ⚠️ Total con envío persistido
+            'total': str(_compute_total(p)),
             'detalles': [{
                 'producto': d.producto.nombre,
                 'opcion': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
@@ -1710,6 +1685,7 @@ def mp_webhook_view(request):
         return HttpResponse(status=200)
 
     # ---- Actualizar estado según pago / reintegros
+    estado_anterior = pedido.estado
     try:
         pedido.metodo_pago = 'MERCADOPAGO'
 
@@ -1743,21 +1719,22 @@ def mp_webhook_view(request):
     except Exception as e:
         print(f"WEBHOOK MP: error guardando pedido: {e}")
 
-    # ---- Si approved (alta/confirmación), notificar panel y puntos
+    # ---- Notificar SIEMPRE al panel cuando cambie algo (aprobado, cancelado, refund, etc.)
+    try:
+        _notify_panel_update(pedido, message='actualizacion_pedido' if status != 'approved' else 'nuevo_pedido')
+    except Exception as e:
+        print(f"WEBHOOK MP: error enviando WS: {e}")
+
+    # ---- Si approved (alta/confirmación), puntos
     if status == 'approved':
         try:
             if pedido.user and hasattr(pedido.user, 'clienteprofile'):
-                total = Decimal(str(pedido.total_pedido)) if pedido.total_pedido is not None else Decimal('0')
+                total = Decimal(str(_compute_total(pedido)))
                 puntos = int(total / Decimal('500')) * 100
                 pedido.user.clienteprofile.puntos_fidelidad += puntos
                 pedido.user.clienteprofile.save()
         except Exception as e:
             print(f"WEBHOOK MP: error otorgando puntos: {e}")
-
-        try:
-            _send_new_order_notification(pedido)
-        except Exception as e:
-            print(f"WEBHOOK MP: error enviando WS: {e}")
 
     return HttpResponse(status=200)
 
@@ -1771,7 +1748,35 @@ def mp_success(request):
     if last_id:
         try:
             pedido = Pedido.objects.get(id=last_id)
-            _send_new_order_notification(pedido)
+            channel_layer = get_channel_layer()
+            detalles_para_notificacion = []
+            for d in pedido.detalles.all():
+                detalles_para_notificacion.append({
+                    'producto_nombre': d.producto.nombre,
+                    'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
+                    'cantidad': d.cantidad,
+                    'sabores_nombres': [s.nombre for s in d.sabores.all()],
+                })
+
+            async_to_sync(channel_layer.group_send)(
+                'pedidos_new_orders',
+                {
+                    'type': 'send_order_notification',
+                    'message': 'nuevo_pedido',
+                    'order_id': pedido.id,
+                    'order_data': {
+                        'cliente_nombre': pedido.cliente_nombre,
+                        'cliente_direccion': pedido.cliente_direccion,
+                        'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
+                        'map_url': _map_url_from_text(pedido.cliente_direccion),
+                        'cliente_telefono': pedido.cliente_telefono,
+                        'metodo_pago': 'MERCADOPAGO',
+                        'total_pedido': str(_compute_total(pedido)),
+                        'costo_envio': float(pedido.costo_envio or 0),
+                        'detalles': detalles_para_notificacion,
+                    }
+                }
+            )
             print(f"MP SUCCESS: notificación fallback enviada para pedido #{pedido.id}")
         except Exception as e:
             print(f"MP SUCCESS: error en fallback WS: {e}")
