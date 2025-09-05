@@ -16,7 +16,7 @@
     <button id="enable-sound" class="btn btn-outline-primary">🔔 Habilitar sonido</button>
     <span id="sound-warning" class="badge bg-warning text-dark d-none">Tocá “Habilitar sonido” para oír alertas</span>
 
-    <!-- NUEVO: Notificaciones push -->
+    <!-- Notificaciones push -->
     <button id="enable-push" class="btn btn-outline-success">🛎️ Activar notificaciones</button>
     <span id="push-status" class="badge bg-secondary">Push: sin configurar</span>
   </div>
@@ -33,7 +33,16 @@
                 <div>
                   <span class="fw-bold">#{{ p.id }}</span>
                   <span class="badge bg-primary">{{ p.estado }}</span>
-                  <div class="text-muted small">{{ p.cliente_nombre }} — {{ p.cliente_direccion|default:"" }}</div>
+                  <div class="text-muted small">
+                    {{ p.cliente_nombre }}
+                    — 
+                    {% with q=p.direccion_legible|default:p.cliente_direccion %}
+                      <span class="addr-text">{{ q|default:"" }}</span>
+                      {% if q %}
+                        <a class="btn btn-sm btn-outline-primary ms-1 map-link" data-addr="{{ q|escape }}">Ver mapa</a>
+                      {% endif %}
+                    {% endwith %}
+                  </div>
                   <div class="text-muted small">Total aprox: ${{ p.total_pedido|default_if_none:"0.00" }}</div>
                 </div>
                 <div>
@@ -75,7 +84,7 @@
   function getCookie(name){const value=`; ${document.cookie}`;const parts=value.split(`; ${name}=`);if(parts.length===2) return parts.pop().split(';').shift();}
   const csrftoken=getCookie('csrftoken');
 
-  // ===== Sonido (un botón para habilitar/probar) =====
+  // ===== Sonido =====
   const orderSoundUrl = "{% static 'pedidos/sounds/new-order.mp3' %}";
   const enableBtn   = document.getElementById('enable-sound');
   const soundWarn   = document.getElementById('sound-warning');
@@ -115,8 +124,8 @@
   });
   if(!soundEnabled){ soundWarn.classList.remove('d-none'); }
 
-  // ===== NUEVO: Notificaciones Push =====
-  const VAPID_PUBLIC_KEY = '{{ vapid_public_key|default:""|escapejs }}'; // viene del contexto de la vista
+  // ===== Notificaciones Push =====
+  const VAPID_PUBLIC_KEY = '{{ vapid_public_key|default:""|escapejs }}';
   const btnPush   = document.getElementById('enable-push');
   const pushBadge = document.getElementById('push-status');
 
@@ -124,7 +133,6 @@
     pushBadge.textContent = text;
     pushBadge.className = 'badge ' + (ok ? 'bg-success' : 'bg-secondary');
   }
-
   function urlBase64ToUint8Array(base64String){
     const padding = '='.repeat((4 - base64String.length % 4) % 4);
     const base64  = (base64String + padding).replace(/-/g,'+').replace(/_/g,'/');
@@ -133,7 +141,6 @@
     for(let i=0;i<rawData.length;i++){ outputArray[i]=rawData.charCodeAt(i); }
     return outputArray;
   }
-
   async function saveSubscription(sub){
     const res = await fetch("{% url 'save_subscription' %}", {
       method: 'POST',
@@ -142,21 +149,17 @@
     });
     return res.ok;
   }
-
   async function ensureServiceWorker(){
     if(!('serviceWorker' in navigator)){ throw new Error('SW no soportado'); }
-    // Registramos /sw.js que ya sirve el backend con scope raíz
     const reg = await navigator.serviceWorker.register('/sw.js');
     return reg;
   }
-
   async function getOrCreateSubscription(reg){
     const existing = await reg.pushManager.getSubscription();
     if(existing) return existing;
     const appKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
     return await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey: appKey});
   }
-
   async function activatePush(){
     if(!VAPID_PUBLIC_KEY){
       setPushBadge('Push: sin VAPID', false);
@@ -167,15 +170,9 @@
       setPushBadge('Push no disponible', false);
       return;
     }
-
-    // permiso
-    let perm = Notification.permission; // 'default' | 'granted' | 'denied'
+    let perm = Notification.permission;
     if(perm === 'default'){ perm = await Notification.requestPermission(); }
-    if(perm !== 'granted'){
-      setPushBadge('Push: permiso denegado', false);
-      return;
-    }
-
+    if(perm !== 'granted'){ setPushBadge('Push: permiso denegado', false); return; }
     try{
       const reg  = await ensureServiceWorker();
       const sub  = await getOrCreateSubscription(reg);
@@ -192,15 +189,12 @@
       setPushBadge('Push: error', false);
     }
   }
-
-  // Estado inicial de push
   (async ()=>{
     try{
       if(!VAPID_PUBLIC_KEY){ setPushBadge('Push: sin VAPID', false); return; }
       if(!('serviceWorker' in navigator) || !('Notification' in window)){
         setPushBadge('Push no disponible', false); return;
       }
-      // Si ya está concedido, intentamos suscribir silenciosamente
       if(Notification.permission === 'granted'){
         const reg = await ensureServiceWorker();
         const sub = await getOrCreateSubscription(reg);
@@ -217,10 +211,9 @@
       setPushBadge('Push: error', false);
     }
   })();
-
   btnPush.addEventListener('click', activatePush);
 
-  // ===== Disponibilidad (solo visualizar) & Feed =====
+  // ===== Disponibilidad & Feed =====
   const availBadge   = document.getElementById('avail-badge');
   const feedList     = document.getElementById('feed-list');
   const enCursoList  = document.getElementById('en-curso-list');
@@ -236,7 +229,29 @@
     availBadge.textContent = 'Estado: ' + (disponible ? 'Disponible' : 'No disponible');
   }
 
+  // Normaliza una dirección para query de Maps (agarra coords en medio de un texto "GPS: lat,lng — Nota...")
+  function mapsQueryFromAddr(addr){
+    const s = (addr||'').trim();
+    if(!s) return '';
+    const m = s.match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/); // toma la primera pareja lat,lng
+    return m ? `${m[1]},${m[2]}` : s;
+  }
+  function mapsUrlFromAddr(addr){
+    const q = mapsQueryFromAddr(addr);
+    return q ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}` : '';
+  }
+
+  // Completa los enlaces "Ver mapa" renderizados por el servidor
+  (function hydrateServerMapLinks(){
+    document.querySelectorAll('.map-link[data-addr]').forEach(a=>{
+      const url = mapsUrlFromAddr(a.dataset.addr || '');
+      if(url){ a.href = url; a.target = '_blank'; }
+      else{ a.classList.add('d-none'); }
+    });
+  })();
+
   function buildEnCursoCard({id, estado, cliente, direccion, total}){
+    const mapsUrl = mapsUrlFromAddr(direccion);
     const div = document.createElement('div');
     div.className = 'card mb-2';
     div.dataset.orderId = id;
@@ -246,7 +261,10 @@
           <div>
             <span class="fw-bold">#${id}</span>
             <span class="badge bg-primary">${estado}</span>
-            <div class="text-muted small">${cliente||''} — ${direccion||''}</div>
+            <div class="text-muted small">
+              ${cliente||''} — <span class="addr-text">${direccion||''}</span>
+              ${mapsUrl ? `<a class="btn btn-sm btn-outline-primary ms-1" target="_blank" href="${mapsUrl}">Ver mapa</a>` : ``}
+            </div>
             <div class="text-muted small">Total aprox: $${parseFloat(total||0).toFixed(2)}</div>
           </div>
           <div>
@@ -280,6 +298,7 @@
         feedList.innerHTML = pedidos.map(p=>{
           const dir = (p.cliente_direccion||'').trim();
           const tel = (p.cliente_telefono||'').trim();
+          const mapsUrl = mapsUrlFromAddr(dir);
           const detalleHtml = (p.detalles||[]).map(d=>{
             const opt = d.opcion ? ` - ${d.opcion}` : '';
             const sab = (d.sabores&&d.sabores.length) ? d.sabores.join(', ') : 'Sin especificar';
@@ -292,7 +311,11 @@
                   <div>
                     <span class="fw-bold">#${p.id}</span>
                     <span class="badge bg-info text-dark">EN_PREPARACION</span>
-                    <div class="text-muted small">Cliente: <span class="fw-semibold">${p.cliente_nombre||''}</span> · ${tel||'—'} · ${dir||'—'}</div>
+                    <div class="text-muted small">
+                      Cliente: <span class="fw-semibold">${p.cliente_nombre||''}</span>
+                      · ${tel||'—'} · <span class="addr-text">${dir||'—'}</span>
+                      ${mapsUrl ? `<a class="btn btn-sm btn-outline-primary ms-1" target="_blank" href="${mapsUrl}">Ver mapa</a>` : ``}
+                    </div>
                     <div class="text-muted small">Total aprox: $${parseFloat(p.total||0).toFixed(2)}</div>
                     <details class="mt-2"><summary>Ver productos</summary><ul class="small mt-2 mb-0">${detalleHtml}</ul></details>
                   </div>
@@ -301,7 +324,7 @@
                             data-url="/cadete/aceptar-pedido/${p.id}/"
                             data-id="${p.id}"
                             data-cliente="${(p.cliente_nombre||'').replace(/"/g,'&quot;')}"
-                            data-dir="${(p.cliente_direccion||'').replace(/"/g,'&quot;')}"
+                            data-dir="${(dir||'').replace(/"/g,'&quot;')}"
                             data-total="${p.total||0}">
                       ✅ Aceptar pedido
                     </button>
@@ -327,7 +350,7 @@
     }
   }
 
-  // Aceptar pedido (POST a /cadete/aceptar-pedido/ID/, y añadir a “en curso” sin refrescar)
+  // Aceptar pedido (POST y añadir a “en curso” sin refrescar)
   document.addEventListener('click', async (ev)=>{
     const btn = ev.target.closest('.btn-accept'); if(!btn) return;
     const url = btn.dataset.url;
@@ -344,14 +367,11 @@
       if(res.ok && ct.includes('application/json')){
         const data = await res.json();
         if(data.ok){
-          // añadir card a "en curso"
           if(enCursoEmpty) enCursoEmpty.remove();
           const card = buildEnCursoCard({id, estado: data.estado || 'ASIGNADO', cliente, direccion, total});
           enCursoList.prepend(card);
-          // sacar oferta de la lista
           const offer = document.getElementById(`offer-${id}`); if(offer) offer.remove();
-          // al aceptar, backend deja no disponible -> reflejar
-          setAvailUI(false);
+          setAvailUI(false); // el backend lo deja NO disponible al aceptar
           return;
         }
       }

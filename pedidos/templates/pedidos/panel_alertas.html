@@ -23,10 +23,14 @@
 
               <div class="small text-muted mb-1">
                 Cliente: <span class="fw-semibold">{{ p.cliente_nombre|default:"N/A" }}</span>
-                · {{ p.cliente_telefono|default:"—" }} · {{ p.cliente_direccion|default:"—" }}
+                · {{ p.cliente_telefono|default:"—" }}
+                · {{ p.direccion_legible|default:"—" }}
+                {% if p.map_url %}
+                  <a class="btn btn-sm btn-outline-primary ms-2" target="_blank" href="{{ p.map_url }}">Ver mapa</a>
+                {% endif %}
               </div>
 
-              {# ==== NUEVO: bloque informativo de envío (no rompe nada si no hay datos) ==== #}
+              {# Info de envío #}
               <div class="small text-muted">
                 Envío:
                 {% if p.costo_envio %}
@@ -111,7 +115,6 @@
                   {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
                 {% else %}—{% endif %}
               </span>
-              {# opcional: mini info de envío #}
               {% if p.costo_envio %}
                 <span class="small text-muted">· Envío ${{ p.costo_envio|floatformat:2 }}</span>
               {% endif %}
@@ -172,7 +175,7 @@
       {% endif %}
     </div>
   </details>
-  <!-- Link a pedidos anteriores -->
+
   <div class="text-center mt-4">
     <a href="{% url 'panel_alertas_anteriores' %}" class="btn btn-outline-secondary">
       Ver pedidos anteriores
@@ -194,7 +197,7 @@
   function getCookie(name){const value=`; ${document.cookie}`;const parts=value.split(`; ${name}=`);if(parts.length===2) return parts.pop().split(';').shift();}
   const csrftoken=getCookie('csrftoken');
 
-  // ===== Sonido (robusto) =====
+  // ===== Sonido =====
   const orderSoundUrl = "{% static 'pedidos/sounds/new-order.mp3' %}";
   let soundEnabled = (localStorage.getItem('panel_sound') ?? 'on') !== 'off';
 
@@ -202,7 +205,6 @@
   const btnTestSound   = document.getElementById('test-sound');
   const soundStatus    = document.getElementById('sound-status');
 
-  // Reutilizamos un solo elemento <audio>
   const audioEl = new Audio(orderSoundUrl);
   audioEl.preload = 'auto';
   let audioUnlocked = false;
@@ -238,14 +240,12 @@
     unlockAudio();
     if(soundEnabled){ try{ audioEl.currentTime=0; audioEl.play().catch(()=>{});}catch(e){} }
   });
-
   ['click','touchstart','keydown'].forEach(evt=>{
     document.addEventListener(evt, function once(){
       if(!audioUnlocked) unlockAudio();
       document.removeEventListener(evt, once, {passive:true});
     }, {passive:true});
   });
-
   updateSoundBtn();
 
   // ===== Helpers =====
@@ -259,7 +259,7 @@
     return document.getElementById(`order-${id}`) || document.getElementById(`chip-${id}`) || document.getElementById(`chip-hoy-${id}`);
   }
 
-  /* ===== Construcción de tarjetas/chips (se mantiene igual, solo agrego mini-bloques de envío si llegan datos) ===== */
+  /* ===== Construcción de tarjetas/chips ===== */
 
   function buildCard(order){
     const wrapper=document.createElement('div');
@@ -284,6 +284,9 @@
       const sabores=(d.sabores_nombres && d.sabores_nombres.length)? d.sabores_nombres.join(', ') : 'Sin especificar';
       return `<li>${name} (x${d.cantidad})<br><span class="text-muted">Sabores: ${sabores}</span></li>`;
     }).join('');
+
+    const direccion = order.direccion_legible || order.cliente_direccion || '—';
+    const mapUrl = order.map_url || '';
 
     const rightControls = estado==='RECIBIDO'
       ? `<button class="btn btn-success fw-bold btn-confirm"
@@ -314,7 +317,8 @@
           </div>
           <div class="small text-muted mb-1">
             Cliente: <span class="fw-semibold">${order.cliente_nombre||'N/A'}</span>
-            · ${order.cliente_telefono||'—'} · ${order.cliente_direccion||'—'}
+            · ${order.cliente_telefono||'—'} · ${direccion}
+            ${mapUrl ? `<a class="btn btn-sm btn-outline-primary ms-2" target="_blank" href="${mapUrl}">Ver mapa</a>` : ``}
           </div>
           ${envioHtml}
           <div class="small">Cadete: <span class="fw-semibold cadete-name">${cadeteTxt}</span></div>
@@ -484,8 +488,8 @@
 
     if(kind==='nuevo_pedido'){
       if(!orderExists(orderId)){
-        orderData.id=orderId;
-        const card=buildCard(orderData);   // mostrará envío si vino en orderData
+        orderData.id=orderId;               // viene con direccion_legible y map_url
+        const card=buildCard(orderData);
         alertsHoy.prepend(card);
         playSound();
       }
