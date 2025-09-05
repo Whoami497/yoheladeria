@@ -189,14 +189,19 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
   integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
-<!-- JS: mapa obligatorio + cálculo automático -->
+<!-- JS: mapa obligatorio + cálculo automático + PERSISTENCIA -->
 <script>
 (function(){
   // ---------- CONFIGURABLES ----------
-  // Coordenadas de tu local (de tus settings ORIGEN_LAT/ORIGEN_LNG):
+  // Coordenadas de tu local (settings ORIGEN_LAT/ORIGEN_LNG):
   const STORE = { lat: -28.4705234, lng: -65.7937524 };
   // Radio de servicio en metros (0 para desactivar límite visual):
   const SERVICE_RADIUS_M = 8000;
+
+  // ---------- LOCALSTORAGE KEYS ----------
+  const LS_GEO  = 'yl_geo_latlng';
+  const LS_COST = 'yl_envio_cost';
+  const LS_KM   = 'yl_envio_km';
 
   const fmt = (n) => '$' + Number(n).toFixed(2);
   const subtotal = parseFloat('{{ total|floatformat:2 }}') || 0;
@@ -230,7 +235,6 @@
     envioLblH.value = envioSel.options[envioSel.selectedIndex]?.text || '';
     envioCostH.value  = String(envio);
 
-    // Habilitamos envío si: (Retiro) o (hay geo_latlng y costo calculado)
     const isPickup = envioSel.value === '0';
     const hasPoint = !!geoHidden.value;
     setSubmitEnabled(isPickup || (hasPoint && envio > 0));
@@ -319,9 +323,13 @@
     const debounced = debounce(async (latlng)=>{
       try{
         elMapStatus.textContent = 'Calculando costo...';
-        const data = await getJSON(`/api/costo-envio/?direccion=${latlng.lat.toFixed(6)},${latlng.lng.toFixed(6)}`);
+        const q = `${latlng.lat.toFixed(6)},${latlng.lng.toFixed(6)}`;
+        const data = await getJSON(`/api/costo-envio/?direccion=${q}`);
         if(data && data.ok){
           setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0), 'Estimado con punto del mapa');
+          // Guarda costo y km (para mostrar rápido si el user vuelve al carrito)
+          localStorage.setItem(LS_COST, String(Number(data.costo_envio||0).toFixed(2)));
+          localStorage.setItem(LS_KM,   String(Number(data.distancia_km||0).toFixed(3)));
           elMapStatus.textContent = `Distancia ≈ ${Number(data.distancia_km||0).toFixed(2)} km`;
         }else{
           elMapStatus.textContent = 'No se pudo calcular. Probá mover el pin nuevamente.';
@@ -337,7 +345,7 @@
       debounced(p);
     });
 
-    // Intento de centrar al usuario al abrir
+    // Intento de centrar al usuario al abrir (solo primera vez)
     if(navigator.geolocation){
       elMapStatus.textContent = 'Buscando tu ubicación...';
       navigator.geolocation.getCurrentPosition((pos)=>{
@@ -347,7 +355,6 @@
         updateUI(here);
         setTimeout(()=>map.invalidateSize(), 250);
         elMapStatus.textContent = 'Podés arrastrar el pin para ajustar.';
-        // Dispara un cálculo inicial
         debounced(here);
       }, ()=>{
         elMapStatus.textContent = 'No pudimos obtener tu ubicación. Arrastrá el pin al lugar exacto.';
@@ -373,13 +380,33 @@
     ensureMap();
   });
 
-  // Confirmar punto
-  btnMapUse.addEventListener('click', ()=>{
+  // Confirmar punto desde el modal (también persiste)
+  btnMapUse.addEventListener('click', async ()=>{
     const p = marker.getLatLng();
     const lat = p.lat.toFixed(6), lng = p.lng.toFixed(6);
-    geoHidden.value = `${lat},${lng}`;
+    const latlng = `${lat},${lng}`;
+
+    geoHidden.value = latlng;
     coordsPreview.style.display = '';
-    coordsPreview.textContent = `📍 ${lat}, ${lng}`;
+    coordsPreview.textContent = `📍 ${latlng}`;
+
+    // Persistir ubicación
+    localStorage.setItem(LS_GEO, latlng);
+
+    // Asegurar costo al confirmar (por si no se disparó el cálculo durante el drag)
+    try{
+      const data = await getJSON(`/api/costo-envio/?direccion=${latlng}`);
+      if(data && data.ok){
+        setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0), 'Estimado con punto del mapa');
+        localStorage.setItem(LS_COST, String(Number(data.costo_envio||0).toFixed(2)));
+        localStorage.setItem(LS_KM,   String(Number(data.distancia_km||0).toFixed(3)));
+      }else{
+        removeAutoOption();
+      }
+    }catch(e){
+      removeAutoOption();
+    }
+
     if(mapModal) mapModal.hide();
     recalc();
   });
@@ -390,19 +417,47 @@
     if(!isPickup && !geoHidden.value){
       e.preventDefault();
       submitWarn.style.display = '';
-      // abre mapa para que elija
       mapModal = new bootstrap.Modal(elMapModal);
       mapModal.show();
       ensureMap();
     }
   });
 
-  // Al cargar: mostrar números y abrir el mapa si no hay punto elegido
-  function init(){
+  // ------- RESTAURAR DESDE LOCALSTORAGE AL CARGAR -------
+  async function restoreFromLocalStorage(){
+    const saved = localStorage.getItem(LS_GEO);
+    if(saved){
+      // pinta coords y hidden
+      geoHidden.value = saved;
+      coordsPreview.style.display = '';
+      coordsPreview.textContent = `📍 ${saved}`;
+
+      // Si tenemos costo/ km guardados, mostrar rápido mientras recalculamos
+      const savedCost = localStorage.getItem(LS_COST);
+      const savedKm   = localStorage.getItem(LS_KM);
+      if(savedCost){
+        setAutoOption(Number(savedCost), Number(savedKm||0), 'Estimado (guardado)');
+      }
+
+      // Recalcular en vivo (por si cambió la tarifa)
+      try{
+        const data = await getJSON(`/api/costo-envio/?direccion=${saved}`);
+        if(data && data.ok){
+          setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0), 'Estimado con punto guardado');
+          localStorage.setItem(LS_COST, String(Number(data.costo_envio||0).toFixed(2)));
+          localStorage.setItem(LS_KM,   String(Number(data.distancia_km||0).toFixed(3)));
+        }
+      }catch(e){}
+    }
     recalc();
+  }
+
+  // Al cargar
+  async function init(){
+    await restoreFromLocalStorage();
+    // Si no hay ubicación guardada, abrimos el mapa
     if(!geoHidden.value){
-      // Abrimos el mapa apenas entra para que elija; si quiere retiro, puede ignorarlo
-      setTimeout(()=>{ btnMap.click(); }, 300);
+      setTimeout(()=>{ btnMap.click(); }, 400);
     }
   }
   init();
