@@ -20,6 +20,8 @@ from asgiref.sync import async_to_sync
 import json
 import mercadopago
 import requests
+import re
+from urllib.parse import quote_plus
 
 from .forms import ClienteRegisterForm, ClienteProfileForm
 from .models import (
@@ -64,7 +66,11 @@ def _serialize_pedido_for_panel(pedido, include_details=True):
         'id': pedido.id,
         'estado': pedido.estado,
         'cliente_nombre': pedido.cliente_nombre,
+        # mostramos la cadena completa guardada:
         'cliente_direccion': pedido.cliente_direccion,
+        # además exponemos una versión legible y la url de mapa:
+        'direccion_legible': getattr(pedido, 'direccion_legible', None) or _direccion_legible_from_text(pedido.cliente_direccion),
+        'map_url': _map_url_from_text(pedido.cliente_direccion),
         'cliente_telefono': pedido.cliente_telefono,
         'metodo_pago': pedido.metodo_pago,
         'total_pedido': str(pedido.total_pedido or 0),
@@ -95,7 +101,11 @@ def _notify_panel_update(pedido, message='actualizacion_pedido'):
         if message == 'nuevo_pedido':
             order_data = _serialize_pedido_for_panel(pedido, include_details=True)
         else:
-            order_data = {'estado': pedido.estado}
+            order_data = {
+                'estado': pedido.estado,
+                'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
+                'map_url': _map_url_from_text(pedido.cliente_direccion),
+            }
 
         async_to_sync(channel_layer.group_send)(
             'pedidos_new_orders',
@@ -144,7 +154,7 @@ def _notify_cadetes_new_order(request, pedido):
 
     payload = {
         "title": "Nuevo pedido disponible",
-        "body": f"Pedido #{pedido.id} — {pedido.cliente_direccion or ''}",
+        "body": f"Pedido #{pedido.id} — {_direccion_legible_from_text(pedido.cliente_direccion)}",
         "url": _abs_https(request, reverse('panel_cadete')),
     }
 
@@ -181,6 +191,72 @@ def _origin_from_settings() -> str:
         except Exception:
             pass
     return (getattr(settings, 'SUCURSAL_DIRECCION', '') or '').strip()
+
+
+def _extract_coords(text: str):
+    """
+    Busca lat,lng en un texto. Devuelve (lat, lng) como strings o None.
+    """
+    if not text:
+        return None
+    m = re.search(r'(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)', text)
+    if m:
+        return m.group(1), m.group(2)
+    return None
+
+
+def _direccion_legible_from_text(text: str) -> str:
+    """
+    De una cadena "Av. X 123 — GPS: -28.44,-65.77 — Nota: yyy", devuelve solo la parte de dirección.
+    Si no hay separadores, devuelve todo el texto.
+    """
+    if not text:
+        return ""
+    # Cortar antes del " — GPS:" si existe
+    parts = text.split(' — GPS:')
+    return parts[0].strip()
+
+
+def _map_url_from_text(text: str) -> str:
+    """
+    Construye una URL de Google Maps desde un texto que puede contener lat,lng.
+    """
+    coords = _extract_coords(text)
+    if coords:
+        lat, lng = coords
+        return f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
+    # fallback: buscar por la dirección entera
+    q = quote_plus(_direccion_legible_from_text(text) or text)
+    return f"https://www.google.com/maps/search/?api=1&query={q}"
+
+
+def _reverse_geocode(latlng: str) -> str:
+    """
+    Devuelve una dirección legible para un 'lat,lng' usando Geocoding API.
+    Fallback: 'Cerca de lat,lng'.
+    """
+    api_key = getattr(settings, 'GOOGLE_MAPS_API_KEY', '') or ''
+    language = getattr(settings, 'MAPS_LANGUAGE', 'es')
+    region   = getattr(settings, 'MAPS_REGION', 'AR')
+    if not api_key or not latlng:
+        return f"Cerca de {latlng}"
+    try:
+        url = "https://maps.googleapis.com/maps/api/geocode/json"
+        params = {
+            'latlng': latlng,
+            'key': api_key,
+            'language': language,
+            'region': region,
+        }
+        r = requests.get(url, params=params, timeout=8)
+        r.raise_for_status()
+        data = r.json()
+        results = data.get('results') or []
+        if results:
+            return results[0].get('formatted_address') or f"Cerca de {latlng}"
+    except Exception as e:
+        print(f"GEOCODING ERROR: {e}")
+    return f"Cerca de {latlng}"
 
 
 def _calcular_costo_envio(direccion_cliente: str):
@@ -562,21 +638,33 @@ def ver_carrito(request):
 
     if request.method == 'POST':
         nombre = request.POST.get('cliente_nombre')
-        direccion_input = (request.POST.get('cliente_direccion') or '').strip()
+        direccion_input = (request.POST.get('cliente_direccion') or '').strip()  # (puede venir vacío si usamos sólo mapa)
         telefono = request.POST.get('cliente_telefono')
         metodo_pago = request.POST.get('metodo_pago')
         nota_pedido = (request.POST.get('nota_pedido') or '').strip()
 
-        # <- NUEVO: si el front mandó un lat,lng confirmado, úsalo para calcular
+        # Si el front mandó un lat,lng confirmado, úsalo para costo y para dire legible
         geo_latlng = (request.POST.get('geo_latlng') or '').strip()
         direccion_para_maps = geo_latlng if geo_latlng else direccion_input
 
-        # Lo que guardamos como "dirección" en el pedido (texto visible en cocina)
-        direccion_a_guardar = direccion_input
-        if not direccion_a_guardar and geo_latlng:
-            direccion_a_guardar = f"GPS: {geo_latlng}"
+        # Dirección legible (preferimos reverse geocoding si hay GPS)
+        direccion_legible = None
+        if geo_latlng:
+            try:
+                direccion_legible = _reverse_geocode(geo_latlng)
+            except Exception:
+                direccion_legible = None
+
+        # String que guardaremos en el Pedido
+        base_dir = direccion_legible or direccion_input
+        if not base_dir and geo_latlng:
+            base_dir = f"Cerca de {geo_latlng}"
+
+        direccion_a_guardar = base_dir or ""  # nunca None
+        if geo_latlng:
+            direccion_a_guardar = f"{direccion_a_guardar} — GPS: {geo_latlng}"
         if nota_pedido:
-            direccion_a_guardar = (f"{direccion_a_guardar} — Nota: {nota_pedido}").strip(" —")
+            direccion_a_guardar = f"{direccion_a_guardar} — Nota: {nota_pedido}"
 
         # Cálculo de envío ANTES de crear el pedido
         costo_envio_decimal = Decimal('0.00')
@@ -669,6 +757,7 @@ def ver_carrito(request):
             request.user.clienteprofile.save()
             messages.success(request, f"¡Has ganado {puntos_ganados} puntos de fidelidad con este pedido!")
 
+        # Notificación a panel (con direccion_legible y map_url incluidos)
         try:
             channel_layer = get_channel_layer()
             async_to_sync(channel_layer.group_send)(
@@ -680,6 +769,8 @@ def ver_carrito(request):
                     'order_data': {
                         'cliente_nombre': nuevo_pedido.cliente_nombre,
                         'cliente_direccion': nuevo_pedido.cliente_direccion,
+                        'direccion_legible': _direccion_legible_from_text(nuevo_pedido.cliente_direccion),
+                        'map_url': _map_url_from_text(nuevo_pedido.cliente_direccion),
                         'cliente_telefono': nuevo_pedido.cliente_telefono,
                         'metodo_pago': nuevo_pedido.metodo_pago,
                         'total_pedido': str(nuevo_pedido.total_pedido),
@@ -866,6 +957,7 @@ def pedido_en_curso(request):
 def panel_alertas(request):
     """
     Muestra HOY (activos), AYER (plegable) y ENTREGADOS de hoy (plegable al final).
+    Anotamos cada pedido con direccion_legible y map_url para uso en template.
     """
     hoy = timezone.localdate()
     ayer = hoy - timedelta(days=1)
@@ -887,10 +979,16 @@ def panel_alertas(request):
         .order_by('-fecha_pedido')[:200]
     )
 
+    def enrich(qs):
+        for p in qs:
+            setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
+            setattr(p, 'map_url', _map_url_from_text(p.cliente_direccion))
+        return qs
+
     ctx = {
-        'pedidos_hoy': pedidos_hoy,
-        'pedidos_ayer': pedidos_ayer,
-        'entregados_hoy': entregados_hoy,
+        'pedidos_hoy': enrich(pedidos_hoy),
+        'pedidos_ayer': enrich(pedidos_ayer),
+        'entregados_hoy': enrich(entregados_hoy),
     }
     return render(request, 'pedidos/panel_alertas.html', ctx)
 
@@ -900,6 +998,7 @@ def panel_alertas_data(request):
     """
     JSON para rehidratar/pollear el panel.
     Soporta scope=hoy | hoy_finalizados | ayer | YYYY-MM-DD
+    Devuelve tambien direccion_legible y map_url.
     """
     scope = (request.GET.get('scope') or 'hoy').lower()
     hoy = timezone.localdate()
@@ -932,6 +1031,8 @@ def panel_alertas_data(request):
             'estado': p.estado,
             'cliente_nombre': p.cliente_nombre,
             'cliente_direccion': p.cliente_direccion,
+            'direccion_legible': _direccion_legible_from_text(p.cliente_direccion),
+            'map_url': _map_url_from_text(p.cliente_direccion),
             'cliente_telefono': p.cliente_telefono,
             'metodo_pago': p.metodo_pago,
             'total_pedido': str(p.total_pedido or 0),
@@ -972,7 +1073,7 @@ def panel_alertas_anteriores(request):
 
         filas.append(
             f"<tr><td>#{p.id}</td><td>{p.fecha_pedido:%Y-%m-%d %H:%M}</td>"
-            f"<td>{p.estado}</td><td>{p.cliente_nombre or 'N/A'}</td>"
+            f"<td>{p.estado}</td><td>{_direccion_legible_from_text(p.cliente_direccion) or 'N/A'}</td>"
             f"<td>{cad}</td><td>${p.total_pedido or 0}</td></tr>"
         )
     html = f"""
@@ -980,7 +1081,7 @@ def panel_alertas_anteriores(request):
     <h3>Pedidos anteriores</h3>
     <p><a href="/panel-alertas/">Volver al panel</a></p>
     <table border="1" cellpadding="6" cellspacing="0">
-        <thead><tr><th>ID</th><th>Fecha</th><th>Estado</th><th>Cliente</th><th>Cadete</th><th>Total</th></tr></thead>
+        <thead><tr><th>ID</th><th>Fecha</th><th>Estado</th><th>Dirección</th><th>Cadete</th><th>Total</th></tr></thead>
         <tbody>{''.join(filas) or '<tr><td colspan="6">Sin datos</td></tr>'}</tbody>
     </table>
     </div>
@@ -1070,6 +1171,8 @@ def confirmar_pedido(request, pedido_id):
             'id': pedido.id,
             'cliente_nombre': pedido.cliente_nombre,
             'cliente_direccion': pedido.cliente_direccion,
+            'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
+            'map_url': _map_url_from_text(pedido.cliente_direccion),
             'total_pedido': str(pedido.total_pedido),
             'detalles': detalles_para_notificacion
         }
@@ -1187,6 +1290,11 @@ def panel_cadete(request):
             cadete_asignado=request.user.cadeteprofile,
             estado__in=['ASIGNADO', 'EN_CAMINO']
         ).order_by('fecha_pedido')
+
+    # Enriquecer con direccion_legible y map_url (para template)
+    for p in pedidos_en_curso:
+        setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
+        setattr(p, 'map_url', _map_url_from_text(p.cliente_direccion))
 
     contexto = {'vapid_public_key': vapid_public_key, 'pedidos_en_curso': pedidos_en_curso}
     return render(request, 'pedidos/panel_cadete.html', contexto)
@@ -1370,6 +1478,8 @@ def cadete_feed(request):
             'id': p.id,
             'cliente_nombre': p.cliente_nombre or '',
             'cliente_direccion': p.cliente_direccion or '',
+            'direccion_legible': _direccion_legible_from_text(p.cliente_direccion),
+            'map_url': _map_url_from_text(p.cliente_direccion),
             'cliente_telefono': p.cliente_telefono or '',
             'total': str(p.total_pedido or 0),
             'detalles': [{
@@ -1381,28 +1491,6 @@ def cadete_feed(request):
         }
 
     return JsonResponse({'ok': True, 'disponible': True, 'pedidos': [ser(p) for p in pedidos]})
-
-
-# --- Historial del cadete (FALTABA) ---
-@login_required
-def cadete_historial(request):
-    """
-    Muestra SOLO pedidos ENTREGADOS/CANCELADOS del cadete logueado.
-    Nunca mezcla pedidos de otros cadetes.
-    """
-    if not hasattr(request.user, 'cadeteprofile'):
-        return redirect('index')
-
-    cp = request.user.cadeteprofile
-
-    pedidos = (
-        Pedido.objects
-        .filter(cadete_asignado=cp, estado__in=['ENTREGADO', 'CANCELADO'])
-        .select_related('cadete_asignado__user')
-        .order_by('-fecha_pedido')[:50]
-    )
-
-    return render(request, 'pedidos/cadete_historial.html', {'pedidos': pedidos})
 
 
 # =========================
@@ -1485,6 +1573,8 @@ def mp_webhook_view(request):
                     'order_data': {
                         'cliente_nombre': pedido.cliente_nombre,
                         'cliente_direccion': pedido.cliente_direccion,
+                        'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
+                        'map_url': _map_url_from_text(pedido.cliente_direccion),
                         'cliente_telefono': pedido.cliente_telefono,
                         'metodo_pago': pedido.metodo_pago,
                         'total_pedido': str(pedido.total_pedido),
@@ -1528,6 +1618,8 @@ def mp_success(request):
                     'order_data': {
                         'cliente_nombre': pedido.cliente_nombre,
                         'cliente_direccion': pedido.cliente_direccion,
+                        'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
+                        'map_url': _map_url_from_text(pedido.cliente_direccion),
                         'cliente_telefono': pedido.cliente_telefono,
                         'metodo_pago': 'MERCADOPAGO',
                         'total_pedido': str(pedido.total_pedido),
