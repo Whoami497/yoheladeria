@@ -565,6 +565,19 @@ def crear_preferencia_mp(request, pedido):
             "currency_id": "ARS",
         })
 
+    # Solo si hay costo de envío (> 0) lo cobramos en MP como un ítem aparte.
+    try:
+        costo_envio = Decimal(str(pedido.costo_envio or '0'))
+    except Exception:
+        costo_envio = Decimal('0')
+    if costo_envio > 0:
+        items.append({
+            "title": "Envío a domicilio",
+            "quantity": 1,
+            "unit_price": float(costo_envio),
+            "currency_id": "ARS",
+        })
+
     success_url = _abs_https(request, reverse("mp_success"))
     failure_url = _abs_https(request, reverse("index"))
     pending_url = _abs_https(request, reverse("index"))
@@ -644,41 +657,70 @@ def ver_carrito(request):
         metodo_pago = request.POST.get('metodo_pago')
         nota_pedido = (request.POST.get('nota_pedido') or '').strip()
 
+        # NUEVO: viene del front (radio): "delivery" | "pickup"
+        envio_opcion = (request.POST.get('envio_visual_opcion') or '').strip().lower()
+        envio_costo_in = (request.POST.get('envio_visual_costo') or '').strip()
+
         # Si el front mandó un lat,lng confirmado, úsalo para costo y para dire legible
         geo_latlng = (request.POST.get('geo_latlng') or '').strip()
-        direccion_para_maps = geo_latlng if geo_latlng else direccion_input
 
-        # Dirección legible (preferimos reverse geocoding si hay GPS)
-        direccion_legible = None
-        if geo_latlng:
-            try:
-                direccion_legible = _reverse_geocode(geo_latlng)
-            except Exception:
-                direccion_legible = None
-
-        # String que guardaremos en el Pedido
-        base_dir = direccion_legible or direccion_input
-        if not base_dir and geo_latlng:
-            base_dir = f"Cerca de {geo_latlng}"
-
-        direccion_a_guardar = base_dir or ""  # nunca None
-        if geo_latlng:
-            direccion_a_guardar = f"{direccion_a_guardar} — GPS: {geo_latlng}"
-        if nota_pedido:
-            direccion_a_guardar = f"{direccion_a_guardar} — Nota: {nota_pedido}"
-
-        # Cálculo de envío ANTES de crear el pedido
+        # ---------- Decidir envío vs retiro ----------
         costo_envio_decimal = Decimal('0.00')
         distancia_km = 0.0
-        if direccion_para_maps:
-            costo_envio_decimal, distancia_km = _calcular_costo_envio(direccion_para_maps)
+        direccion_para_maps = ''
+        direccion_legible = None
+        direccion_a_guardar = ''
 
+        if envio_opcion == 'pickup':
+            # ✅ Retiro en el local: no calculamos envío ni usamos dirección previa
+            direccion_a_guardar = "Retiro en el local"
+            if nota_pedido:
+                direccion_a_guardar = f"{direccion_a_guardar} — Nota: {nota_pedido}"
+        else:
+            # DELIVERY
+            direccion_para_maps = geo_latlng if geo_latlng else direccion_input
+
+            # Dirección legible (preferimos reverse geocoding si hay GPS)
+            if geo_latlng:
+                try:
+                    direccion_legible = _reverse_geocode(geo_latlng)
+                except Exception:
+                    direccion_legible = None
+
+            base_dir = direccion_legible or direccion_input
+            if not base_dir and geo_latlng:
+                base_dir = f"Cerca de {geo_latlng}"
+
+            direccion_a_guardar = base_dir or ""  # nunca None
+            if geo_latlng:
+                direccion_a_guardar = f"{direccion_a_guardar} — GPS: {geo_latlng}"
+            if nota_pedido:
+                direccion_a_guardar = f"{direccion_a_guardar} — Nota: {nota_pedido}"
+
+            # Costo de envío:
+            # 1) si el front mandó un número válido, lo usamos
+            # 2) si no, calculamos con Distance Matrix
+            def _to_decimal_safe(val):
+                try:
+                    return Decimal(str(val))
+                except Exception:
+                    return None
+
+            costo_front = _to_decimal_safe(envio_costo_in) if envio_costo_in else None
+            if costo_front is not None and costo_front >= 0:
+                costo_envio_decimal = costo_front.quantize(Decimal('0.01'))
+            elif direccion_para_maps:
+                costo_envio_decimal, distancia_km = _calcular_costo_envio(direccion_para_maps)
+            else:
+                costo_envio_decimal = Decimal('0.00')
+
+        # ---------- Construir Pedido ----------
         pedido_kwargs = {
             'cliente_nombre': nombre,
             'cliente_direccion': direccion_a_guardar,
             'cliente_telefono': telefono,
             'metodo_pago': metodo_pago,
-            'costo_envio': costo_envio_decimal,  # persistimos lo calculado (con lat,lng si vino)
+            'costo_envio': costo_envio_decimal,  # 0 en pickup, >0 en delivery
         }
 
         if request.user.is_authenticated:
@@ -689,8 +731,8 @@ def ver_carrito(request):
                     pedido_kwargs['cliente_nombre'] = f"{request.user.first_name} {request.user.last_name}"
                 if not telefono and profile.telefono:
                     pedido_kwargs['cliente_telefono'] = profile.telefono
-                # Si no tenemos ni dirección ni geo_latlng, podemos usar la del perfil para calcular
-                if not direccion_para_maps and profile.direccion:
+                # Solo si es DELIVERY y no tenemos nada para calcular
+                if envio_opcion != 'pickup' and not direccion_para_maps and profile.direccion:
                     pedido_kwargs['cliente_direccion'] = profile.direccion
                     costo_envio_decimal, distancia_km = _calcular_costo_envio(profile.direccion)
                     pedido_kwargs['costo_envio'] = costo_envio_decimal
@@ -1720,7 +1762,7 @@ def canjear_puntos(request):
                         user=request.user,
                         cliente_nombre=request.user.get_full_name() or request.user.username,
                         cliente_direccion=f"Canje de Puntos: {producto_canje.nombre}",
-                        cliente_telefono=cliente_profile.telefono or "",
+                        cliente_telefono=cliente_profile.telefono o "",
                         estado='RECIBIDO',
                     )
 
