@@ -22,6 +22,7 @@ import mercadopago
 import requests
 import re
 from urllib.parse import quote_plus
+from django.template import TemplateDoesNotExist  # <-- NUEVO
 
 from .forms import ClienteRegisterForm, ClienteProfileForm
 from .models import (
@@ -1301,6 +1302,52 @@ def panel_cadete(request):
 
 
 @login_required
+def cadete_historial(request):
+    """
+    Historial del cadete logueado.
+    - Intenta renderizar 'pedidos/cadete_historial.html'.
+    - Si el template no existe, devuelve una tabla simple (fallback) para no romper.
+    """
+    if not hasattr(request.user, 'cadeteprofile'):
+        messages.error(request, "Acceso denegado: este usuario no es cadete.")
+        return redirect('index')
+
+    pedidos = (Pedido.objects
+               .filter(cadete_asignado=request.user.cadeteprofile)
+               .order_by('-fecha_pedido')[:300])
+
+    ctx = {'pedidos': pedidos}
+    try:
+        return render(request, 'pedidos/cadete_historial.html', ctx)
+    except TemplateDoesNotExist:
+        # Fallback HTML simple si aún no creaste el template
+        filas = []
+        for p in pedidos:
+            filas.append(
+                f"<tr>"
+                f"<td>#{p.id}</td>"
+                f"<td>{p.fecha_pedido:%Y-%m-%d %H:%M}</td>"
+                f"<td>{p.estado}</td>"
+                f"<td>{p.cliente_nombre or ''}</td>"
+                f"<td>{_direccion_legible_from_text(p.cliente_direccion) or ''}</td>"
+                f"<td>${p.total_pedido or 0}</td>"
+                f"</tr>"
+            )
+        link = reverse('panel_cadete')
+        html = f"""
+        <div style="padding:20px;font-family:system-ui;-webkit-font-smoothing:antialiased">
+          <h3>Historial de mis pedidos</h3>
+          <p><a href="{link}">Volver al panel</a></p>
+          <table border="1" cellpadding="6" cellspacing="0">
+            <thead><tr><th>ID</th><th>Fecha</th><th>Estado</th><th>Cliente</th><th>Dirección</th><th>Total</th></tr></thead>
+            <tbody>{''.join(filas) or '<tr><td colspan="6">Sin datos</td></tr>'}</tbody>
+          </table>
+        </div>
+        """
+        return HttpResponse(html)
+
+
+@login_required
 def logout_cadete(request):
     logout(request)
     messages.info(request, "Has cerrado sesión como cadete.")
@@ -1319,7 +1366,7 @@ def cadete_toggle_disponible(request):
         return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
 
     val = (request.POST.get('disponible') == '1')
-    # Si tiene un pedido activo, no puede ponerse disponible=true hasta entregar
+    # Si tiene un pedido activo, no puede ponerse disponible=true hasta que entregue
     if val and cadete_esta_ocupado(request.user.cadeteprofile):
         return JsonResponse({'ok': False, 'error': 'ocupado'}, status=400)
 
