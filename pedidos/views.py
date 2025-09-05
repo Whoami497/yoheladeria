@@ -378,6 +378,64 @@ def api_costo_envio(request):
 
 
 # =========================
+# === util de WS para NUEVO PEDIDO (refactor)
+# =========================
+def _order_details_payload(pedido, distancia_km=None, nota_pedido=None):
+    """
+    Construye el payload estándar de 'nuevo_pedido' (usado en varias vistas).
+    """
+    detalles = []
+    for d in pedido.detalles.all().select_related('producto', 'opcion_seleccionada').prefetch_related('sabores'):
+        detalles.append({
+            'producto_nombre': d.producto.nombre,
+            'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
+            'cantidad': d.cantidad,
+            'sabores_nombres': [s.nombre for s in d.sabores.all()],
+        })
+
+    payload = {
+        'cliente_nombre': pedido.cliente_nombre,
+        'cliente_direccion': pedido.cliente_direccion,
+        'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
+        'map_url': _map_url_from_text(pedido.cliente_direccion),
+        'cliente_telefono': pedido.cliente_telefono,
+        'metodo_pago': pedido.metodo_pago,
+        'total_pedido': str(pedido.total_pedido),
+        'costo_envio': float(pedido.costo_envio or 0),
+        'detalles': detalles,
+    }
+    if distancia_km is not None:
+        payload['distancia_km'] = float(distancia_km or 0)
+    if nota_pedido:
+        payload['nota_pedido'] = nota_pedido
+    return payload
+
+
+def _send_new_order_notification(pedido, extra_payload=None):
+    """
+    Envía al grupo 'pedidos_new_orders' el mensaje 'nuevo_pedido' con payload estándar,
+    permitiendo 'extra_payload' para agregar campos como distancia_km o nota_pedido.
+    """
+    try:
+        channel_layer = get_channel_layer()
+        order_data = _order_details_payload(pedido)
+        if extra_payload:
+            order_data.update(extra_payload)
+        async_to_sync(channel_layer.group_send)(
+            'pedidos_new_orders',
+            {
+                'type': 'send_order_notification',
+                'message': 'nuevo_pedido',
+                'order_id': pedido.id,
+                'order_data': order_data,
+            }
+        )
+        print(f"WS: notificación 'nuevo_pedido' enviada para pedido #{pedido.id}")
+    except Exception as e:
+        print(f"ERROR al enviar notificación de nuevo pedido: {e}")
+
+
+# =========================
 # === CATÁLOGO / HOME
 # =========================
 def index(request):
@@ -565,19 +623,6 @@ def crear_preferencia_mp(request, pedido):
             "currency_id": "ARS",
         })
 
-    # Solo si hay costo de envío (> 0) lo cobramos en MP como un ítem aparte.
-    try:
-        costo_envio = Decimal(str(pedido.costo_envio or '0'))
-    except Exception:
-        costo_envio = Decimal('0')
-    if costo_envio > 0:
-        items.append({
-            "title": "Envío a domicilio",
-            "quantity": 1,
-            "unit_price": float(costo_envio),
-            "currency_id": "ARS",
-        })
-
     success_url = _abs_https(request, reverse("mp_success"))
     failure_url = _abs_https(request, reverse("index"))
     pending_url = _abs_https(request, reverse("index"))
@@ -657,70 +702,41 @@ def ver_carrito(request):
         metodo_pago = request.POST.get('metodo_pago')
         nota_pedido = (request.POST.get('nota_pedido') or '').strip()
 
-        # NUEVO: viene del front (radio): "delivery" | "pickup"
-        envio_opcion = (request.POST.get('envio_visual_opcion') or '').strip().lower()
-        envio_costo_in = (request.POST.get('envio_visual_costo') or '').strip()
-
         # Si el front mandó un lat,lng confirmado, úsalo para costo y para dire legible
         geo_latlng = (request.POST.get('geo_latlng') or '').strip()
+        direccion_para_maps = geo_latlng if geo_latlng else direccion_input
 
-        # ---------- Decidir envío vs retiro ----------
+        # Dirección legible (preferimos reverse geocoding si hay GPS)
+        direccion_legible = None
+        if geo_latlng:
+            try:
+                direccion_legible = _reverse_geocode(geo_latlng)
+            except Exception:
+                direccion_legible = None
+
+        # String que guardaremos en el Pedido
+        base_dir = direccion_legible or direccion_input
+        if not base_dir and geo_latlng:
+            base_dir = f"Cerca de {geo_latlng}"
+
+        direccion_a_guardar = base_dir or ""  # nunca None
+        if geo_latlng:
+            direccion_a_guardar = f"{direccion_a_guardar} — GPS: {geo_latlng}"
+        if nota_pedido:
+            direccion_a_guardar = f"{direccion_a_guardar} — Nota: {nota_pedido}"
+
+        # Cálculo de envío ANTES de crear el pedido
         costo_envio_decimal = Decimal('0.00')
         distancia_km = 0.0
-        direccion_para_maps = ''
-        direccion_legible = None
-        direccion_a_guardar = ''
+        if direccion_para_maps:
+            costo_envio_decimal, distancia_km = _calcular_costo_envio(direccion_para_maps)
 
-        if envio_opcion == 'pickup':
-            # ✅ Retiro en el local: no calculamos envío ni usamos dirección previa
-            direccion_a_guardar = "Retiro en el local"
-            if nota_pedido:
-                direccion_a_guardar = f"{direccion_a_guardar} — Nota: {nota_pedido}"
-        else:
-            # DELIVERY
-            direccion_para_maps = geo_latlng if geo_latlng else direccion_input
-
-            # Dirección legible (preferimos reverse geocoding si hay GPS)
-            if geo_latlng:
-                try:
-                    direccion_legible = _reverse_geocode(geo_latlng)
-                except Exception:
-                    direccion_legible = None
-
-            base_dir = direccion_legible or direccion_input
-            if not base_dir and geo_latlng:
-                base_dir = f"Cerca de {geo_latlng}"
-
-            direccion_a_guardar = base_dir or ""  # nunca None
-            if geo_latlng:
-                direccion_a_guardar = f"{direccion_a_guardar} — GPS: {geo_latlng}"
-            if nota_pedido:
-                direccion_a_guardar = f"{direccion_a_guardar} — Nota: {nota_pedido}"
-
-            # Costo de envío:
-            # 1) si el front mandó un número válido, lo usamos
-            # 2) si no, calculamos con Distance Matrix
-            def _to_decimal_safe(val):
-                try:
-                    return Decimal(str(val))
-                except Exception:
-                    return None
-
-            costo_front = _to_decimal_safe(envio_costo_in) if envio_costo_in else None
-            if costo_front is not None and costo_front >= 0:
-                costo_envio_decimal = costo_front.quantize(Decimal('0.01'))
-            elif direccion_para_maps:
-                costo_envio_decimal, distancia_km = _calcular_costo_envio(direccion_para_maps)
-            else:
-                costo_envio_decimal = Decimal('0.00')
-
-        # ---------- Construir Pedido ----------
         pedido_kwargs = {
             'cliente_nombre': nombre,
             'cliente_direccion': direccion_a_guardar,
             'cliente_telefono': telefono,
             'metodo_pago': metodo_pago,
-            'costo_envio': costo_envio_decimal,  # 0 en pickup, >0 en delivery
+            'costo_envio': costo_envio_decimal,  # persistimos lo calculado (con lat,lng si vino)
         }
 
         if request.user.is_authenticated:
@@ -731,8 +747,8 @@ def ver_carrito(request):
                     pedido_kwargs['cliente_nombre'] = f"{request.user.first_name} {request.user.last_name}"
                 if not telefono and profile.telefono:
                     pedido_kwargs['cliente_telefono'] = profile.telefono
-                # Solo si es DELIVERY y no tenemos nada para calcular
-                if envio_opcion != 'pickup' and not direccion_para_maps and profile.direccion:
+                # Si no tenemos ni dirección ni geo_latlng, podemos usar la del perfil para calcular
+                if not direccion_para_maps and profile.direccion:
                     pedido_kwargs['cliente_direccion'] = profile.direccion
                     costo_envio_decimal, distancia_km = _calcular_costo_envio(profile.direccion)
                     pedido_kwargs['costo_envio'] = costo_envio_decimal
@@ -741,8 +757,8 @@ def ver_carrito(request):
 
         puntos_ganados = 0
         total_del_pedido_para_puntos = Decimal('0.00')
-        detalles_para_notificacion = []
 
+        # Guardar detalles
         for key, item_data in carrito.items():
             try:
                 producto = Producto.objects.get(id=item_data['producto_id'])
@@ -763,13 +779,6 @@ def ver_carrito(request):
 
                 precio_unitario_item = Decimal(item_data['precio'])
                 total_del_pedido_para_puntos += precio_unitario_item * item_data['cantidad']
-
-                detalles_para_notificacion.append({
-                    'producto_nombre': producto.nombre,
-                    'opcion_nombre': opcion_obj_pedido.nombre_opcion if opcion_obj_pedido else None,
-                    'cantidad': item_data['cantidad'],
-                    'sabores_nombres': [s.nombre for s in sabores_seleccionados],
-                })
 
             except (Producto.DoesNotExist, OpcionProducto.DoesNotExist) as e:
                 messages.warning(request, f"Advertencia: Un ítem no pudo ser añadido al pedido final porque ya no existe. Error: {e}")
@@ -800,31 +809,15 @@ def ver_carrito(request):
             request.user.clienteprofile.save()
             messages.success(request, f"¡Has ganado {puntos_ganados} puntos de fidelidad con este pedido!")
 
-        # Notificación a panel (con direccion_legible y map_url incluidos)
+        # Notificación a panel (con distancia y nota si corresponde)
         try:
-            channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                'pedidos_new_orders',
-                {
-                    'type': 'send_order_notification',
-                    'message': 'nuevo_pedido',
-                    'order_id': nuevo_pedido.id,
-                    'order_data': {
-                        'cliente_nombre': nuevo_pedido.cliente_nombre,
-                        'cliente_direccion': nuevo_pedido.cliente_direccion,
-                        'direccion_legible': _direccion_legible_from_text(nuevo_pedido.cliente_direccion),
-                        'map_url': _map_url_from_text(nuevo_pedido.cliente_direccion),
-                        'cliente_telefono': nuevo_pedido.cliente_telefono,
-                        'metodo_pago': nuevo_pedido.metodo_pago,
-                        'total_pedido': str(nuevo_pedido.total_pedido),
-                        'costo_envio': float(nuevo_pedido.costo_envio or 0),
-                        'distancia_km': float(distancia_km or 0),
-                        'nota_pedido': (nota_pedido or None),
-                        'detalles': detalles_para_notificacion,
-                    }
+            _send_new_order_notification(
+                nuevo_pedido,
+                extra_payload={
+                    'distancia_km': float(distancia_km or 0),
+                    'nota_pedido': (nota_pedido or None),
                 }
             )
-            print(f"Notificación de pedido #{nuevo_pedido.id} enviada a Channels.")
         except Exception as e:
             print(f"ERROR al enviar notificación de pedido a Channels: {e}")
             messages.error(request, f"ERROR INTERNO: No se pudo enviar la alerta en tiempo real. Contacta a soporte. Error: {e}")
@@ -955,7 +948,10 @@ def perfil_cliente(request):
 
 @login_required
 def historial_pedidos_cliente(request):
-    pedidos = Pedido.objects.filter(user=request.user).order_by('-fecha_pedido')
+    pedidos = (Pedido.objects
+               .filter(user=request.user)
+               .order_by('-fecha_pedido')
+               .prefetch_related('detalles__producto', 'detalles__sabores', 'detalles__opcion_seleccionada'))
 
     cliente_profile = None
     if hasattr(request.user, 'clienteprofile'):
@@ -978,17 +974,18 @@ def pedido_en_curso(request):
     - Cliente: sus pedidos que NO estén ENTREGADO/CANCELADO.
     - Cadete: pedidos ASIGNADO/EN_CAMINO donde él es el cadete.
     """
-    pedidos = []
     if hasattr(request.user, 'cadeteprofile'):
         pedidos = (Pedido.objects
                 .filter(cadete_asignado=request.user.cadeteprofile,
                         estado__in=['ASIGNADO', 'EN_CAMINO'])
-                .order_by('-fecha_pedido'))
+                .order_by('-fecha_pedido')
+                .prefetch_related('detalles__producto', 'detalles__sabores', 'detalles__opcion_seleccionada'))
     else:
         pedidos = (Pedido.objects
                 .filter(user=request.user)
                 .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
-                .order_by('-fecha_pedido'))
+                .order_by('-fecha_pedido')
+                .prefetch_related('detalles__producto', 'detalles__sabores', 'detalles__opcion_seleccionada'))
 
     return render(request, 'pedidos/pedido_en_curso.html', {'pedidos': pedidos})
 
@@ -1005,21 +1002,33 @@ def panel_alertas(request):
     hoy = timezone.localdate()
     ayer = hoy - timedelta(days=1)
 
+    base_prefetch = [
+        'detalles__producto',
+        'detalles__sabores',
+        'detalles__opcion_seleccionada',
+    ]
+
     pedidos_hoy = (
         Pedido.objects
         .filter(fecha_pedido__date=hoy)
         .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
         .order_by('-fecha_pedido')
+        .select_related('cadete_asignado__user')
+        .prefetch_related(*base_prefetch)
     )
     pedidos_ayer = (
         Pedido.objects
         .filter(fecha_pedido__date=ayer)
         .order_by('-fecha_pedido')[:120]
+        .select_related('cadete_asignado__user')
+        .prefetch_related(*base_prefetch)
     )
     entregados_hoy = (
         Pedido.objects
         .filter(fecha_pedido__date=hoy, estado='ENTREGADO')
         .order_by('-fecha_pedido')[:200]
+        .select_related('cadete_asignado__user')
+        .prefetch_related(*base_prefetch)
     )
 
     def enrich(qs):
@@ -1068,6 +1077,10 @@ def panel_alertas_data(request):
             fecha = hoy
         qs = Pedido.objects.filter(fecha_pedido__date=fecha).order_by('-fecha_pedido')
 
+    qs = qs.select_related('cadete_asignado__user').prefetch_related(
+        'detalles__producto', 'detalles__sabores', 'detalles__opcion_seleccionada'
+    )
+
     def serialize(p):
         data = {
             'id': p.id,
@@ -1104,7 +1117,8 @@ def panel_alertas_anteriores(request):
     limite = hoy - timedelta(days=1)
     pedidos = (Pedido.objects
             .filter(fecha_pedido__date__lt=limite)
-            .order_by('-fecha_pedido')[:300])
+            .order_by('-fecha_pedido')[:300]
+            .select_related('cadete_asignado__user'))
 
     filas = []
     for p in pedidos:
@@ -1201,24 +1215,7 @@ def confirmar_pedido(request, pedido_id):
     try:
         channel_layer = get_channel_layer()
 
-        detalles_para_notificacion = []
-        for detalle in pedido.detalles.all():
-            detalles_para_notificacion.append({
-                'producto_nombre': detalle.producto.nombre,
-                'opcion_nombre': detalle.opcion_seleccionada.nombre_opcion if detalle.opcion_seleccionada else None,
-                'cantidad': detalle.cantidad,
-                'sabores_nombres': [s.nombre for s in detalle.sabores.all()],
-            })
-
-        order_data = {
-            'id': pedido.id,
-            'cliente_nombre': pedido.cliente_nombre,
-            'cliente_direccion': pedido.cliente_direccion,
-            'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
-            'map_url': _map_url_from_text(pedido.cliente_direccion),
-            'total_pedido': str(pedido.total_pedido),
-            'detalles': detalles_para_notificacion
-        }
+        order_data = _order_details_payload(pedido)
 
         async_to_sync(channel_layer.group_send)(
             'cadetes_disponibles',
@@ -1329,10 +1326,12 @@ def panel_cadete(request):
 
     pedidos_en_curso = []
     if hasattr(request.user, 'cadeteprofile'):
-        pedidos_en_curso = Pedido.objects.filter(
+        pedidos_en_curso = (Pedido.objects.filter(
             cadete_asignado=request.user.cadeteprofile,
             estado__in=['ASIGNADO', 'EN_CAMINO']
-        ).order_by('fecha_pedido')
+        )
+        .order_by('fecha_pedido')
+        .prefetch_related('detalles__producto', 'detalles__sabores', 'detalles__opcion_seleccionada'))
 
     # Enriquecer con direccion_legible y map_url (para template)
     for p in pedidos_en_curso:
@@ -1356,7 +1355,8 @@ def cadete_historial(request):
 
     pedidos = (Pedido.objects
                .filter(cadete_asignado=request.user.cadeteprofile)
-               .order_by('-fecha_pedido')[:300])
+               .order_by('-fecha_pedido')[:300]
+               .prefetch_related('detalles__producto', 'detalles__sabores', 'detalles__opcion_seleccionada'))
 
     ctx = {'pedidos': pedidos}
     try:
@@ -1560,7 +1560,8 @@ def cadete_feed(request):
 
     pedidos = (Pedido.objects
             .filter(estado='EN_PREPARACION', cadete_asignado__isnull=True)
-            .order_by('-fecha_pedido')[:50])
+            .order_by('-fecha_pedido')
+            .prefetch_related('detalles__producto', 'detalles__sabores', 'detalles__opcion_seleccionada')[:50])
 
     def ser(p):
         return {
@@ -1583,13 +1584,99 @@ def cadete_feed(request):
 
 
 # =========================
-# === MERCADO PAGO (webhook + success)
+# === MERCADO PAGO (Refunds + webhook + success)
 # =========================
+
+def _mp_find_latest_approved_payment(external_reference: str):
+    """
+    Busca el último payment APROBADO en MP para un external_reference dado (id de Pedido).
+    Devuelve el dict del payment, o None si no hay approved.
+    """
+    if not getattr(settings, "MERCADO_PAGO_ACCESS_TOKEN", None):
+        raise RuntimeError("MERCADO_PAGO_ACCESS_TOKEN no está configurado en el servidor")
+
+    sdk = mercadopago.SDK(settings.MERCADO_PAGO_ACCESS_TOKEN)
+    try:
+        search = sdk.payment().search({
+            "external_reference": str(external_reference),
+            "sort": "date_created",
+            "criteria": "desc",
+        })
+        results = (search or {}).get("response", {}).get("results") or []
+        # En algunas versiones viene directo, en otras anidado bajo "payment"
+        for it in results:
+            p = it.get("payment") if isinstance(it, dict) and "payment" in it else it
+            if isinstance(p, dict) and p.get("status") == "approved":
+                return p
+    except Exception as e:
+        print(f"MP SEARCH error: {e}")
+    return None
+
+
+@staff_member_required
+@require_POST
+def mp_refund(request, pedido_id: int):
+    """
+    Reintegro vía MP.
+    - Total: sin 'monto'
+    - Parcial: POST 'monto' (ARS)
+    """
+    if not getattr(settings, "MERCADO_PAGO_ACCESS_TOKEN", None):
+        return JsonResponse({'ok': False, 'error': 'missing_access_token'}, status=500)
+
+    pedido = get_object_or_404(Pedido, id=pedido_id)
+
+    amount_raw = (request.POST.get('monto') or '').strip()
+    refund_amount = None
+    if amount_raw:
+        try:
+            refund_amount = Decimal(amount_raw)
+            if refund_amount <= 0:
+                return JsonResponse({'ok': False, 'error': 'monto_invalido'}, status=400)
+        except Exception:
+            return JsonResponse({'ok': False, 'error': 'monto_invalido'}, status=400)
+
+    payment = _mp_find_latest_approved_payment(pedido.id)
+    if not payment:
+        return JsonResponse({'ok': False, 'error': 'payment_no_encontrado'}, status=404)
+
+    payment_id = payment.get("id")
+    sdk = mercadopago.SDK(settings.MERCADO_PAGO_ACCESS_TOKEN)
+
+    try:
+        if refund_amount is None:
+            mp_resp = sdk.refund().create(payment_id)
+        else:
+            mp_resp = sdk.refund().create(payment_id, {"amount": float(refund_amount)})
+    except Exception as e:
+        print(f"MP REFUND EXCEPTION: {e}")
+        return JsonResponse({'ok': False, 'error': 'mp_exception', 'detail': str(e)}, status=500)
+
+    status = mp_resp.get("status")
+    resp = (mp_resp.get("response") or {}) if isinstance(mp_resp, dict) else {}
+
+    if status not in (200, 201):
+        return JsonResponse({'ok': False, 'error': 'mp_error', 'detail': resp}, status=400)
+
+    # No cambiamos estado acá; dejamos que el webhook de MP lo refleje al llegar la notificación.
+    data_out = {
+        'ok': True,
+        'pedido_id': pedido.id,
+        'payment_id': payment_id,
+        'refund_id': resp.get('id'),
+        'amount': resp.get('amount') or refund_amount and float(refund_amount),
+        'status': resp.get('status') or 'created',
+    }
+    return JsonResponse(data_out, status=200)
+
+
 @csrf_exempt
 def mp_webhook_view(request):
     """
     Mercado Pago nos avisa aquí. Si el pago queda 'approved', enviamos la
     notificación a la tienda y otorgamos puntos al cliente.
+    Además, si detectamos reintegro total (status 'refunded' o monto refund == total),
+    dejamos el pedido en CANCELADO.
     """
     try:
         payload = json.loads(request.body.decode('utf-8') or '{}')
@@ -1612,7 +1699,7 @@ def mp_webhook_view(request):
         return HttpResponse(status=200)
 
     ref = payment.get("external_reference")
-    status = payment.get("status")  # approved | pending | rejected | in_process
+    status = payment.get("status")  # approved | pending | rejected | in_process | refunded | cancelled | charged_back
     if not ref:
         return HttpResponse(status=200)
 
@@ -1622,16 +1709,41 @@ def mp_webhook_view(request):
         print("WEBHOOK MP: Pedido no encontrado por external_reference")
         return HttpResponse(status=200)
 
+    # ---- Actualizar estado según pago / reintegros
     try:
         pedido.metodo_pago = 'MERCADOPAGO'
-        if status == 'approved':
-            pedido.estado = 'RECIBIDO'
-        elif status == 'rejected':
+
+        # Detectar reintegro total
+        total_txn = Decimal(str(payment.get("transaction_amount") or "0"))
+        refunded_total = Decimal('0')
+
+        # Preferimos transaction_amount_refunded si viene
+        try:
+            refunded_total = Decimal(str(payment.get("transaction_amount_refunded") or "0"))
+        except Exception:
+            refunded_total = Decimal('0')
+
+        # Fallback sumando refunds
+        if refunded_total == 0 and isinstance(payment.get("refunds"), list):
+            try:
+                refunded_total = sum(Decimal(str(r.get("amount") or "0")) for r in payment.get("refunds"))
+            except Exception:
+                pass
+
+        if status in ('refunded', 'cancelled', 'charged_back') or (total_txn > 0 and refunded_total >= total_txn):
             pedido.estado = 'CANCELADO'
+        else:
+            if status == 'approved':
+                pedido.estado = 'RECIBIDO'
+            elif status == 'rejected':
+                pedido.estado = 'CANCELADO'
+            # Otros estados no tocan el estado local
+
         pedido.save()
     except Exception as e:
         print(f"WEBHOOK MP: error guardando pedido: {e}")
 
+    # ---- Si approved (alta/confirmación), notificar panel y puntos
     if status == 'approved':
         try:
             if pedido.user and hasattr(pedido.user, 'clienteprofile'):
@@ -1643,36 +1755,7 @@ def mp_webhook_view(request):
             print(f"WEBHOOK MP: error otorgando puntos: {e}")
 
         try:
-            channel_layer = get_channel_layer()
-            detalles_para_notificacion = []
-            for d in pedido.detalles.all():
-                detalles_para_notificacion.append({
-                    'producto_nombre': d.producto.nombre,
-                    'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
-                    'cantidad': d.cantidad,
-                    'sabores_nombres': [s.nombre for s in d.sabores.all()],
-                })
-
-            async_to_sync(channel_layer.group_send)(
-                'pedidos_new_orders',
-                {
-                    'type': 'send_order_notification',
-                    'message': 'nuevo_pedido',
-                    'order_id': pedido.id,
-                    'order_data': {
-                        'cliente_nombre': pedido.cliente_nombre,
-                        'cliente_direccion': pedido.cliente_direccion,
-                        'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
-                        'map_url': _map_url_from_text(pedido.cliente_direccion),
-                        'cliente_telefono': pedido.cliente_telefono,
-                        'metodo_pago': pedido.metodo_pago,
-                        'total_pedido': str(pedido.total_pedido),
-                        'costo_envio': float(pedido.costo_envio or 0),
-                        'detalles': detalles_para_notificacion,
-                    }
-                }
-            )
-            print(f"WEBHOOK MP: notificación enviada para pedido #{pedido.id}")
+            _send_new_order_notification(pedido)
         except Exception as e:
             print(f"WEBHOOK MP: error enviando WS: {e}")
 
@@ -1688,35 +1771,7 @@ def mp_success(request):
     if last_id:
         try:
             pedido = Pedido.objects.get(id=last_id)
-            channel_layer = get_channel_layer()
-            detalles_para_notificacion = []
-            for d in pedido.detalles.all():
-                detalles_para_notificacion.append({
-                    'producto_nombre': d.producto.nombre,
-                    'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
-                    'cantidad': d.cantidad,
-                    'sabores_nombres': [s.nombre for s in d.sabores.all()],
-                })
-
-            async_to_sync(channel_layer.group_send)(
-                'pedidos_new_orders',
-                {
-                    'type': 'send_order_notification',
-                    'message': 'nuevo_pedido',
-                    'order_id': pedido.id,
-                    'order_data': {
-                        'cliente_nombre': pedido.cliente_nombre,
-                        'cliente_direccion': pedido.cliente_direccion,
-                        'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
-                        'map_url': _map_url_from_text(pedido.cliente_direccion),
-                        'cliente_telefono': pedido.cliente_telefono,
-                        'metodo_pago': 'MERCADOPAGO',
-                        'total_pedido': str(pedido.total_pedido),
-                        'costo_envio': float(pedido.costo_envio or 0),
-                        'detalles': detalles_para_notificacion,
-                    }
-                }
-            )
+            _send_new_order_notification(pedido)
             print(f"MP SUCCESS: notificación fallback enviada para pedido #{pedido.id}")
         except Exception as e:
             print(f"MP SUCCESS: error en fallback WS: {e}")
