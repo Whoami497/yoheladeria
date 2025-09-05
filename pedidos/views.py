@@ -1762,7 +1762,7 @@ def canjear_puntos(request):
                         user=request.user,
                         cliente_nombre=request.user.get_full_name() or request.user.username,
                         cliente_direccion=f"Canje de Puntos: {producto_canje.nombre}",
-                        cliente_telefono=cliente_profile.telefono o "",
+                        cliente_telefono=cliente_profile.telefono or "",
                         estado='RECIBIDO',
                     )
 
