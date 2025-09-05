@@ -657,27 +657,38 @@ def ver_carrito(request):
 
     if request.method == 'POST':
         nombre = request.POST.get('cliente_nombre')
-        direccion_input = (request.POST.get('cliente_direccion') or '').strip()  # (puede venir vacío si usamos sólo mapa)
+        direccion_input = (request.POST.get('cliente_direccion') or '').strip()  # puede venir vacío
         telefono = request.POST.get('cliente_telefono')
         metodo_pago = request.POST.get('metodo_pago')
         nota_pedido = (request.POST.get('nota_pedido') or '').strip()
 
-        # Si el front mandó un lat,lng confirmado, úsalo para costo y para dire legible
+        # Nuevo: modo de envío (opcional). Si no viene, inferimos por datos.
+        modo_envio = (request.POST.get('modo_envio') or '').lower()  # 'pickup' | 'delivery' (opcional)
         geo_latlng = (request.POST.get('geo_latlng') or '').strip()
-        direccion_para_maps = geo_latlng if geo_latlng else direccion_input
 
-        # Dirección legible (preferimos reverse geocoding si hay GPS)
-        direccion_legible = None
-        if geo_latlng:
-            try:
-                direccion_legible = _reverse_geocode(geo_latlng)
-            except Exception:
-                direccion_legible = None
+        # "pickup" si lo indica el form o si NO hay ni dirección ni GPS
+        es_pickup = (modo_envio == 'pickup') or (not direccion_input and not geo_latlng)
 
-        # String que guardaremos en el Pedido
+        if es_pickup:
+            # Retiro en local: NO calculamos envío ni usamos fallback del perfil
+            direccion_para_maps = ''  # importante para que _calcular_costo_envio no se dispare
+            direccion_legible = "Retiro en local"
+        else:
+            # Delivery: usamos coords si hay, sino el texto cargado por el usuario
+            direccion_para_maps = geo_latlng if geo_latlng else direccion_input
+            direccion_legible = None
+            if geo_latlng:
+                try:
+                    direccion_legible = _reverse_geocode(geo_latlng)
+                except Exception:
+                    direccion_legible = None
+
+        # String que guardamos en el Pedido
         base_dir = direccion_legible or direccion_input
         if not base_dir and geo_latlng:
             base_dir = f"Cerca de {geo_latlng}"
+        if not base_dir and es_pickup:
+            base_dir = "Retiro en local"
 
         direccion_a_guardar = base_dir or ""  # nunca None
         if geo_latlng:
@@ -696,11 +707,9 @@ def ver_carrito(request):
             'cliente_direccion': direccion_a_guardar,
             'cliente_telefono': telefono,
             'metodo_pago': metodo_pago,
-            'costo_envio': costo_envio_decimal,  # persistimos lo calculado (con lat,lng si vino)
+            'costo_envio': costo_envio_decimal,  # persistimos lo calculado (0 si pickup)
         }
 
-        # 🔴 Importante: NO forzar dirección del perfil si el usuario no ingresó ninguna.
-        # Antes acá se tomaba profile.direccion y se recalculaba envío, lo que cobraba envío en retiros.
         if request.user.is_authenticated:
             pedido_kwargs['user'] = request.user
             if hasattr(request.user, 'clienteprofile'):
@@ -709,7 +718,14 @@ def ver_carrito(request):
                     pedido_kwargs['cliente_nombre'] = f"{request.user.first_name} {request.user.last_name}"
                 if not telefono and profile.telefono:
                     pedido_kwargs['cliente_telefono'] = profile.telefono
-                # 👇 YA NO usamos automáticamente profile.direccion para costo/envío.
+
+                # ⚠️ ANTES: si no había dirección/coords, usaba la del perfil = problema.
+                # AHORA: solo usamos la del perfil como fallback si ES DELIVERY explícito
+                # y no llegó nada (p. ej., clickeó "a domicilio" pero dejó vacío).
+                if (not es_pickup) and (not direccion_para_maps) and profile.direccion:
+                    pedido_kwargs['cliente_direccion'] = profile.direccion
+                    costo_envio_decimal, distancia_km = _calcular_costo_envio(profile.direccion)
+                    pedido_kwargs['costo_envio'] = costo_envio_decimal
 
         nuevo_pedido = Pedido.objects.create(**pedido_kwargs)
 
@@ -774,7 +790,7 @@ def ver_carrito(request):
             request.user.clienteprofile.save()
             messages.success(request, f"¡Has ganado {puntos_ganados} puntos de fidelidad con este pedido!")
 
-        # Notificación a panel (con direccion_legible y map_url incluidos)
+        # Notificación a panel
         try:
             channel_layer = get_channel_layer()
             async_to_sync(channel_layer.group_send)(
@@ -790,7 +806,7 @@ def ver_carrito(request):
                         'map_url': _map_url_from_text(nuevo_pedido.cliente_direccion),
                         'cliente_telefono': nuevo_pedido.cliente_telefono,
                         'metodo_pago': nuevo_pedido.metodo_pago,
-                        'total_pedido': str(_compute_total(nuevo_pedido)),
+                        'total_pedido': str(nuevo_pedido.total_pedido),
                         'costo_envio': float(nuevo_pedido.costo_envio or 0),
                         'distancia_km': float(distancia_km or 0),
                         'nota_pedido': (nota_pedido or None),
@@ -811,6 +827,7 @@ def ver_carrito(request):
 
     contexto = {'carrito_items': items_carrito_procesados, 'total': total}
     return render(request, 'pedidos/carrito.html', contexto)
+
 
 
 

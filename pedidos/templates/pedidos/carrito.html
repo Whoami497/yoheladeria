@@ -99,6 +99,9 @@
           <form id="checkout-form" method="post">
             {% csrf_token %}
 
+            <!-- modo de envío real para el backend -->
+            <input type="hidden" name="modo_envio" id="modo_envio" value="pickup">
+
             <!-- elegido en el selector de envío (solo informativo) -->
             <input type="hidden" name="envio_visual_opcion" id="envio-visual-opcion" value="Retiro en local — $0">
             <input type="hidden" name="envio_visual_costo" id="envio-visual-costo" value="0">
@@ -112,7 +115,7 @@
             </div>
 
             <div class="mb-2">
-              <label class="form-label mb-1">Ubicación de Envío (obligatorio)</label>
+              <label class="form-label mb-1">Ubicación de Envío (si es a domicilio)</label>
               <div class="d-grid gap-2">
                 <button type="button" class="btn btn-outline-success" id="btn-map">🗺️ Elegir ubicación en el mapa</button>
               </div>
@@ -217,6 +220,8 @@
   const geoHidden  = document.getElementById('geo-latlng');
   const coordsPreview = document.getElementById('coords-preview');
 
+  const modoHidden = document.getElementById('modo_envio');
+
   const btnMap   = document.getElementById('btn-map');
   const btnSubmit= document.getElementById('btn-submit');
   const submitWarn = document.getElementById('submit-warn');
@@ -236,6 +241,9 @@
     envioCostH.value  = String(envio);
 
     const isPickup = envioSel.value === '0';
+    // <-- clave para el backend:
+    modoHidden.value = isPickup ? 'pickup' : 'delivery';
+
     const hasPoint = !!geoHidden.value;
     setSubmitEnabled(isPickup || (hasPoint && envio > 0));
   }
@@ -375,8 +383,8 @@
 
   // Abrir mapa
   btnMap.addEventListener('click', ()=>{
-    mapModal = new bootstrap.Modal(elMapModal);
-    mapModal.show();
+    const modal = new bootstrap.Modal(elMapModal);
+    modal.show();
     ensureMap();
   });
 
@@ -407,7 +415,8 @@
       removeAutoOption();
     }
 
-    if(mapModal) mapModal.hide();
+    const modal = bootstrap.Modal.getInstance(elMapModal);
+    if(modal) modal.hide();
     recalc();
   });
 
@@ -417,8 +426,8 @@
     if(!isPickup && !geoHidden.value){
       e.preventDefault();
       submitWarn.style.display = '';
-      mapModal = new bootstrap.Modal(elMapModal);
-      mapModal.show();
+      const modal = new bootstrap.Modal(elMapModal);
+      modal.show();
       ensureMap();
     }
   });
@@ -455,8 +464,8 @@
   // Al cargar
   async function init(){
     await restoreFromLocalStorage();
-    // Si no hay ubicación guardada, abrimos el mapa
-    if(!geoHidden.value){
+    // Si no hay ubicación guardada y NO es retiro en local, abrimos el mapa
+    if(envioSel.value !== '0' && !geoHidden.value){
       setTimeout(()=>{ btnMap.click(); }, 400);
     }
   }
