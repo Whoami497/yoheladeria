@@ -135,7 +135,8 @@
 
             <div class="mb-3">
               <label class="form-label">Teléfono:</label>
-              <input type="text" class="form-control" name="cliente_telefono" placeholder="Ej: 3834 123456">
+              <input type="tel" class="form-control" name="cliente_telefono" placeholder="Ej: 3834 123456"
+                     autocomplete="tel" inputmode="tel" required>
             </div>
 
             <h5 class="mt-3 mb-2">Método de Pago</h5>
@@ -464,8 +465,8 @@
   // Al cargar
   async function init(){
     await restoreFromLocalStorage();
-    // Si no hay ubicación guardada y NO es retiro en local, abrimos el mapa
-    if(envioSel.value !== '0' && !geoHidden.value){
+    // Si NO hay ubicación guardada, abrimos el mapa automáticamente (como antes)
+    if(!geoHidden.value){
       setTimeout(()=>{ btnMap.click(); }, 400);
     }
   }
