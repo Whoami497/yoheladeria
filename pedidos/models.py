@@ -4,6 +4,7 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.utils import timezone
 from decimal import Decimal
 
 # =========================
@@ -107,7 +108,6 @@ class CadeteProfile(models.Model):
 
     class Meta:
         verbose_name = "Perfil de Cadete"
-        verbose_name_plural = "Perfiles de Cadetes"
 
     def __str__(self):
         if self.user.first_name and self.user.last_name:
@@ -134,12 +134,12 @@ class Pedido(models.Model):
     cliente_nombre = models.CharField(max_length=100)
     cliente_direccion = models.CharField(max_length=255)
     cliente_telefono = models.CharField(max_length=20, blank=True)
-    fecha_pedido = models.DateTimeField(auto_now_add=True)
-    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='RECIBIDO')
+    fecha_pedido = models.DateTimeField(auto_now_add=True, db_index=True)
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='RECIBIDO', db_index=True)
     metodo_pago = models.CharField(max_length=20, choices=METODO_PAGO_CHOICES, default='EFECTIVO')
     zona_envio = models.ForeignKey(ZonaEnvio, on_delete=models.SET_NULL, null=True, blank=True, related_name='pedidos_en_zona')
 
-    # 🆕 Campo para guardar costo real de envío (API o manual)
+    # 🆕 Costo real de envío (API o manual)
     costo_envio = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, help_text="Costo calculado del envío (ej: por Google Maps).")
 
     cadete_asignado = models.ForeignKey(
@@ -150,6 +150,20 @@ class Pedido(models.Model):
         related_name='pedidos_asignados',
         help_text="El cadete que ha aceptado este pedido."
     )
+
+    # 🆕 Hitos de tiempo para métricas (opcionales, los setea la vista si existen)
+    fecha_pago_aprobado   = models.DateTimeField(null=True, blank=True, help_text="Momento en que el pago fue aprobado (o creación para efectivo).")
+    fecha_en_preparacion  = models.DateTimeField(null=True, blank=True, help_text="Cuando la tienda confirma y pasa a preparación.")
+    fecha_asignado        = models.DateTimeField(null=True, blank=True, help_text="Cuando un cadete acepta el pedido.")
+    fecha_en_camino       = models.DateTimeField(null=True, blank=True, help_text="Cuando el cadete marca 'en camino'.")
+    fecha_entregado       = models.DateTimeField(null=True, blank=True, help_text="Cuando el pedido se marca como entregado.")
+    fecha_cancelado       = models.DateTimeField(null=True, blank=True, help_text="Cuando el pedido se cancela.")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['estado']),
+            models.Index(fields=['-fecha_pedido']),
+        ]
 
     def __str__(self):
         if self.user:
@@ -164,11 +178,43 @@ class Pedido(models.Model):
             if detalle.opcion_seleccionada:
                 precio_unitario += detalle.opcion_seleccionada.precio_adicional
             total += precio_unitario * detalle.cantidad
-        if self.zona_envio and self.zona_envio.costo:
-            total += self.zona_envio.costo
+        # Evitar doble cobro: si costo_envio > 0 lo usamos; si no, fallback a zona_envio.costo
         if self.costo_envio:
             total += self.costo_envio
+        elif self.zona_envio and self.zona_envio.costo:
+            total += self.zona_envio.costo
         return total
+
+    # ---- Helpers de métricas
+    def _mins(self, t1, t2):
+        if not t1 or not t2:
+            return None
+        return round((t2 - t1).total_seconds() / 60.0, 2)
+
+    def _secs(self, t1, t2):
+        if not t1 or not t2:
+            return None
+        return int((t2 - t1).total_seconds())
+
+    def tiempos_en_minutos(self):
+        """Dict con tiempos clave en minutos (None si falta un hito)."""
+        return {
+            'm_recibido_a_preparacion': self._mins(self.fecha_pago_aprobado or self.fecha_pedido, self.fecha_en_preparacion),
+            'm_preparacion_a_asignado': self._mins(self.fecha_en_preparacion, self.fecha_asignado),
+            'm_asignado_a_en_camino':   self._mins(self.fecha_asignado, self.fecha_en_camino),
+            'm_en_camino_a_entregado':  self._mins(self.fecha_en_camino, self.fecha_entregado),
+            'm_total':                  self._mins(self.fecha_pago_aprobado or self.fecha_pedido, self.fecha_entregado),
+        }
+
+    def tiempos_en_segundos(self):
+        """Dict con tiempos clave en segundos (None si falta un hito)."""
+        return {
+            's_recibido_a_preparacion': self._secs(self.fecha_pago_aprobado or self.fecha_pedido, self.fecha_en_preparacion),
+            's_preparacion_a_asignado': self._secs(self.fecha_en_preparacion, self.fecha_asignado),
+            's_asignado_a_en_camino':   self._secs(self.fecha_asignado, self.fecha_en_camino),
+            's_en_camino_a_entregado':  self._secs(self.fecha_en_camino, self.fecha_entregado),
+            's_total':                  self._secs(self.fecha_pago_aprobado or self.fecha_pedido, self.fecha_entregado),
+        }
 
 
 class DetallePedido(models.Model):
@@ -219,3 +265,46 @@ def create_or_update_user_profile(sender, instance, created, **kwargs):
             ClienteProfile.objects.create(user=instance)
     if hasattr(instance, 'clienteprofile'):
         instance.clienteprofile.save()
+
+
+# ---------- 🆕 Log de cambios de estado (trazabilidad/metrics)
+class PedidoEstadoLog(models.Model):
+    ACTOR_CHOICES = [
+        ('sistema', 'Sistema'),
+        ('staff', 'Staff'),
+        ('cadete', 'Cadete'),
+        ('cliente', 'Cliente'),
+    ]
+
+    pedido = models.ForeignKey(Pedido, on_delete=models.CASCADE, related_name='logs_estado')
+    de = models.CharField(max_length=20, blank=True, null=True)
+    a = models.CharField(max_length=20)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    actor_tipo = models.CharField(max_length=10, choices=ACTOR_CHOICES, default='sistema')
+    fuente = models.CharField(max_length=50, blank=True, help_text="Origen del cambio (panel, cadete, webhook_mp, etc.)")
+    meta = models.JSONField(null=True, blank=True, help_text="Datos auxiliares (ej: payment_id, ip, etc.)")
+
+    class Meta:
+        verbose_name = "Log de Estado de Pedido"
+        verbose_name_plural = "Logs de Estado de Pedido"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['pedido', '-created_at']),
+            models.Index(fields=['a']),
+        ]
+
+    def __str__(self):
+        return f"Pedido #{self.pedido_id}: {self.de or '—'} → {self.a} @ {self.created_at:%Y-%m-%d %H:%M}"
+
+
+# ---------- 🆕 Al crear un pedido en RECIBIDO (efectivo), fijamos inicio
+@receiver(post_save, sender=Pedido)
+def pedido_set_inicio_si_corresponde(sender, instance: Pedido, created, **kwargs):
+    if created and instance.estado == 'RECIBIDO' and not instance.fecha_pago_aprobado:
+        try:
+            instance.fecha_pago_aprobado = instance.fecha_pedido
+            instance.save(update_fields=['fecha_pago_aprobado'])
+        except Exception:
+            pass

@@ -74,6 +74,67 @@ def _compute_total(pedido) -> Decimal:
     return total.quantize(Decimal('0.01'))
 
 
+def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta: dict | None = None):
+    """
+    Cambia el estado del pedido, intenta completar timestamps de hitos si los campos existen
+    (fecha_en_preparacion, fecha_asignado, etc.) y registra un log en PedidoEstadoLog si existe el modelo.
+    TODO-SAFE: si los campos/modelo no existen aún, no rompe (está envuelto en try/except).
+    """
+    anterior = getattr(pedido, 'estado', None)
+    pedido.estado = nuevo_estado
+    ahora = timezone.now()
+
+    # Intentar setear timestamp del hito si el campo existe
+    try:
+        mapping = {
+            'RECIBIDO': 'fecha_pago_aprobado',
+            'EN_PREPARACION': 'fecha_en_preparacion',
+            'ASIGNADO': 'fecha_asignado',
+            'EN_CAMINO': 'fecha_en_camino',
+            'ENTREGADO': 'fecha_entregado',
+            'CANCELADO': 'fecha_cancelado',
+        }
+        campo = mapping.get(nuevo_estado)
+        update_fields = ['estado']
+        if campo and hasattr(pedido, campo) and not getattr(pedido, campo):
+            setattr(pedido, campo, ahora)
+            update_fields.append(campo)
+        pedido.save(update_fields=update_fields)
+    except Exception:
+        # Si falla por campos inexistentes, guardamos al menos el estado
+        try:
+            pedido.save(update_fields=['estado'])
+        except Exception:
+            pedido.save()
+
+    # Intentar escribir un log si existe el modelo PedidoEstadoLog
+    try:
+        from .models import PedidoEstadoLog  # puede no existir aún
+        actor_tipo = 'sistema'
+        if actor is not None and getattr(actor, 'is_authenticated', False):
+            if getattr(actor, 'is_staff', False):
+                actor_tipo = 'staff'
+            elif hasattr(actor, 'cadeteprofile'):
+                actor_tipo = 'cadete'
+            else:
+                actor_tipo = 'cliente'
+        PedidoEstadoLog.objects.create(
+            pedido=pedido,
+            de=anterior,
+            a=nuevo_estado,
+            actor=actor if getattr(actor, 'is_authenticated', False) else None,
+            actor_tipo=actor_tipo,
+            fuente=fuente or '',
+            meta=meta or {}
+        )
+    except Exception as e:
+        # Modelo no existe o hubo otro error: no rompemos el flujo.
+        # print(f"DEBUG estado_log skip: {e}")
+        pass
+
+    return pedido
+
+
 def _serialize_pedido_for_panel(pedido, include_details=True):
     """
     Serializa un Pedido para mandarlo al panel por WS/JSON.
@@ -1158,9 +1219,8 @@ def panel_alertas_set_estado(request, pedido_id):
         # Si llega por navegación normal:
         return redirect('login')
 
-    # Guardar
-    pedido.estado = estado
-    pedido.save(update_fields=['estado'])
+    # Guardar con trazabilidad
+    _marcar_estado(pedido, estado, actor=request.user, fuente='panel_alertas_set_estado')
 
     # Notificar a panel para refrescar
     _notify_panel_update(pedido)
@@ -1186,8 +1246,7 @@ def confirmar_pedido(request, pedido_id):
         messages.warning(request, f"El Pedido #{pedido.id} ya fue procesado.")
         return redirect('panel_alertas')
 
-    pedido.estado = 'EN_PREPARACION'
-    pedido.save(update_fields=['estado'])
+    _marcar_estado(pedido, 'EN_PREPARACION', actor=request.user, fuente='confirmar_pedido')
 
     # WebSocket a tablets/tienda + Push a cadetes
     try:
@@ -1258,10 +1317,13 @@ def aceptar_pedido(request, pedido_id):
         messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
         return redirect('panel_cadete')
 
-    # Asignar y pasar a ASIGNADO
+    # Asignar cadete y marcar estado
     pedido.cadete_asignado = request.user.cadeteprofile
-    pedido.estado = 'ASIGNADO'
-    pedido.save()
+    try:
+        pedido.save(update_fields=['cadete_asignado'])
+    except Exception:
+        pedido.save()
+    _marcar_estado(pedido, 'ASIGNADO', actor=request.user, fuente='aceptar_pedido')
 
     # Al aceptar, dejar no-disponible al cadete
     cp = request.user.cadeteprofile
@@ -1453,8 +1515,7 @@ def cadete_set_estado(request, pedido_id):
         messages.error(request, "Estado inválido.")
         return redirect('panel_cadete')
 
-    pedido.estado = estado
-    pedido.save(update_fields=['estado'])
+    _marcar_estado(pedido, estado, actor=request.user, fuente='cadete_set_estado')
 
     # Si entregó, NO auto-activar disponibilidad: queda en OFF hasta que el cadete la prenda.
     finalizado = False
@@ -1702,11 +1763,13 @@ def mp_webhook_view(request):
         return HttpResponse(status=200)
 
     # ---- Actualizar estado según pago / reintegros
-    estado_anterior = pedido.estado
     try:
         pedido.metodo_pago = 'MERCADOPAGO'
+        try:
+            pedido.save(update_fields=['metodo_pago'])
+        except Exception:
+            pedido.save()
 
-        # Detectar reintegro total
         total_txn = Decimal(str(payment.get("transaction_amount") or "0"))
         refunded_total = Decimal('0')
 
@@ -1724,17 +1787,15 @@ def mp_webhook_view(request):
                 pass
 
         if status in ('refunded', 'cancelled', 'charged_back') or (total_txn > 0 and refunded_total >= total_txn):
-            pedido.estado = 'CANCELADO'
+            _marcar_estado(pedido, 'CANCELADO', actor=None, fuente='webhook_mp', meta={'payment_id': payment_id})
         else:
             if status == 'approved':
-                pedido.estado = 'RECIBIDO'
+                _marcar_estado(pedido, 'RECIBIDO', actor=None, fuente='webhook_mp', meta={'payment_id': payment_id})
             elif status == 'rejected':
-                pedido.estado = 'CANCELADO'
+                _marcar_estado(pedido, 'CANCELADO', actor=None, fuente='webhook_mp', meta={'payment_id': payment_id})
             # Otros estados no tocan el estado local
-
-        pedido.save()
     except Exception as e:
-        print(f"WEBHOOK MP: error guardando pedido: {e}")
+        print(f"WEBHOOK MP: error guardando pedido/estado: {e}")
 
     # ---- Notificar SIEMPRE al panel cuando cambie algo (aprobado, cancelado, refund, etc.)
     try:
