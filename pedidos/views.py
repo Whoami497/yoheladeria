@@ -163,7 +163,44 @@ def _serialize_pedido_for_panel(pedido, include_details=True):
             'cantidad': d.cantidad,
             'sabores_nombres': [s.nombre for s in d.sabores.all()],
         } for d in pedido.detalles.all()]
+    # === NUEVO: métricas y logs para panel/cadete/cliente
+    data.update({
+        'metricas': _serialize_metricas(pedido),
+        'logs': _serialize_logs(pedido, limit=8),
+    })
     return data
+
+
+# === NUEVO: serializadores de métricas y logs
+def _serialize_logs(pedido, limit=8):
+    """
+    Devuelve los últimos 'limit' logs de estado del pedido como dicts serializables.
+    """
+    out = []
+    try:
+        qs = pedido.logs_estado.select_related('actor').order_by('-created_at')[:limit]
+        for l in qs:
+            out.append({
+                'de': l.de or None,
+                'a': l.a,
+                'actor': (l.actor.get_full_name() or l.actor.username) if l.actor else None,
+                'actor_tipo': l.actor_tipo,
+                'fuente': l.fuente or '',
+                'created_at': timezone.localtime(l.created_at).strftime('%Y-%m-%d %H:%M'),
+            })
+    except Exception:
+        pass
+    return out
+
+
+def _serialize_metricas(pedido):
+    """
+    Serializa tiempos en minutos (usa el helper del modelo).
+    """
+    try:
+        return pedido.tiempos_en_minutos()
+    except Exception:
+        return {}
 
 
 def _notify_panel_update(pedido, message='actualizacion_pedido'):
@@ -177,6 +214,9 @@ def _notify_panel_update(pedido, message='actualizacion_pedido'):
         channel_layer = get_channel_layer()
         if message == 'nuevo_pedido':
             order_data = _serialize_pedido_for_panel(pedido, include_details=True)
+            # garantizamos métricas/logs
+            order_data['metricas'] = _serialize_metricas(pedido)
+            order_data['logs'] = _serialize_logs(pedido)
         else:
             order_data = {
                 'estado': pedido.estado,
@@ -185,6 +225,9 @@ def _notify_panel_update(pedido, message='actualizacion_pedido'):
                 # En actualizaciones conviene también enviar el total recalculado con envío persistido.
                 'total_pedido': str(_compute_total(pedido)),
                 'costo_envio': float(pedido.costo_envio or 0),
+                # NUEVO
+                'metricas': _serialize_metricas(pedido),
+                'logs': _serialize_logs(pedido),
             }
 
         async_to_sync(channel_layer.group_send)(
@@ -872,6 +915,9 @@ def ver_carrito(request):
                         'distancia_km': float(distancia_km or 0),
                         'nota_pedido': (nota_pedido or None),
                         'detalles': detalles_para_notificacion,
+                        # NUEVO
+                        'metricas': _serialize_metricas(nuevo_pedido),
+                        'logs': _serialize_logs(nuevo_pedido),
                     }
                 }
             )
@@ -1042,6 +1088,13 @@ def pedido_en_curso(request):
                 .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
                 .order_by('-fecha_pedido'))
 
+    # NUEVO: enriquecer para template (cliente y cadete)
+    for p in pedidos:
+        setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
+        setattr(p, 'map_url', _map_url_from_text(p.cliente_direccion))
+        setattr(p, 'metricas', _serialize_metricas(p))
+        setattr(p, 'logs', p.logs_estado.select_related('actor').order_by('-created_at')[:8])
+
     return render(request, 'pedidos/pedido_en_curso.html', {'pedidos': pedidos})
 
 
@@ -1078,6 +1131,9 @@ def panel_alertas(request):
         for p in qs:
             setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
             setattr(p, 'map_url', _map_url_from_text(p.cliente_direccion))
+            # NUEVO:
+            setattr(p, 'metricas', _serialize_metricas(p))
+            setattr(p, 'logs', p.logs_estado.select_related('actor').order_by('-created_at')[:8])
         return qs
 
     ctx = {
@@ -1141,6 +1197,9 @@ def panel_alertas_data(request):
                 'cantidad': d.cantidad,
                 'sabores_nombres': [s.nombre for s in d.sabores.all()],
             } for d in p.detalles.all()],
+            # NUEVO:
+            'metricas': _serialize_metricas(p),
+            'logs': _serialize_logs(p),
         }
         return data
 
@@ -1392,6 +1451,9 @@ def panel_cadete(request):
     for p in pedidos_en_curso:
         setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
         setattr(p, 'map_url', _map_url_from_text(p.cliente_direccion))
+        # NUEVO:
+        setattr(p, 'metricas', _serialize_metricas(p))
+        setattr(p, 'logs', p.logs_estado.select_related('actor').order_by('-created_at')[:8])
 
     contexto = {'vapid_public_key': vapid_public_key, 'pedidos_en_curso': pedidos_en_curso}
     return render(request, 'pedidos/panel_cadete.html', contexto)
@@ -1852,6 +1914,9 @@ def mp_success(request):
                         'total_pedido': str(_compute_total(pedido)),
                         'costo_envio': float(pedido.costo_envio or 0),
                         'detalles': detalles_para_notificacion,
+                        # NUEVO
+                        'metricas': _serialize_metricas(pedido),
+                        'logs': _serialize_logs(pedido),
                     }
                 }
             )

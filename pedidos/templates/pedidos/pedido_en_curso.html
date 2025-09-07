@@ -5,7 +5,15 @@
 
   {% if pedidos %}
     {% for p in pedidos %}
-      <div class="card mb-3 shadow-sm">
+      <div class="card mb-3 shadow-sm"
+           data-order-id="{{ p.id }}"
+           data-estado="{{ p.estado }}"
+           data-ts-pedido="{{ p.fecha_pedido|date:'c' }}"
+           data-ts-pago="{{ p.fecha_pago_aprobado|date:'c' }}"
+           data-ts-preparacion="{{ p.fecha_en_preparacion|date:'c' }}"
+           data-ts-asignado="{{ p.fecha_asignado|date:'c' }}"
+           data-ts-camino="{{ p.fecha_en_camino|date:'c' }}"
+           data-ts-entregado="{{ p.fecha_entregado|date:'c' }}">
         <div class="card-body">
           <div class="d-flex justify-content-between align-items-center mb-1">
             <h5 class="card-title mb-0">#{{ p.id }}</h5>
@@ -18,12 +26,16 @@
               {% elif p.estado == 'CANCELADO' %}bg-danger
               {% endif %}">{{ p.estado }}</span>
           </div>
+
           <div class="text-muted small mb-2">
             {{ p.cliente_nombre }} · {{ p.cliente_direccion|default:"" }} · {{ p.cliente_telefono|default:"" }}
           </div>
 
           {% if p.cadete_asignado %}
-            <div class="mb-2"><strong>Cadete:</strong> {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}</div>
+            <div class="mb-2">
+              <strong>Cadete:</strong>
+              {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
+            </div>
           {% endif %}
 
           <ul class="small mb-2">
@@ -38,7 +50,13 @@
             {% endfor %}
           </ul>
 
-          <div class="d-flex justify-content-between">
+          <!-- Línea de tiempo (cliente) -->
+          <details class="mt-2">
+            <summary class="cursor-pointer">Ver tiempos</summary>
+            <div class="mt-2 small timeline-box" id="timeline-{{ p.id }}"></div>
+          </details>
+
+          <div class="d-flex justify-content-between mt-2">
             <span class="fw-semibold">Total: ${{ p.total_pedido|default_if_none:"0.00" }}</span>
             <a class="btn btn-outline-primary btn-sm" href="{% url 'historial_pedidos_cliente' %}">Ver historial</a>
           </div>
@@ -52,5 +70,71 @@
 
 <style>
 .badge.bg-purple{background:#6f42c1}
+
+/* Timeline */
+.timeline-table{width:100%; border-collapse:collapse}
+.timeline-table th{font-weight:600; padding:.15rem .35rem 0 0}
+.timeline-table td{padding:.15rem .35rem}
+.timeline-table tr.sep td{border-top:1px solid #ddd; padding-top:.4rem}
+.timeline-table tr.total th{font-size:.95rem}
+.timeline-table .muted{color:#6c757d; font-weight:400}
 </style>
+
+<script>
+  // ===== Helpers de timeline =====
+  const fmt     = n => (n==null || Number.isNaN(n)) ? '—' : `${n.toFixed(2)} min`;
+  const toDate  = s => s ? new Date(s) : null;
+  const diffMin = (a,b) => (a && b) ? Math.round(((b - a) / 60000) * 100) / 100 : null;
+
+  function collectTsFromCard(card){
+    return {
+      fecha_pedido:         card.dataset.tsPedido || null,
+      fecha_pago_aprobado:  card.dataset.tsPago || null,
+      fecha_en_preparacion: card.dataset.tsPreparacion || null,
+      fecha_asignado:       card.dataset.tsAsignado || null,
+      fecha_en_camino:      card.dataset.tsCamino || null,
+      fecha_entregado:      card.dataset.tsEntregado || null,
+    };
+  }
+
+  function computeMetricas(ts){
+    const recibido = toDate(ts.fecha_pago_aprobado || ts.fecha_pedido);
+    const prep     = toDate(ts.fecha_en_preparacion);
+    const asign    = toDate(ts.fecha_asignado);
+    const camino   = toDate(ts.fecha_en_camino);
+    const entr     = toDate(ts.fecha_entregado);
+
+    return {
+      m_recibido_a_preparacion: diffMin(recibido, prep),
+      m_preparacion_a_asignado: diffMin(prep, asign),
+      m_asignado_a_en_camino:   diffMin(asign, camino),
+      m_en_camino_a_entregado:  diffMin(camino, entr),
+      m_total:                  diffMin(recibido, entr),
+    };
+  }
+
+  function renderTimelineHTML(ts, m){
+    m = m || computeMetricas(ts);
+    return `
+      <table class="timeline-table">
+        <tr><th>Recibido → Preparación</th><td>${fmt(m.m_recibido_a_preparacion)}</td><td class="muted">${ts.fecha_en_preparacion || '—'}</td></tr>
+        <tr><th>Preparación → Asignado</th><td>${fmt(m.m_preparacion_a_asignado)}</td><td class="muted">${ts.fecha_asignado || '—'}</td></tr>
+        <tr><th>Asignado → En camino</th><td>${fmt(m.m_asignado_a_en_camino)}</td><td class="muted">${ts.fecha_en_camino || '—'}</td></tr>
+        <tr><th>En camino → Entregado</th><td>${fmt(m.m_en_camino_a_entregado)}</td><td class="muted">${ts.fecha_entregado || '—'}</td></tr>
+        <tr class="sep"><td colspan="3"></td></tr>
+        <tr class="total"><th>Total</th><td>${fmt(m.m_total)}</td><td></td></tr>
+      </table>`;
+  }
+
+  function renderTimelineForCard(card){
+    const id  = card.dataset.orderId;
+    const box = card.querySelector(`#timeline-${id}`);
+    if(!box) return;
+    const ts = collectTsFromCard(card);
+    box.innerHTML = renderTimelineHTML(ts, null);
+  }
+
+  // Render inicial para todos los pedidos en la página
+  document.querySelectorAll('.card[data-order-id]').forEach(renderTimelineForCard);
+</script>
 {% endblock %}

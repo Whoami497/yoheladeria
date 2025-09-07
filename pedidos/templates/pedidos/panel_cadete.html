@@ -16,7 +16,7 @@
     <button id="enable-sound" class="btn btn-outline-primary">🔔 Habilitar sonido</button>
     <span id="sound-warning" class="badge bg-warning text-dark d-none">Tocá “Habilitar sonido” para oír alertas</span>
 
-    <!-- NUEVO: Notificaciones push -->
+    <!-- Notificaciones push -->
     <button id="enable-push" class="btn btn-outline-success">🛎️ Activar notificaciones</button>
     <span id="push-status" class="badge bg-secondary">Push: sin configurar</span>
   </div>
@@ -27,27 +27,40 @@
     {% if pedidos_en_curso %}
       <div id="en-curso-list">
         {% for p in pedidos_en_curso %}
-          <div class="card mb-2" data-order-id="{{ p.id }}">
+          <div class="card mb-2"
+               data-order-id="{{ p.id }}"
+               data-estado="{{ p.estado }}"
+               data-ts-pedido="{{ p.fecha_pedido|date:'c' }}"
+               data-ts-pago="{{ p.fecha_pago_aprobado|date:'c' }}"
+               data-ts-preparacion="{{ p.fecha_en_preparacion|date:'c' }}"
+               data-ts-asignado="{{ p.fecha_asignado|date:'c' }}"
+               data-ts-camino="{{ p.fecha_en_camino|date:'c' }}"
+               data-ts-entregado="{{ p.fecha_entregado|date:'c' }}">
             <div class="card-body">
               <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <div>
+                <div class="flex-grow-1">
                   <span class="fw-bold">#{{ p.id }}</span>
-                  <span class="badge bg-primary">{{ p.estado }}</span>
-                  <div class="text-muted small">
+                  <span class="badge bg-primary badge-estado">{{ p.estado }}</span>
+                  <div class="text-muted small mt-1">
                     {{ p.cliente_nombre }} — {{ p.direccion_legible|default:p.cliente_direccion|default:"—" }}
-                    {% if p.map_url %}
-                      — <a href="{{ p.map_url }}" target="_blank" class="btn btn-sm btn-outline-primary">Ver mapa</a>
-                    {% endif %}
+                    {% if p.map_url %} — <a href="{{ p.map_url }}" target="_blank" class="btn btn-sm btn-outline-primary">Ver mapa</a>{% endif %}
                   </div>
                   <div class="text-muted small">Total aprox: ${{ p.total_pedido|default_if_none:"0.00" }}</div>
+
+                  <!-- Línea de tiempo -->
+                  <details class="mt-2 timeline-details">
+                    <summary>Ver tiempos</summary>
+                    <div class="mt-2 small timeline-box" id="timeline-{{ p.id }}"></div>
+                  </details>
                 </div>
-                <div>
-                  <form method="post" action="{% url 'cadete_set_estado' p.id %}" class="d-inline">
+
+                <div class="text-end">
+                  <form method="post" action="{% url 'cadete_set_estado' p.id %}" class="d-inline cadete-state-form">
                     {% csrf_token %}
                     <input type="hidden" name="estado" value="EN_CAMINO">
                     <button class="btn btn-outline-warning me-1">Marcar EN CAMINO</button>
                   </form>
-                  <form method="post" action="{% url 'cadete_set_estado' p.id %}" class="d-inline">
+                  <form method="post" action="{% url 'cadete_set_estado' p.id %}" class="d-inline cadete-state-form">
                     {% csrf_token %}
                     <input type="hidden" name="estado" value="ENTREGADO">
                     <button class="btn btn-success">Marcar ENTREGADO</button>
@@ -129,7 +142,6 @@
     pushBadge.textContent = text;
     pushBadge.className = 'badge ' + (ok ? 'bg-success' : 'bg-secondary');
   }
-
   function urlBase64ToUint8Array(base64String){
     const padding = '='.repeat((4 - base64String.length % 4) % 4);
     const base64  = (base64String + padding).replace(/-/g,'+').replace(/_/g,'/');
@@ -138,7 +150,6 @@
     for(let i=0;i<rawData.length;i++){ outputArray[i]=rawData.charCodeAt(i); }
     return outputArray;
   }
-
   async function saveSubscription(sub){
     const res = await fetch("{% url 'save_subscription' %}", {
       method: 'POST',
@@ -147,22 +158,19 @@
     });
     return res.ok;
   }
-
   async function ensureServiceWorker(){
     if(!('serviceWorker' in navigator)){ throw new Error('SW no soportado'); }
     const reg = await navigator.serviceWorker.register('/sw.js');
     return reg;
   }
-
   async function getOrCreateSubscription(reg){
     const existing = await reg.pushManager.getSubscription();
     if(existing) return existing;
     const appKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
     return await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey: appKey});
   }
-
   async function activatePush(){
-    if(!VAPID_PUBLIC_KEY){ setPushBadge('Push: sin VAPID', false); alert('No hay VAPID_PUBLIC_KEY configurada en el servidor.'); return; }
+    if(!VAPID_PUBLIC_KEY){ setPushBadge('Push: sin VAPID', false); alert('No hay VAPID_PUBLIC_KEY configurada.'); return; }
     if(!('Notification' in window)){ setPushBadge('Push no disponible', false); return; }
     let perm = Notification.permission;
     if(perm === 'default'){ perm = await Notification.requestPermission(); }
@@ -220,28 +228,84 @@
     availBadge.textContent = 'Estado: ' + (disponible ? 'Disponible' : 'No disponible');
   }
 
+  // ===== Timeline helpers =====
+  const fmt = n => (n==null || Number.isNaN(n)) ? '—' : `${n.toFixed(2)} min`;
+  const toDate = s => s ? new Date(s) : null;
+  const diffMin = (a,b) => (a && b) ? Math.round(((b - a) / 60000) * 100) / 100 : null;
+
+  function computeMetricasFromTs(ts){
+    const recibido = toDate(ts.fecha_pago_aprobado || ts.fecha_pedido);
+    const prep     = toDate(ts.fecha_en_preparacion);
+    const asign    = toDate(ts.fecha_asignado);
+    const camino   = toDate(ts.fecha_en_camino);
+    const entr     = toDate(ts.fecha_entregado);
+    return {
+      m_recibido_a_preparacion: diffMin(recibido, prep),
+      m_preparacion_a_asignado: diffMin(prep, asign),
+      m_asignado_a_en_camino:   diffMin(asign, camino),
+      m_en_camino_a_entregado:  diffMin(camino, entr),
+      m_total:                  diffMin(recibido, entr),
+    };
+  }
+  function renderTimelineHTML(ts, metricas){
+    const m = metricas || computeMetricasFromTs(ts);
+    return `
+      <table class="timeline-table">
+        <tr><th>Recibido → Preparación</th><td>${fmt(m.m_recibido_a_preparacion)}</td><td class="muted">${ts.fecha_en_preparacion || '—'}</td></tr>
+        <tr><th>Preparación → Asignado</th><td>${fmt(m.m_preparacion_a_asignado)}</td><td class="muted">${ts.fecha_asignado || '—'}</td></tr>
+        <tr><th>Asignado → En camino</th><td>${fmt(m.m_asignado_a_en_camino)}</td><td class="muted">${ts.fecha_en_camino || '—'}</td></tr>
+        <tr><th>En camino → Entregado</th><td>${fmt(m.m_en_camino_a_entregado)}</td><td class="muted">${ts.fecha_entregado || '—'}</td></tr>
+        <tr class="sep"><td colspan="3"></td></tr>
+        <tr class="total"><th>Total</th><td>${fmt(m.m_total)}</td><td></td></tr>
+      </table>`;
+  }
+  function readTsFromCard(card){
+    return {
+      fecha_pedido: card.dataset.tsPedido || null,
+      fecha_pago_aprobado: card.dataset.tsPago || null,
+      fecha_en_preparacion: card.dataset.tsPreparacion || null,
+      fecha_asignado: card.dataset.tsAsignado || null,
+      fecha_en_camino: card.dataset.tsCamino || null,
+      fecha_entregado: card.dataset.tsEntregado || null,
+    };
+  }
+  function renderTimelineForCard(card){
+    const id = card.dataset.orderId;
+    const box = card.querySelector(`#timeline-${id}`);
+    if(!box) return;
+    const ts = readTsFromCard(card);
+    box.innerHTML = renderTimelineHTML(ts, null);
+  }
+  // Render inicial timelines
+  document.querySelectorAll('#en-curso-list .card[data-order-id]').forEach(renderTimelineForCard);
+
+  // Crear card “en curso” (cuando el cadete acepta)
   function buildEnCursoCard({id, estado, cliente, direccion, total, map_url}){
     const div = document.createElement('div');
     div.className = 'card mb-2';
     div.dataset.orderId = id;
+    div.dataset.estado = estado || 'ASIGNADO';
+    // como fue recién aceptado, seteamos ts-asignado = ahora
+    div.dataset.tsAsignado = new Date().toISOString();
     div.innerHTML = `
       <div class="card-body">
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-          <div>
+          <div class="flex-grow-1">
             <span class="fw-bold">#${id}</span>
-            <span class="badge bg-primary">${estado}</span>
-            <div class="text-muted small">
+            <span class="badge bg-primary badge-estado">${estado||'ASIGNADO'}</span>
+            <div class="text-muted small mt-1">
               ${cliente||''} — ${direccion||'—'}${map_url ? ` — <a href="${map_url}" target="_blank" class="btn btn-sm btn-outline-primary">Ver mapa</a>` : ``}
             </div>
             <div class="text-muted small">Total aprox: $${parseFloat(total||0).toFixed(2)}</div>
+            <details class="mt-2 timeline-details"><summary>Ver tiempos</summary><div class="mt-2 small timeline-box" id="timeline-${id}"></div></details>
           </div>
-          <div>
-            <form method="post" action="/cadete/estado/${id}/" class="d-inline">
+          <div class="text-end">
+            <form method="post" action="/cadete/estado/${id}/" class="d-inline cadete-state-form">
               <input type="hidden" name="csrfmiddlewaretoken" value="${csrftoken}">
               <input type="hidden" name="estado" value="EN_CAMINO">
               <button class="btn btn-outline-warning me-1">Marcar EN CAMINO</button>
             </form>
-            <form method="post" action="/cadete/estado/${id}/" class="d-inline">
+            <form method="post" action="/cadete/estado/${id}/" class="d-inline cadete-state-form">
               <input type="hidden" name="csrfmiddlewaretoken" value="${csrftoken}">
               <input type="hidden" name="estado" value="ENTREGADO">
               <button class="btn btn-success">Marcar ENTREGADO</button>
@@ -249,6 +313,8 @@
           </div>
         </div>
       </div>`;
+    // timeline (solo ts_asignado conocido por ahora)
+    renderTimelineForCard(div);
     return div;
   }
 
@@ -348,8 +414,70 @@
     }
   });
 
-  // init + refresco periódico
+  // Interceptar cambio de estado (EN_CAMINO / ENTREGADO) para actualizar timeline sin recargar
+  document.addEventListener('submit', async (ev)=>{
+    const form = ev.target.closest('.cadete-state-form'); if(!form) return;
+    ev.preventDefault();
+    const card = form.closest('.card[data-order-id]');
+    const id = card.dataset.orderId;
+    const estado = form.querySelector('input[name="estado"]').value;
+
+    try{
+      const res = await fetch(form.action, {
+        method:'POST',
+        headers:{'X-CSRFToken': csrftoken, 'X-Requested-With':'XMLHttpRequest', 'Content-Type':'application/x-www-form-urlencoded'},
+        body: `estado=${encodeURIComponent(estado)}`
+      });
+      const data = await res.json();
+      if(!data.ok){ location.href=form.action; return; }
+
+      // Cambiar badge
+      const b = card.querySelector('.badge-estado');
+      if(b){ b.textContent = data.estado || estado; }
+
+      // Marcar timestamps optimistamente
+      const nowIso = new Date().toISOString();
+      if(estado==='EN_CAMINO'){ card.dataset.tsCamino = nowIso; }
+      if(estado==='ENTREGADO'){ card.dataset.tsEntregado = nowIso; }
+
+      renderTimelineForCard(card);
+
+      // Si finalizó, sacar la card
+      if(data.finalizado){
+        card.remove();
+        if(!enCursoList.querySelector('.card')) enCursoEmpty?.classList?.replace('d-none','') || (document.getElementById('en-curso').innerHTML = '<div class="alert alert-light border">No tenés pedidos en curso.</div>');
+      }
+    }catch(e){
+      location.href=form.action;
+    }
+  });
+
+  // init + refresco periódico (feed)
   fetchFeed();
   setInterval(()=>{ fetchFeed(); }, 7000);
+
+  // ===== WebSocket para ofertas en vivo (grupo cadetes_disponibles)
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+  const cadeteWsUrl = wsProtocol + window.location.host + '/ws/cadetes/notifications/';
+  try{
+    const cadeteSocket = new WebSocket(cadeteWsUrl);
+    cadeteSocket.onmessage = (e)=>{
+      const payload = JSON.parse(e.data||'{}');
+      if(payload && payload.order_data){
+        if(disponible){ playSound(); }
+        fetchFeed(); // refrescamos la lista de ofertas
+      }
+    };
+  }catch(e){}
 </script>
+
+<style>
+  /* Timeline */
+  .timeline-table{width:100%; border-collapse:collapse}
+  .timeline-table th{font-weight:600; padding:.15rem .35rem 0 0}
+  .timeline-table td{padding:.15rem .35rem}
+  .timeline-table tr.sep td{border-top:1px solid #ddd; padding-top:.4rem}
+  .timeline-table tr.total th{font-size:.95rem}
+  .timeline-table .muted{color:#6c757d; font-weight:400}
+</style>
 {% endblock %}

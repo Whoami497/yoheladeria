@@ -12,7 +12,19 @@
   <div id="alerts-hoy">
     {% if pedidos_hoy %}
       {% for p in pedidos_hoy %}
-        <div class="order-card alert alert-primary alert-dismissible fade show mb-3 p-3" id="order-{{ p.id }}" data-order-id="{{ p.id }}">
+        <div
+          class="order-card alert alert-primary alert-dismissible fade show mb-3 p-3"
+          id="order-{{ p.id }}"
+          data-order-id="{{ p.id }}"
+          data-estado="{{ p.estado }}"
+          data-ts-pedido="{{ p.fecha_pedido|date:'c' }}"
+          data-ts-pago="{{ p.fecha_pago_aprobado|date:'c' }}"
+          data-ts-preparacion="{{ p.fecha_en_preparacion|date:'c' }}"
+          data-ts-asignado="{{ p.fecha_asignado|date:'c' }}"
+          data-ts-camino="{{ p.fecha_en_camino|date:'c' }}"
+          data-ts-entregado="{{ p.fecha_entregado|date:'c' }}"
+          data-ts-cancelado="{{ p.fecha_cancelado|date:'c' }}"
+        >
           <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
             <div class="flex-grow-1">
               <div class="d-flex align-items-center gap-2 mb-1">
@@ -30,7 +42,6 @@
                 {% endif %}
               </div>
 
-              {# Info de envío #}
               <div class="small text-muted">
                 Envío:
                 {% if p.costo_envio %}
@@ -61,6 +72,12 @@
                     </li>
                   {% endfor %}
                 </ul>
+              </details>
+
+              <!-- NUEVO: línea de tiempo -->
+              <details class="mt-2 timeline-details">
+                <summary class="cursor-pointer">Ver tiempos</summary>
+                <div class="mt-2 small" id="timeline-{{ p.id }}"></div>
               </details>
             </div>
 
@@ -259,6 +276,73 @@
     return document.getElementById(`order-${id}`) || document.getElementById(`chip-${id}`) || document.getElementById(`chip-hoy-${id}`);
   }
 
+  // ====== TIMELINE (nuevo) ======
+  const fmt = n => (n==null || Number.isNaN(n)) ? '—' : `${n.toFixed(2)} min`;
+  const toDate = s => s ? new Date(s) : null;
+  const diffMin = (a,b) => (a && b) ? Math.round(((b - a) / 60000) * 100) / 100 : null;
+
+  function computeMetricasFromTs(t){
+    const recibido = toDate(t.fecha_pago_aprobado || t.fecha_pedido);
+    const prep     = toDate(t.fecha_en_preparacion);
+    const asign    = toDate(t.fecha_asignado);
+    const camino   = toDate(t.fecha_en_camino);
+    const entr     = toDate(t.fecha_entregado);
+
+    return {
+      m_recibido_a_preparacion: diffMin(recibido, prep),
+      m_preparacion_a_asignado: diffMin(prep, asign),
+      m_asignado_a_en_camino:   diffMin(asign, camino),
+      m_en_camino_a_entregado:  diffMin(camino, entr),
+      m_total:                  diffMin(recibido, entr),
+    };
+  }
+
+  function renderTimelineHTML(timestamps, metricas, logs){
+    const ts = timestamps || {};
+    const m  = metricas || computeMetricasFromTs(ts);
+
+    const rows = `
+      <table class="timeline-table">
+        <tr><th>Recibido → Preparación</th><td>${fmt(m.m_recibido_a_preparacion)}</td><td class="muted">${ts.fecha_en_preparacion || '—'}</td></tr>
+        <tr><th>Preparación → Asignado</th><td>${fmt(m.m_preparacion_a_asignado)}</td><td class="muted">${ts.fecha_asignado || '—'}</td></tr>
+        <tr><th>Asignado → En camino</th><td>${fmt(m.m_asignado_a_en_camino)}</td><td class="muted">${ts.fecha_en_camino || '—'}</td></tr>
+        <tr><th>En camino → Entregado</th><td>${fmt(m.m_en_camino_a_entregado)}</td><td class="muted">${ts.fecha_entregado || '—'}</td></tr>
+        <tr class="sep"><td colspan="3"></td></tr>
+        <tr class="total"><th>Total</th><td>${fmt(m.m_total)}</td><td></td></tr>
+      </table>`;
+
+    const logsHtml = (logs && logs.length)
+      ? `<div class="timeline-logs mt-2">
+          <div class="fw-semibold mb-1">Historial:</div>
+          <ul class="small mb-0">
+            ${logs.map(l => `<li><span class="muted">${l.created_at||''}</span> — <span class="badge badge-sm ${badgeClass(l.a)}">${l.a}</span> <span class="muted">(${l.actor || l.actor_tipo || ''}${l.fuente ? ' · '+l.fuente : ''})</span></li>`).join('')}
+          </ul>
+        </div>`
+      : '';
+
+    return rows + logsHtml;
+  }
+
+  function renderTimelineInto(root, enriched){
+    const box = root.querySelector(`#timeline-${root.dataset.orderId}`);
+    if(!box) return;
+    const ts = (enriched && enriched.timestamps) ? enriched.timestamps : {
+      fecha_pedido: root.dataset.tsPedido || null,
+      fecha_pago_aprobado: root.dataset.tsPago || null,
+      fecha_en_preparacion: root.dataset.tsPreparacion || null,
+      fecha_asignado: root.dataset.tsAsignado || null,
+      fecha_en_camino: root.dataset.tsCamino || null,
+      fecha_entregado: root.dataset.tsEntregado || null,
+      fecha_cancelado: root.dataset.tsCancelado || null,
+    };
+    const metricas = enriched && enriched.metricas ? enriched.metricas : null;
+    const logs = enriched && enriched.logs_estado ? enriched.logs_estado : null;
+    box.innerHTML = renderTimelineHTML(ts, metricas, logs);
+  }
+
+  // Render inicial de timelines usando data-attributes del HTML
+  document.querySelectorAll('.order-card[data-order-id]').forEach(card => renderTimelineInto(card, null));
+
   /* ===== Construcción de tarjetas/chips ===== */
 
   function buildCard(order){
@@ -266,6 +350,17 @@
     wrapper.className='order-card alert alert-primary alert-dismissible fade show mb-3 p-3';
     wrapper.id=`order-${order.id}`;
     wrapper.dataset.orderId=order.id;
+
+    // dataset de timestamps (si vienen desde WS)
+    if(order.timestamps){
+      wrapper.dataset.tsPedido      = order.timestamps.fecha_pedido || '';
+      wrapper.dataset.tsPago        = order.timestamps.fecha_pago_aprobado || '';
+      wrapper.dataset.tsPreparacion = order.timestamps.fecha_en_preparacion || '';
+      wrapper.dataset.tsAsignado    = order.timestamps.fecha_asignado || '';
+      wrapper.dataset.tsCamino      = order.timestamps.fecha_en_camino || '';
+      wrapper.dataset.tsEntregado   = order.timestamps.fecha_entregado || '';
+      wrapper.dataset.tsCancelado   = order.timestamps.fecha_cancelado || '';
+    }
 
     const cadeteTxt = order.cadete || '—';
     const total = parseFloat(order.total_pedido||0).toFixed(2);
@@ -323,6 +418,7 @@
           ${envioHtml}
           <div class="small">Cadete: <span class="fw-semibold cadete-name">${cadeteTxt}</span></div>
           <details class="mt-2"><summary>Ver productos</summary><ul class="mb-0 small mt-2">${detailsHtml}</ul></details>
+          <details class="mt-2 timeline-details"><summary>Ver tiempos</summary><div class="mt-2 small" id="timeline-${order.id}"></div></details>
         </div>
         <div class="text-end min-btn-col">
           ${rightControls}
@@ -330,6 +426,9 @@
       </div>
       <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     `;
+
+    // pintar timeline si vino info enriquecida
+    renderTimelineInto(wrapper, order);
     return wrapper;
   }
 
@@ -383,6 +482,7 @@
       const res=await fetch(url,{method:'POST',headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'}});
       if(res.ok){
         const badge=card.querySelector('.badge'); badge.className='badge '+badgeClass('EN_PREPARACION'); badge.textContent='EN_PREPARACION';
+        // controles
         btn.parentElement.innerHTML = `
           <div class="dropdown">
             <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
@@ -488,37 +588,42 @@
 
     if(kind==='nuevo_pedido'){
       if(!orderExists(orderId)){
-        orderData.id=orderId;               // viene con direccion_legible y map_url
+        orderData.id=orderId;
         const card=buildCard(orderData);
         alertsHoy.prepend(card);
         playSound();
+      }else{
+        // si ya existe, refrescamos timeline con lo enriquecido
+        const card = document.getElementById(`order-${orderId}`);
+        if(card) renderTimelineInto(card, orderData);
       }
       return;
     }
 
     if(kind==='actualizacion_pedido'){
       const estado=orderData.estado;
-      if(!estado) return;
-
       const card=document.getElementById(`order-${orderId}`);
       const chipHoy=document.getElementById(`chip-hoy-${orderId}`);
       const chipAyer=document.getElementById(`chip-${orderId}`);
 
       if(card){
         const badge=card.querySelector('.badge');
-        if(badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
+        if(estado && badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
+        // timeline enriquecido
+        renderTimelineInto(card, orderData || null);
         if(estado==='ASIGNADO'){ refreshCadeteName(orderId); }
         if(estado==='ENTREGADO'||estado==='CANCELADO'){ moveToFinalizadosFromCard(card, estado); }
       }else if(chipHoy||chipAyer){
         const chip = chipHoy || chipAyer;
         const b=chip.querySelector('.badge');
-        if(b){ b.className='badge '+badgeClass(estado); b.textContent=estado; }
+        if(estado && b){ b.className='badge '+badgeClass(estado); b.textContent=estado; }
       }else{
         location.reload();
       }
       return;
     }
 
+    // fallback: si llega otro tipo y no existe, lo creo
     if(!orderExists(orderId)){
       orderData.id=orderId;
       const card=buildCard(orderData);
@@ -542,5 +647,14 @@
   .bg-status-en_camino{background:#ffc107 !important;color:#212529 !important}
   .bg-status-entregado{background:#198754 !important}
   .bg-status-cancelado{background:#dc3545 !important}
+
+  /* Timeline */
+  .timeline-table{width:100%; border-collapse:collapse}
+  .timeline-table th{font-weight:600; padding:.15rem .35rem 0 0}
+  .timeline-table td{padding:.15rem .35rem}
+  .timeline-table tr.sep td{border-top:1px solid #ddd; padding-top:.4rem}
+  .timeline-table tr.total th{font-size:.95rem}
+  .timeline-table .muted{color:#6c757d; font-weight:400}
+  .badge-sm{font-size:.75rem}
 </style>
 {% endblock %}
