@@ -2,24 +2,23 @@
 {% load static %}
 
 {% block content %}
-<!-- ===== HERO nuevo ===== -->
-<section class="container my-3" id="hero-domicilio">
-  <div class="yo-hero d-flex align-items-center gap-3 gap-md-5 p-4 p-md-5 rounded-4 shadow-sm">
-    <div class="flex-grow-1">
-      <h1 class="yo-hero__title mb-2">La mejor calidad de helado</h1>
-      <p class="yo-hero__sub mb-3 mb-md-4">Disfrutá Yo Heladerías en casa.</p>
-      <a href="#nuestro-catalogo" class="btn btn-light px-4 fw-semibold">Explorar sabores</a>
-    </div>
-    <div class="yo-hero__img d-none d-sm-block">
-      <img src="{% static 'pedidos/img/yo-scooter.png' %}"
-           alt="Delivery Yo Heladerías"
-           class="img-fluid yo-hero__img-el">
-    </div>
+<!-- ===== HERO responsive (con imagen en mobile) ===== -->
+<section class="hero-card mt-3">
+  <div class="hero-copy">
+    <h1>La mejor calidad de helado</h1>
+    <p>Disfrutá Yo Heladerías en casa.</p>
+    <a href="#nuestro-catalogo" class="btn btn-light btn-sm fw-semibold">Explorar sabores</a>
+  </div>
+
+  <div class="hero-illustration">
+    <img
+      src="{% static 'pedidos/img/hero-scooter.png' %}"
+      alt="Reparto de Yo Heladerías"
+      width="180" height="180" loading="eager">
   </div>
 </section>
 
 <div class="container pt-2 pb-5" id="nuestro-catalogo">
-
   <!-- ===== Título ===== -->
   <h2 class="py-title">Nuestro Catálogo</h2>
 
@@ -36,7 +35,7 @@
     {% endif %}
   </form>
 
-  <!-- ===== Chips de categorías (scroll horizontal) ===== -->
+  <!-- ===== Chips de categorías ===== -->
   <div class="py-chips">
     <a href="?{% if q %}q={{ q }}&{% endif %}{% if sort %}sort={{ sort }}{% endif %}"
        class="chip {% if not cat %}active{% endif %}">Menú</a>
@@ -86,40 +85,53 @@
       <div class="alert alert-light border mt-3">No encontramos productos para tu búsqueda.</div>
     {% endfor %}
   </div>
-
 </div>
 
 <style>
-/* ===== HERO nuevo ===== */
-.yo-hero{
-  background: linear-gradient(135deg, #0b5ed7 0%, #0a4ea9 60%, #083e87 100%);
+/* ===== HERO (muestra imagen también en mobile) ===== */
+.hero-card{
+  display:grid;
+  grid-template-columns: 1fr 92px;   /* texto + imagen pequeña en mobile */
+  align-items:center;
+  gap:12px;
+  background: linear-gradient(135deg,#0d47a1,#0a61c9);
   color:#fff;
-  border:0;
+  padding:14px 16px;
+  border-radius:16px;
+  margin:0 12px 8px;
+  box-shadow: 0 6px 20px rgba(13,71,161,.25);
 }
-.yo-hero__title{
+.hero-copy h1{
+  font-size:1.28rem;
+  line-height:1.18;
+  margin:0 0 6px;
   font-weight:800;
-  letter-spacing:.3px;
-  line-height:1.15;
-  font-size:1.4rem;
+  letter-spacing:.2px;
 }
-.yo-hero__sub{
-  opacity:.9;
-  font-size:.98rem;
+.hero-copy p{
+  margin:0 0 10px;
+  font-size:.95rem;
+  opacity:.95;
 }
-.yo-hero__img-el{
-  max-width:180px;
-  filter: drop-shadow(0 8px 18px rgba(0,0,0,.25));
-}
-@media (min-width: 576px){
-  .yo-hero__img-el{ max-width:220px; }
-}
-@media (min-width: 768px){
-  .yo-hero__title{ font-size:2rem; }
-  .yo-hero__sub{ font-size:1.05rem; }
-  .yo-hero__img-el{ max-width:260px; }
+.hero-illustration img{
+  width:92px; height:auto; display:block; object-fit:contain;
+  filter: drop-shadow(0 3px 8px rgba(0,0,0,.2));
 }
 
-/* ===== Catálogo tipo PedidosYa ===== */
+/* Más aire e imagen grande en pantallas medianas+ */
+@media (min-width: 768px){
+  .hero-card{
+    grid-template-columns: 1fr 220px;
+    padding:22px 24px;
+    margin:0 12px 12px;
+    border-radius:18px;
+  }
+  .hero-copy h1{ font-size:2rem; }
+  .hero-copy p{ font-size:1.05rem; }
+  .hero-illustration img{ width:220px; }
+}
+
+/* ===== Catálogo tipo PedidosYa (igual que tenías) ===== */
 .py-title{ font-weight:800; font-size:1.4rem; margin:8px 0 10px 2px; }
 
 .py-search{
@@ -128,9 +140,7 @@
   padding:8px 12px; gap:8px; margin:0 2px 8px;
 }
 .py-search i{font-size:1.1rem; color:#6b7280}
-.py-search input{
-  border:0; outline:none; width:100%; font-size:1rem; background:transparent;
-}
+.py-search input{ border:0; outline:none; width:100%; font-size:1rem; background:transparent; }
 .py-search .clear{color:#9ca3af; font-size:1.1rem}
 
 .py-chips{
@@ -154,22 +164,18 @@
 
 .product-list{ display:grid; grid-template-columns:1fr; gap:12px }
 
-/* Tarjeta con imagen a la derecha */
 .tile{
   display:grid; grid-template-columns:1fr 110px; gap:12px; align-items:center;
   background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:12px;
   text-decoration:none; color:inherit; box-shadow:0 1px 0 rgba(0,0,0,.02);
 }
 .tile:hover{ border-color:#d1d5db }
-.tile-media img{
-  width:110px; height:110px; object-fit:cover; border-radius:12px;
-}
+.tile-media img{ width:110px; height:110px; object-fit:cover; border-radius:12px; }
 .tile-title{ font-size:1.05rem; line-height:1.2; margin:0 0 4px; font-weight:800 }
 .tile-sub{ color:#6b7280; font-size:.9rem; margin-bottom:6px }
 .tile-price{ font-weight:800; font-size:1.05rem; margin-bottom:4px }
 .tile-cta{ font-size:.9rem; color:#0d6efd; font-weight:700 }
 
-/* En pantallas medianas, dos columnas */
 @media (min-width: 768px){
   .product-list{ grid-template-columns:1fr 1fr; }
   .tile{ grid-template-columns:1fr 140px; }
