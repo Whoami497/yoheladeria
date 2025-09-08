@@ -2,19 +2,17 @@
 {% load static %}
 
 {% block content %}
-<!-- ===== HERO responsive (con imagen en mobile) ===== -->
+<!-- ===== HERO responsive (con imagen) ===== -->
 <section class="hero-card mt-3">
   <div class="hero-copy">
     <h1>La mejor calidad de helado</h1>
     <p>Disfrutá Yo Heladerías en casa.</p>
-    <a href="#nuestro-catalogo" class="btn btn-light btn-sm fw-semibold">Explorar sabores</a>
+    {# Botón eliminado intencionalmente #}
   </div>
-
   <div class="hero-illustration">
     <img
       src="{% static 'pedidos/img/hero-scooter.png' %}"
-      alt="Reparto de Yo Heladerías"
-      width="180" height="180" loading="eager">
+      alt="Reparto de Yo Heladerías" width="180" height="180" loading="eager">
   </div>
 </section>
 
@@ -35,13 +33,21 @@
     {% endif %}
   </form>
 
-  <!-- ===== Chips de categorías ===== -->
-  <div class="py-chips">
-    <a href="?{% if q %}q={{ q }}&{% endif %}{% if sort %}sort={{ sort }}{% endif %}"
-       class="chip {% if not cat %}active{% endif %}">Menú</a>
+  <!-- ===== Chips de categorías (SIN “Menú”) ===== -->
+  <div class="py-chips" id="cat-chips">
     {% for c in categorias %}
-      <a href="?cat={{ c.id }}{% if q %}&q={{ q }}{% endif %}{% if sort %}&sort={{ sort }}{% endif %}"
-         class="chip {% if cat == c.id %}active{% endif %}">{{ c.nombre }}</a>
+      <a
+        data-cat="{{ c.id }}"
+        data-name="{{ c.nombre }}"
+        href="?cat={{ c.id }}{% if q %}&q={{ q }}{% endif %}{% if sort %}&sort={{ sort }}{% endif %}"
+        class="chip
+          {% if cat == c.id %}
+            active
+          {% elif not cat and c.nombre|lower == 'potes' %}
+            active
+          {% endif %}">
+        {{ c.nombre }}
+      </a>
     {% endfor %}
   </div>
 
@@ -87,11 +93,30 @@
   </div>
 </div>
 
+<!-- Redirección suave a “Potes” por defecto si no hay ?cat= -->
+<script>
+(function(){
+  const params = new URLSearchParams(location.search);
+  if (params.has('cat')) return;
+
+  const chips = document.querySelectorAll('#cat-chips a');
+  if (!chips.length) return;
+
+  // Busca “Potes”, si no existe usa la primera categoría
+  let target = Array.from(chips).find(a => (a.dataset.name || '').toLowerCase() === 'potes') || chips[0];
+
+  const p = new URLSearchParams(location.search);
+  p.set('cat', target.dataset.cat);
+  // preserva q y sort si ya estaban
+  location.replace(location.pathname + '?' + p.toString());
+})();
+</script>
+
 <style>
-/* ===== HERO (muestra imagen también en mobile) ===== */
+/* ===== HERO (imagen también en mobile) ===== */
 .hero-card{
   display:grid;
-  grid-template-columns: 1fr 92px;   /* texto + imagen pequeña en mobile */
+  grid-template-columns: 1fr 92px; /* texto + imagen pequeña en mobile */
   align-items:center;
   gap:12px;
   background: linear-gradient(135deg,#0d47a1,#0a61c9);
@@ -99,41 +124,25 @@
   padding:14px 16px;
   border-radius:16px;
   margin:0 12px 8px;
-  box-shadow: 0 6px 20px rgba(13,71,161,.25);
+  box-shadow:0 6px 20px rgba(13,71,161,.25);
 }
 .hero-copy h1{
-  font-size:1.28rem;
-  line-height:1.18;
-  margin:0 0 6px;
-  font-weight:800;
-  letter-spacing:.2px;
+  font-size:1.28rem; line-height:1.18; margin:0 0 6px; font-weight:800; letter-spacing:.2px;
 }
-.hero-copy p{
-  margin:0 0 10px;
-  font-size:.95rem;
-  opacity:.95;
-}
+.hero-copy p{ margin:0; font-size:.95rem; opacity:.95; } /* sin botón, menos margen */
 .hero-illustration img{
   width:92px; height:auto; display:block; object-fit:contain;
   filter: drop-shadow(0 3px 8px rgba(0,0,0,.2));
 }
-
-/* Más aire e imagen grande en pantallas medianas+ */
-@media (min-width: 768px){
-  .hero-card{
-    grid-template-columns: 1fr 220px;
-    padding:22px 24px;
-    margin:0 12px 12px;
-    border-radius:18px;
-  }
+@media (min-width:768px){
+  .hero-card{ grid-template-columns: 1fr 220px; padding:22px 24px; margin:0 12px 12px; border-radius:18px; }
   .hero-copy h1{ font-size:2rem; }
   .hero-copy p{ font-size:1.05rem; }
   .hero-illustration img{ width:220px; }
 }
 
-/* ===== Catálogo tipo PedidosYa (igual que tenías) ===== */
+/* ===== Catálogo tipo PedidosYa ===== */
 .py-title{ font-weight:800; font-size:1.4rem; margin:8px 0 10px 2px; }
-
 .py-search{
   position:relative; display:flex; align-items:center;
   background:#fff; border:1px solid #e5e7eb; border-radius:12px;
@@ -163,7 +172,6 @@
 .pill.active{ background:#111827; color:#fff }
 
 .product-list{ display:grid; grid-template-columns:1fr; gap:12px }
-
 .tile{
   display:grid; grid-template-columns:1fr 110px; gap:12px; align-items:center;
   background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:12px;
@@ -175,8 +183,7 @@
 .tile-sub{ color:#6b7280; font-size:.9rem; margin-bottom:6px }
 .tile-price{ font-weight:800; font-size:1.05rem; margin-bottom:4px }
 .tile-cta{ font-size:.9rem; color:#0d6efd; font-weight:700 }
-
-@media (min-width: 768px){
+@media (min-width:768px){
   .product-list{ grid-template-columns:1fr 1fr; }
   .tile{ grid-template-columns:1fr 140px; }
   .tile-media img{ width:140px; height:140px; }
