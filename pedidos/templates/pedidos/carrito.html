@@ -63,15 +63,17 @@
             <strong id="subtotal-amount">${{ total|floatformat:2 }}</strong>
           </div>
 
-          <div class="d-flex align-items-center justify-content-between mb-2">
-            <div class="me-2">
-              <div class="text-muted mb-1">Envío</div>
-              <select id="envio" class="form-select form-select-sm" style="min-width:220px">
-                <option value="0" selected>Retiro en local — $0</option>
-                <!-- La opción “Auto (mapa)” se agrega automáticamente -->
+          <!-- Fila envío: selector más pequeño + precio alineado y sin desbordes -->
+          <div class="d-flex align-items-center justify-content-between gap-2 mb-2 flex-wrap">
+            <div class="d-flex align-items-center gap-2 flex-grow-1 min-w-0">
+              <span class="text-muted">Envío</span>
+              <select id="envio" class="form-select form-select-sm w-auto envio-select">
+                <option value="0" selected>Retiro en local</option>
+                <!-- La opción “Auto (mapa)” se agrega automáticamente por JS -->
               </select>
             </div>
-            <div class="text-end">
+            <div class="text-end flex-shrink-0">
+              <div class="small text-muted lh-1">Costo</div>
               <div class="fw-semibold fs-6" id="envio-amount">$0.00</div>
             </div>
           </div>
@@ -105,7 +107,7 @@
                      value="{{ request.user.get_full_name|default:request.user.username }}" required>
             </div>
 
-            <!-- Botón mapa + chip coords (sin textos extras) -->
+            <!-- Botón mapa + chip coords -->
             <div class="mb-2 d-flex align-items-center gap-2">
               <button type="button" class="btn btn-outline-success btn-sm" id="btn-map">📍 Elegir ubicación</button>
               <span class="badge bg-light text-dark" id="coords-preview" style="display:none;"></span>
@@ -178,7 +180,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
   integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
-<!-- JS: mapa + cálculo automático + persistencia (con UI más limpia) -->
+<!-- JS: mapa + cálculo automático + persistencia -->
 <script>
 (function(){
   // ---------- CONFIG ----------
@@ -226,9 +228,10 @@
   }
   envioSel.addEventListener('change', recalc);
 
+  // Nota: hacemos el label corto para que el select sea angosto.
   function setAutoOption(costo, km){
     let opt = document.getElementById('opt-auto-envio');
-    const label = `Auto (≈ ${Number(km||0).toFixed(2)} km) — ${fmt(costo)}`;
+    const label = `Auto (≈ ${Number(km||0).toFixed(2)} km)`; // sin precio en el texto
     if(!opt){
       opt = document.createElement('option');
       opt.id = 'opt-auto-envio';
@@ -435,6 +438,10 @@
 
   .summary{ position:sticky; top:.75rem; }
   @media (min-width:992px){ .summary{ top:1rem; } }
+
+  /* Selector de envío más chico y que no empuje el precio fuera del card */
+  .envio-select{ max-width: 220px; }
+  @media (max-width: 400px){ .envio-select{ max-width: 180px; } }
 
   #btn-map{ padding:.35rem .6rem;font-weight:600; }
   #coords-preview{ font-size:.8rem; }
