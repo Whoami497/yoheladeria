@@ -2,15 +2,19 @@
 {% load static %}
 
 {% block content %}
-<!-- ===== HERO (compacto en mobile) ===== -->
-<section id="hero-domicilio" class="hero-section-new mt-3">
-  <div class="hero-content">
-    <h1>El Mejor Helado Artesanal<br> de Catamarca</h1>
-    <p>Disfrutá Yo Heladerías en casa.</p>
-    <a href="#nuestro-catalogo" class="btn btn-secondary btn-sm">Explorar sabores</a>
-  </div>
-  <div class="hero-image-container-new">
-    <img src="{% static 'images/helado_a_domicilio.jpg' %}" alt="Helado a Domicilio">
+<!-- ===== HERO nuevo ===== -->
+<section class="container my-3" id="hero-domicilio">
+  <div class="yo-hero d-flex align-items-center gap-3 gap-md-5 p-4 p-md-5 rounded-4 shadow-sm">
+    <div class="flex-grow-1">
+      <h1 class="yo-hero__title mb-2">La mejor calidad de helado</h1>
+      <p class="yo-hero__sub mb-3 mb-md-4">Disfrutá Yo Heladerías en casa.</p>
+      <a href="#nuestro-catalogo" class="btn btn-light px-4 fw-semibold">Explorar sabores</a>
+    </div>
+    <div class="yo-hero__img d-none d-sm-block">
+      <img src="{% static 'pedidos/img/yo-scooter.png' %}"
+           alt="Delivery Yo Heladerías"
+           class="img-fluid yo-hero__img-el">
+    </div>
   </div>
 </section>
 
@@ -86,25 +90,33 @@
 </div>
 
 <style>
-/* ===== HERO compacto ===== */
-.hero-section-new{
-  display:flex; align-items:center; justify-content:space-between;
-  gap:12px; background:#0b4462; color:#fff;
-  padding:14px 16px; border-radius:16px; margin:0 12px 8px;
-  overflow:hidden; min-height:120px;
+/* ===== HERO nuevo ===== */
+.yo-hero{
+  background: linear-gradient(135deg, #0b5ed7 0%, #0a4ea9 60%, #083e87 100%);
+  color:#fff;
+  border:0;
 }
-.hero-section-new .hero-content h1{
-  font-size:1.15rem; line-height:1.15; margin:0 0 4px; font-weight:800;
+.yo-hero__title{
+  font-weight:800;
+  letter-spacing:.3px;
+  line-height:1.15;
+  font-size:1.4rem;
 }
-.hero-section-new .hero-content p{
-  margin:0 0 8px; font-size:.9rem; opacity:.9
+.yo-hero__sub{
+  opacity:.9;
+  font-size:.98rem;
 }
-.hero-image-container-new{ display:none }
+.yo-hero__img-el{
+  max-width:180px;
+  filter: drop-shadow(0 8px 18px rgba(0,0,0,.25));
+}
+@media (min-width: 576px){
+  .yo-hero__img-el{ max-width:220px; }
+}
 @media (min-width: 768px){
-  .hero-section-new{ min-height:180px; padding:22px 24px }
-  .hero-section-new .hero-content h1{ font-size:1.6rem }
-  .hero-image-container-new{ display:block }
-  .hero-image-container-new img{ height:170px; width:auto; border-radius:12px }
+  .yo-hero__title{ font-size:2rem; }
+  .yo-hero__sub{ font-size:1.05rem; }
+  .yo-hero__img-el{ max-width:260px; }
 }
 
 /* ===== Catálogo tipo PedidosYa ===== */
