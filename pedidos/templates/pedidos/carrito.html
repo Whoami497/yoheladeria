@@ -3,7 +3,7 @@
 
 {% block content %}
 <div class="container my-4">
-  <h1 class="display-6 mb-3">Tu Carrito</h1>
+  <h2 class="mb-3">Tu Carrito</h2>
 
   <div class="row g-4">
     <!-- Ítems -->
@@ -65,28 +65,22 @@
 
           <div class="d-flex align-items-center justify-content-between mb-2">
             <div class="me-2">
-              <div class="text-muted">Envío</div>
-              <select id="envio" class="form-select form-select-sm mt-1" style="min-width:220px">
+              <div class="text-muted mb-1">Envío</div>
+              <select id="envio" class="form-select form-select-sm" style="min-width:220px">
                 <option value="0" selected>Retiro en local — $0</option>
                 <!-- La opción “Auto (mapa)” se agrega automáticamente -->
               </select>
-              <div class="small text-muted mt-1" id="envio-info" style="min-height:1.25rem;"></div>
             </div>
             <div class="text-end">
-              <div class="small text-muted">Costo de envío</div>
-              <div class="fw-semibold" id="envio-amount">$0.00</div>
+              <div class="fw-semibold fs-6" id="envio-amount">$0.00</div>
             </div>
           </div>
 
           <hr class="my-2">
 
-          <div class="d-flex justify-content-between">
+          <div class="d-flex justify-content-between align-items-center">
             <span class="fs-6 fw-semibold">Total estimado</span>
-            <span class="fs-5 fw-bold" id="total-final">$0.00</span>
-          </div>
-
-          <div class="small text-muted mt-1">
-            Definí el punto exacto en el <strong>mapa</strong> y calculamos el costo automáticamente.
+            <span class="fs-4 fw-bold" id="total-final">${{ total|floatformat:2 }}</span>
           </div>
         </div>
       </div>
@@ -94,54 +88,45 @@
       <!-- Formulario -->
       <div class="card shadow-sm">
         <div class="card-body p-3">
-          <h5 class="mb-3">Datos de Envío y Contacto</h5>
+          <h5 class="mb-3">Datos de entrega y contacto</h5>
 
           <form id="checkout-form" method="post">
             {% csrf_token %}
 
-            <!-- modo de envío real para el backend -->
+            <!-- Campos que espera la vista -->
             <input type="hidden" name="modo_envio" id="modo_envio" value="pickup">
-
-            <!-- elegido en el selector de envío (solo informativo) -->
-            <input type="hidden" name="envio_visual_opcion" id="envio-visual-opcion" value="Retiro en local — $0">
-            <input type="hidden" name="envio_visual_costo" id="envio-visual-costo" value="0">
-            <!-- Punto real de entrega (obligatorio si no es “Retiro”) -->
             <input type="hidden" name="geo_latlng" id="geo-latlng" value="">
+            <input type="hidden" name="cliente_direccion" id="cliente_direccion" value="">
 
+            <!-- Nombre -->
             <div class="mb-3">
-              <label class="form-label">Nombre Completo:</label>
+              <label class="form-label">Nombre completo</label>
               <input type="text" class="form-control" name="cliente_nombre"
                      value="{{ request.user.get_full_name|default:request.user.username }}" required>
             </div>
 
-            <div class="mb-2">
-              <label class="form-label mb-1">Ubicación de Envío (si es a domicilio)</label>
-              <div class="d-grid gap-2">
-                <button type="button" class="btn btn-outline-success" id="btn-map">🗺️ Elegir ubicación en el mapa</button>
-              </div>
-              <div class="form-text">
-                El costo se calcula desde el punto del mapa. Podés agregar referencias abajo (piso, depto, “tocar timbre”, etc.).
-              </div>
-              <div class="mt-2 small">
-                <span class="badge bg-light text-dark" id="coords-preview" style="display:none;"></span>
-              </div>
+            <!-- Botón mapa + chip coords (sin textos extras) -->
+            <div class="mb-2 d-flex align-items-center gap-2">
+              <button type="button" class="btn btn-outline-success btn-sm" id="btn-map">📍 Elegir ubicación</button>
+              <span class="badge bg-light text-dark" id="coords-preview" style="display:none;"></span>
             </div>
 
+            <!-- Referencias -->
             <div class="mb-3">
-              <label class="form-label">Referencias / Aclaraciones para tu pedido (opcional)</label>
-              <textarea class="form-control" name="nota_pedido" rows="3"
-                        placeholder="Ej: tocar timbre; torre B dpto 2; referencia frente a la plaza."></textarea>
+              <label class="form-label">Referencias (opcional)</label>
+              <input class="form-control" name="nota_pedido" placeholder="Ej: Timbre negro; torre B; dpto 2">
             </div>
 
+            <!-- Teléfono -->
             <div class="mb-3">
-              <label class="form-label">Teléfono:</label>
+              <label class="form-label">Teléfono</label>
               <input type="tel" class="form-control" name="cliente_telefono" placeholder="Ej: 3834 123456"
                      autocomplete="tel" inputmode="tel" required>
             </div>
 
-            <h5 class="mt-3 mb-2">Método de Pago</h5>
-            <div class="mb-3">
-              <label class="form-label">Selecciona el método de pago:</label>
+            <!-- Pago -->
+            <div class="mb-4">
+              <label class="form-label">Método de pago</label>
               <select class="form-select" name="metodo_pago" required>
                 <option value="EFECTIVO">Efectivo</option>
                 <option value="MERCADOPAGO">Mercado Pago</option>
@@ -172,14 +157,14 @@
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Elegí tu ubicación exacta</h5>
+        <h6 class="modal-title">Elegí tu ubicación</h6>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body">
         <div id="map" style="height:420px;"></div>
         <div class="small mt-2">
-          <span id="map-status" class="text-muted">Podés arrastrar el pin para ajustar.</span><br>
-          <span id="map-outside" class="text-danger" style="display:none;">⚠️ Esta ubicación está fuera del radio de servicio.</span>
+          <span id="map-status" class="text-muted">Arrastrá el pin para ajustar.</span><br>
+          <span id="map-outside" class="text-danger" style="display:none;">⚠️ Fuera del radio de servicio.</span>
         </div>
       </div>
       <div class="modal-footer">
@@ -193,16 +178,14 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
   integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
-<!-- JS: mapa obligatorio + cálculo automático + PERSISTENCIA -->
+<!-- JS: mapa + cálculo automático + persistencia (con UI más limpia) -->
 <script>
 (function(){
-  // ---------- CONFIGURABLES ----------
-  // Coordenadas de tu local (settings ORIGEN_LAT/ORIGEN_LNG):
-  const STORE = { lat: -28.4705234, lng: -65.7937524 };
-  // Radio de servicio en metros (0 para desactivar límite visual):
-  const SERVICE_RADIUS_M = 8000;
+  // ---------- CONFIG ----------
+  const STORE = { lat: -28.4705234, lng: -65.7937524 };   // sucursal
+  const SERVICE_RADIUS_M = 8000;                           // 0 = sin límite visual
 
-  // ---------- LOCALSTORAGE KEYS ----------
+  // ---------- LocalStorage ----------
   const LS_GEO  = 'yl_geo_latlng';
   const LS_COST = 'yl_envio_cost';
   const LS_KM   = 'yl_envio_km';
@@ -214,13 +197,9 @@
   const envioEl    = document.getElementById('envio-amount');
   const totalEl    = document.getElementById('total-final');
   const subEl      = document.getElementById('subtotal-amount');
-  const envioInfo  = document.getElementById('envio-info');
-  const envioLblH  = document.getElementById('envio-visual-opcion');
-  const envioCostH = document.getElementById('envio-visual-costo');
 
   const geoHidden  = document.getElementById('geo-latlng');
   const coordsPreview = document.getElementById('coords-preview');
-
   const modoHidden = document.getElementById('modo_envio');
 
   const btnMap   = document.getElementById('btn-map');
@@ -238,20 +217,16 @@
     envioEl.textContent  = fmt(envio);
     totalEl.textContent  = fmt(subtotal + envio);
     subEl.textContent    = fmt(subtotal);
-    envioLblH.value = envioSel.options[envioSel.selectedIndex]?.text || '';
-    envioCostH.value  = String(envio);
 
     const isPickup = envioSel.value === '0';
-    // <-- clave para el backend:
     modoHidden.value = isPickup ? 'pickup' : 'delivery';
 
     const hasPoint = !!geoHidden.value;
     setSubmitEnabled(isPickup || (hasPoint && envio > 0));
   }
-
   envioSel.addEventListener('change', recalc);
 
-  function setAutoOption(costo, km, fuente){
+  function setAutoOption(costo, km){
     let opt = document.getElementById('opt-auto-envio');
     const label = `Auto (≈ ${Number(km||0).toFixed(2)} km) — ${fmt(costo)}`;
     if(!opt){
@@ -262,15 +237,12 @@
     opt.value = String(Number(costo).toFixed(2));
     opt.textContent = label;
     envioSel.value = opt.value;
-    envioInfo.textContent = fuente || 'Estimado automáticamente';
     recalc();
   }
-
   function removeAutoOption(){
     const opt = document.getElementById('opt-auto-envio');
     if(opt) opt.remove();
     if (envioSel.value !== '0') envioSel.value = '0';
-    envioInfo.textContent = '';
     recalc();
   }
 
@@ -281,14 +253,14 @@
   }
 
   // --------- MAPA ----------
-  let map, marker, circle, mapModal, mapReady = false;
+  let map, marker, circle, mapReady = false;
   const DEFAULT_CENTER = [STORE.lat, STORE.lng];
 
-  const elMapModal = document.getElementById('mapModal');
-  const elMapCoords= document.getElementById('map-coords');
-  const elMapStatus= document.getElementById('map-status');
+  const elMapModal  = document.getElementById('mapModal');
+  const elMapCoords = document.getElementById('map-coords');
+  const elMapStatus = document.getElementById('map-status');
   const elMapOutside= document.getElementById('map-outside');
-  const btnMapUse  = document.getElementById('map-use');
+  const btnMapUse   = document.getElementById('map-use');
 
   function haversineKm(a, b){
     const R = 6371e3; // m
@@ -300,7 +272,6 @@
     const c = 2*Math.atan2(Math.sqrt(A), Math.sqrt(1-A));
     return (R*c)/1000.0;
   }
-
   function withinRadius(p){
     if(!SERVICE_RADIUS_M) return true;
     const km = haversineKm({lat:STORE.lat,lng:STORE.lng}, {lat:p.lat,lng:p.lng});
@@ -310,7 +281,7 @@
   }
 
   function ensureMap(){
-    if(mapReady) { setTimeout(()=>map.invalidateSize(), 250); return; }
+    if(mapReady){ setTimeout(()=>map.invalidateSize(), 250); return; }
 
     map = L.map('map').setView(DEFAULT_CENTER, 14);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -335,13 +306,12 @@
         const q = `${latlng.lat.toFixed(6)},${latlng.lng.toFixed(6)}`;
         const data = await getJSON(`/api/costo-envio/?direccion=${q}`);
         if(data && data.ok){
-          setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0), 'Estimado con punto del mapa');
-          // Guarda costo y km (para mostrar rápido si el user vuelve al carrito)
+          setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0));
           localStorage.setItem(LS_COST, String(Number(data.costo_envio||0).toFixed(2)));
           localStorage.setItem(LS_KM,   String(Number(data.distancia_km||0).toFixed(3)));
           elMapStatus.textContent = `Distancia ≈ ${Number(data.distancia_km||0).toFixed(2)} km`;
         }else{
-          elMapStatus.textContent = 'No se pudo calcular. Probá mover el pin nuevamente.';
+          elMapStatus.textContent = 'No se pudo calcular. Probá mover el pin.';
         }
       }catch(e){
         elMapStatus.textContent = 'Error al calcular. Reintentá.';
@@ -354,7 +324,6 @@
       debounced(p);
     });
 
-    // Intento de centrar al usuario al abrir (solo primera vez)
     if(navigator.geolocation){
       elMapStatus.textContent = 'Buscando tu ubicación...';
       navigator.geolocation.getCurrentPosition((pos)=>{
@@ -363,10 +332,10 @@
         marker.setLatLng(here);
         updateUI(here);
         setTimeout(()=>map.invalidateSize(), 250);
-        elMapStatus.textContent = 'Podés arrastrar el pin para ajustar.';
+        elMapStatus.textContent = 'Arrastrá el pin para ajustar.';
         debounced(here);
       }, ()=>{
-        elMapStatus.textContent = 'No pudimos obtener tu ubicación. Arrastrá el pin al lugar exacto.';
+        elMapStatus.textContent = 'No pudimos obtener tu ubicación.';
       }, {enableHighAccuracy:true, timeout:10000, maximumAge:0});
     }
 
@@ -375,11 +344,7 @@
   }
 
   function debounce(fn, wait){
-    let t;
-    return function(...args){
-      clearTimeout(t);
-      t = setTimeout(()=>fn.apply(this, args), wait);
-    }
+    let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn.apply(this,a), wait); };
   }
 
   // Abrir mapa
@@ -389,39 +354,33 @@
     ensureMap();
   });
 
-  // Confirmar punto desde el modal (también persiste)
-  btnMapUse.addEventListener('click', async ()=>{
+  // Confirmar punto
+  document.getElementById('map-use').addEventListener('click', async ()=>{
     const p = marker.getLatLng();
     const lat = p.lat.toFixed(6), lng = p.lng.toFixed(6);
     const latlng = `${lat},${lng}`;
 
     geoHidden.value = latlng;
     coordsPreview.style.display = '';
-    coordsPreview.textContent = `📍 ${latlng}`;
+    coordsPreview.textContent = `📌 ${latlng}`;
 
-    // Persistir ubicación
     localStorage.setItem(LS_GEO, latlng);
 
-    // Asegurar costo al confirmar (por si no se disparó el cálculo durante el drag)
     try{
       const data = await getJSON(`/api/costo-envio/?direccion=${latlng}`);
       if(data && data.ok){
-        setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0), 'Estimado con punto del mapa');
+        setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0));
         localStorage.setItem(LS_COST, String(Number(data.costo_envio||0).toFixed(2)));
         localStorage.setItem(LS_KM,   String(Number(data.distancia_km||0).toFixed(3)));
-      }else{
-        removeAutoOption();
-      }
-    }catch(e){
-      removeAutoOption();
-    }
+      }else{ removeAutoOption(); }
+    }catch(e){ removeAutoOption(); }
 
     const modal = bootstrap.Modal.getInstance(elMapModal);
     if(modal) modal.hide();
     recalc();
   });
 
-  // Interceptar submit: si no es retiro, exigir punto del mapa
+  // Submit: si no es retiro, exigir punto
   form.addEventListener('submit', (e)=>{
     const isPickup = envioSel.value === '0';
     if(!isPickup && !geoHidden.value){
@@ -433,27 +392,22 @@
     }
   });
 
-  // ------- RESTAURAR DESDE LOCALSTORAGE AL CARGAR -------
-  async function restoreFromLocalStorage(){
+  // Restaurar estado
+  async function restore(){
     const saved = localStorage.getItem(LS_GEO);
     if(saved){
-      // pinta coords y hidden
       geoHidden.value = saved;
       coordsPreview.style.display = '';
-      coordsPreview.textContent = `📍 ${saved}`;
+      coordsPreview.textContent = `📌 ${saved}`;
 
-      // Si tenemos costo/ km guardados, mostrar rápido mientras recalculamos
       const savedCost = localStorage.getItem(LS_COST);
       const savedKm   = localStorage.getItem(LS_KM);
-      if(savedCost){
-        setAutoOption(Number(savedCost), Number(savedKm||0), 'Estimado (guardado)');
-      }
+      if(savedCost){ setAutoOption(Number(savedCost), Number(savedKm||0)); }
 
-      // Recalcular en vivo (por si cambió la tarifa)
       try{
         const data = await getJSON(`/api/costo-envio/?direccion=${saved}`);
         if(data && data.ok){
-          setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0), 'Estimado con punto guardado');
+          setAutoOption(Number(data.costo_envio||0), Number(data.distancia_km||0));
           localStorage.setItem(LS_COST, String(Number(data.costo_envio||0).toFixed(2)));
           localStorage.setItem(LS_KM,   String(Number(data.distancia_km||0).toFixed(3)));
         }
@@ -461,31 +415,29 @@
     }
     recalc();
   }
-
-  // Al cargar
-  async function init(){
-    await restoreFromLocalStorage();
-    // Si NO hay ubicación guardada, abrimos el mapa automáticamente (como antes)
-    if(!geoHidden.value){
-      setTimeout(()=>{ btnMap.click(); }, 400);
-    }
-  }
-  init();
+  restore();
 })();
 </script>
 
 <style>
+  /* Más limpio y elegante en mobile */
+  h2{ letter-spacing:.2px; }
+  .card{ border-radius:14px; }
+  .card-body{ padding:1rem 1.1rem; }
+
   .cart-item .thumb-wrap{ width:84px; flex:0 0 84px; }
-  .cart-item .thumb{
-    width:84px; height:84px; object-fit:cover; border-radius:12px; background:#f2f2f2;
-  }
+  .cart-item .thumb{ width:84px;height:84px;object-fit:cover;border-radius:12px;background:#f2f2f2; }
   .thumb-placeholder{
-    display:flex; align-items:center; justify-content:center; color:#999;
-    background:#f3f6fa; border:1px dashed #c9d4e5; border-radius:12px;
-    width:84px; height:84px; font-size:.8rem;
+    display:flex;align-items:center;justify-content:center;color:#999;
+    background:#f3f6fa;border:1px dashed #c9d4e5;border-radius:12px;
+    width:84px;height:84px;font-size:.8rem;
   }
+
   .summary{ position:sticky; top:.75rem; }
-  @media (min-width: 992px){ .summary{ position:sticky; top:1rem; } }
-  #map { min-height: 360px; border-radius: 8px; }
+  @media (min-width:992px){ .summary{ top:1rem; } }
+
+  #btn-map{ padding:.35rem .6rem;font-weight:600; }
+  #coords-preview{ font-size:.8rem; }
+  #map{ min-height:360px;border-radius:8px; }
 </style>
 {% endblock %}
