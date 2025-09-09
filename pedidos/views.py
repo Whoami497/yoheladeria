@@ -325,6 +325,25 @@ def _map_url_from_text(text: str) -> str:
     return f"https://www.google.com/maps/search/?api=1&query={q}"
 
 
+# === NUEVO: dirección corta/bonita para UI ===
+def _short_address(formatted: str, max_len: int = 60) -> str:
+    """
+    Recorta una dirección formateada: "Calle 123, Localidad, Prov, País" -> "Calle 123 · Localidad"
+    y si sigue larga, la trunca con '…'.
+    """
+    if not formatted:
+        return ""
+    parts = [p.strip() for p in formatted.split(",") if p.strip()]
+    pretty = formatted
+    if len(parts) >= 3:
+        street = parts[0]
+        locality = parts[-3]  # suele ser la ciudad/localidad
+        pretty = f"{street} · {locality}"
+    if len(pretty) > max_len:
+        pretty = pretty[:max_len - 1] + "…"
+    return pretty
+
+
 # ======= REVERSE GEOCODING (nuevo: fallback local + wrapper) =======
 def _reverse_geocode_local(lat: float, lng: float) -> dict:
     """
@@ -495,12 +514,16 @@ def api_costo_envio(request):
             print(f"GEOCODING reverse error: {e}")
             addr = {}
 
+    # dirección completa (legible) + versión corta para UI
+    addr_full = addr.get('formatted_address') or _direccion_legible_from_text(direccion)
+
     payload = {
         'ok': True,
         'costo_envio': float(costo),
         'distancia_km': float(km),
         'mode': 'maps',
-        'direccion_legible': addr.get('formatted_address') or _direccion_legible_from_text(direccion),
+        'direccion_legible': addr_full,
+        'direccion_corta': _short_address(addr_full),
         'map_url': addr.get('map_url') or _map_url_from_text(direccion),
         'plus_code': addr.get('plus_code'),
         'locality': addr.get('locality'),
