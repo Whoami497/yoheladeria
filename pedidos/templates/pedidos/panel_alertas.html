@@ -30,13 +30,13 @@
               <div class="d-flex align-items-center gap-2 mb-1">
                 <h6 class="mb-0">#{{ p.id }}</h6>
                 <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
-                <small class="text-muted">Total: ${{ p.total_pedido|default_if_none:"0.00" }}</small>
+                <small class="text-muted">Total: ${{ p.total_pedido|default_if_none:"0.00"|floatformat:2 }}</small>
               </div>
 
-              <div class="small text-muted mb-1">
-                Cliente: <span class="fw-semibold">{{ p.cliente_nombre|default:"N/A" }}</span>
-                · {{ p.cliente_telefono|default:"—" }}
-                · {{ p.direccion_legible|default:"—" }}
+              <div class="small text-muted mb-1 d-flex align-items-center flex-wrap gap-1">
+                <span>Cliente: <span class="fw-semibold">{{ p.cliente_nombre|default:"N/A" }}</span></span>
+                <span>· {{ p.cliente_telefono|default:"—" }}</span>
+                <span class="addr-ellipsis" title="{{ p.direccion_legible|default:'—' }}">· {{ p.direccion_legible|default:"—" }}</span>
                 {% if p.map_url %}
                   <a class="btn btn-sm btn-outline-primary ms-2" target="_blank" href="{{ p.map_url }}">Ver mapa</a>
                 {% endif %}
@@ -125,7 +125,7 @@
             <div class="d-flex align-items-center gap-2 flex-wrap">
               <span class="chip-id">#{{ p.id }}</span>
               <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
-              <span class="text-muted small">$ {{ p.total_pedido|default_if_none:"0.00" }}</span>
+              <span class="text-muted small">$ {{ p.total_pedido|default_if_none:"0.00"|floatformat:2 }}</span>
               <span class="small text-truncate chip-client">{{ p.cliente_nombre|default:"N/A" }}</span>
               <span class="small text-muted">· Cadete:
                 {% if p.cadete_asignado %}
@@ -164,7 +164,7 @@
             <div class="d-flex align-items-center gap-2 flex-wrap">
               <span class="chip-id">#{{ p.id }}</span>
               <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
-              <span class="text-muted small">$ {{ p.total_pedido|default_if_none:"0.00" }}</span>
+              <span class="text-muted small">$ {{ p.total_pedido|default_if_none:"0.00"|floatformat:2 }}</span>
               <span class="small text-truncate chip-client">{{ p.cliente_nombre|default:"N/A" }}</span>
               <span class="small text-muted">· Cadete:
                 {% if p.cadete_asignado %}
@@ -410,9 +410,10 @@
             <span class="badge ${badgeClass(estado)}">${estado}</span>
             <small class="text-muted">Total: $${total}</small>
           </div>
-          <div class="small text-muted mb-1">
-            Cliente: <span class="fw-semibold">${order.cliente_nombre||'N/A'}</span>
-            · ${order.cliente_telefono||'—'} · ${direccion}
+          <div class="small text-muted mb-1 d-flex align-items-center flex-wrap gap-1">
+            <span>Cliente: <span class="fw-semibold">${order.cliente_nombre||'N/A'}</span></span>
+            <span>· ${order.cliente_telefono||'—'}</span>
+            <span class="addr-ellipsis" title="${direccion}">· ${direccion}</span>
             ${mapUrl ? `<a class="btn btn-sm btn-outline-primary ms-2" target="_blank" href="${mapUrl}">Ver mapa</a>` : ``}
           </div>
           ${envioHtml}
@@ -593,7 +594,6 @@
         alertsHoy.prepend(card);
         playSound();
       }else{
-        // si ya existe, refrescamos timeline con lo enriquecido
         const card = document.getElementById(`order-${orderId}`);
         if(card) renderTimelineInto(card, orderData);
       }
@@ -609,7 +609,6 @@
       if(card){
         const badge=card.querySelector('.badge');
         if(estado && badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
-        // timeline enriquecido
         renderTimelineInto(card, orderData || null);
         if(estado==='ASIGNADO'){ refreshCadeteName(orderId); }
         if(estado==='ENTREGADO'||estado==='CANCELADO'){ moveToFinalizadosFromCard(card, estado); }
@@ -623,7 +622,6 @@
       return;
     }
 
-    // fallback: si llega otro tipo y no existe, lo creo
     if(!orderExists(orderId)){
       orderData.id=orderId;
       const card=buildCard(orderData);
@@ -640,6 +638,16 @@
   .order-card h6{font-size:1rem}
   .compact-line{font-size:.95rem}
   .min-btn-col{min-width:190px}
+
+  /* Direcciones: recorte elegante */
+  .addr-ellipsis{
+    max-width: min(44vw, 420px);
+    display:inline-block;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    vertical-align:bottom;
+  }
 
   .bg-status-recibido{background:#0d6efd !important}
   .bg-status-en_preparacion{background:#0dcaf0 !important}

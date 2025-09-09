@@ -42,10 +42,13 @@
                   <span class="fw-bold">#{{ p.id }}</span>
                   <span class="badge bg-primary badge-estado">{{ p.estado }}</span>
                   <div class="text-muted small mt-1">
-                    {{ p.cliente_nombre }} — {{ p.direccion_legible|default:p.cliente_direccion|default:"—" }}
+                    {{ p.cliente_nombre }} —
+                    <span class="addr-ellipsis" title="{{ p.direccion_legible|default:p.cliente_direccion|default:'—' }}">
+                      {{ p.direccion_legible|default:p.cliente_direccion|default:"—" }}
+                    </span>
                     {% if p.map_url %} — <a href="{{ p.map_url }}" target="_blank" class="btn btn-sm btn-outline-primary">Ver mapa</a>{% endif %}
                   </div>
-                  <div class="text-muted small">Total aprox: ${{ p.total_pedido|default_if_none:"0.00" }}</div>
+                  <div class="text-muted small">Total aprox: ${{ p.total_pedido|default_if_none:"0.00"|floatformat:2 }}</div>
 
                   <!-- Línea de tiempo -->
                   <details class="mt-2 timeline-details">
@@ -85,6 +88,14 @@
 
   <div class="text-center my-4">
     <a href="{% url 'cadete_historial' %}">Ver mi historial</a>
+  </div>
+</div>
+
+<!-- Barra inferior: disponibilidad -->
+<div class="cadete-bottom fixed-bottom py-2 border-top bg-white">
+  <div class="container d-flex justify-content-between align-items-center">
+    <div class="small text-muted">Disponibilidad</div>
+    <button id="btn-available" class="btn btn-outline-success">Ponerse disponible</button>
   </div>
 </div>
 
@@ -214,6 +225,7 @@
 
   // ===== Disponibilidad & Feed =====
   const availBadge   = document.getElementById('avail-badge');
+  const btnAvail     = document.getElementById('btn-available');
   const feedList     = document.getElementById('feed-list');
   const enCursoList  = document.getElementById('en-curso-list');
   const enCursoEmpty = document.getElementById('en-curso-empty');
@@ -226,7 +238,45 @@
     disponible = !!val;
     availBadge.className = 'badge ' + (disponible ? 'bg-success' : 'bg-secondary');
     availBadge.textContent = 'Estado: ' + (disponible ? 'Disponible' : 'No disponible');
+    if(disponible){
+      btnAvail.classList.remove('btn-outline-success');
+      btnAvail.classList.add('btn-success');
+      btnAvail.textContent = 'Disponible (pausar)';
+    }else{
+      btnAvail.classList.add('btn-outline-success');
+      btnAvail.classList.remove('btn-success');
+      btnAvail.textContent = 'Ponerse disponible';
+    }
   }
+
+  async function toggleAvailability(){
+    const desired = disponible ? '0' : '1';
+    const original = btnAvail.textContent;
+    btnAvail.disabled = true;
+    btnAvail.textContent = 'Actualizando…';
+    try{
+      const res = await fetch("{% url 'cadete_toggle_disponible' %}", {
+        method:'POST',
+        headers:{'X-CSRFToken': csrftoken, 'X-Requested-With':'XMLHttpRequest', 'Content-Type':'application/x-www-form-urlencoded'},
+        body: `disponible=${desired}`
+      });
+      if(!res.ok){
+        const data = await res.json().catch(()=>({}));
+        if(data && data.error === 'ocupado'){
+          alert('No podés ponerte disponible porque tenés un pedido en curso.');
+        }
+      }else{
+        const data = await res.json();
+        if(data.ok){ setAvailUI(!!data.disponible); if(disponible){ fetchFeed(); } }
+      }
+    }catch(e){
+      // fallback: nada
+    }finally{
+      btnAvail.disabled = false;
+      btnAvail.textContent = original.includes('Actualizando') ? (disponible ? 'Disponible (pausar)' : 'Ponerse disponible') : original;
+    }
+  }
+  btnAvail.addEventListener('click', toggleAvailability);
 
   // ===== Timeline helpers =====
   const fmt = n => (n==null || Number.isNaN(n)) ? '—' : `${n.toFixed(2)} min`;
@@ -285,7 +335,6 @@
     div.className = 'card mb-2';
     div.dataset.orderId = id;
     div.dataset.estado = estado || 'ASIGNADO';
-    // como fue recién aceptado, seteamos ts-asignado = ahora
     div.dataset.tsAsignado = new Date().toISOString();
     div.innerHTML = `
       <div class="card-body">
@@ -294,7 +343,9 @@
             <span class="fw-bold">#${id}</span>
             <span class="badge bg-primary badge-estado">${estado||'ASIGNADO'}</span>
             <div class="text-muted small mt-1">
-              ${cliente||''} — ${direccion||'—'}${map_url ? ` — <a href="${map_url}" target="_blank" class="btn btn-sm btn-outline-primary">Ver mapa</a>` : ``}
+              ${cliente||''} —
+              <span class="addr-ellipsis" title="${(direccion||'').replace(/"/g,'&quot;')}">${direccion||'—'}</span>
+              ${map_url ? ` — <a href="${map_url}" target="_blank" class="btn btn-sm btn-outline-primary">Ver mapa</a>` : ``}
             </div>
             <div class="text-muted small">Total aprox: $${parseFloat(total||0).toFixed(2)}</div>
             <details class="mt-2 timeline-details"><summary>Ver tiempos</summary><div class="mt-2 small timeline-box" id="timeline-${id}"></div></details>
@@ -313,7 +364,6 @@
           </div>
         </div>
       </div>`;
-    // timeline (solo ts_asignado conocido por ahora)
     renderTimelineForCard(div);
     return div;
   }
@@ -330,7 +380,8 @@
         feedList.innerHTML = '<div class="alert alert-light border">No hay pedidos disponibles.</div>';
       }else{
         feedList.innerHTML = pedidos.map(p=>{
-          const dir = ((p.direccion_legible||p.cliente_direccion)||'').trim();
+          const dirRaw = (p.direccion_legible||p.cliente_direccion||'').trim();
+          const dir = dirRaw;
           const tel = (p.cliente_telefono||'').trim();
           const detalleHtml = (p.detalles||[]).map(d=>{
             const opt = d.opcion ? ` - ${d.opcion}` : '';
@@ -345,7 +396,10 @@
                   <div>
                     <span class="fw-bold">#${p.id}</span>
                     <span class="badge bg-info text-dark">EN_PREPARACION</span>
-                    <div class="text-muted small">Cliente: <span class="fw-semibold">${p.cliente_nombre||''}</span> · ${tel||'—'} · ${dir||'—'}</div>
+                    <div class="text-muted small">
+                      Cliente: <span class="fw-semibold">${p.cliente_nombre||''}</span> · ${tel||'—'} ·
+                      <span class="addr-ellipsis" title="${dir.replace(/"/g,'&quot;')}">${dir||'—'}</span>
+                    </div>
                     <div class="text-muted small">Total aprox: $${parseFloat(p.total||0).toFixed(2)}</div>
                     <details class="mt-2"><summary>Ver productos</summary><ul class="small mt-2 mb-0">${detalleHtml}</ul></details>
                   </div>
@@ -355,7 +409,7 @@
                             data-url="/cadete/aceptar-pedido/${p.id}/"
                             data-id="${p.id}"
                             data-cliente="${(p.cliente_nombre||'').replace(/"/g,'&quot;')}"
-                            data-dir="${(dir||'').replace(/"/g,'&quot;')}"
+                            data-dir="${dir.replace(/"/g,'&quot;')}"
                             data-map="${(p.map_url||'').replace(/"/g,'&quot;')}"
                             data-total="${p.total||0}">
                       ✅ Aceptar pedido
@@ -414,7 +468,7 @@
     }
   });
 
-  // Interceptar cambio de estado (EN_CAMINO / ENTREGADO) para actualizar timeline sin recargar
+  // Interceptar cambio de estado (EN_CAMINO / ENTREGADO)
   document.addEventListener('submit', async (ev)=>{
     const form = ev.target.closest('.cadete-state-form'); if(!form) return;
     ev.preventDefault();
@@ -435,17 +489,21 @@
       const b = card.querySelector('.badge-estado');
       if(b){ b.textContent = data.estado || estado; }
 
-      // Marcar timestamps optimistamente
+      // Timestamps optimistas
       const nowIso = new Date().toISOString();
       if(estado==='EN_CAMINO'){ card.dataset.tsCamino = nowIso; }
       if(estado==='ENTREGADO'){ card.dataset.tsEntregado = nowIso; }
 
       renderTimelineForCard(card);
 
-      // Si finalizó, sacar la card
+      // Si finalizó, sacar card y actualizar disponibilidad si viene en payload
       if(data.finalizado){
         card.remove();
-        if(!enCursoList.querySelector('.card')) enCursoEmpty?.classList?.replace('d-none','') || (document.getElementById('en-curso').innerHTML = '<div class="alert alert-light border">No tenés pedidos en curso.</div>');
+        if(typeof data.disponible !== 'undefined'){ setAvailUI(!!data.disponible); }
+        if(!enCursoList.querySelector('.card')){
+          if(enCursoEmpty){ enCursoEmpty.classList.remove('d-none'); }
+          else { document.getElementById('en-curso').innerHTML = '<div class="alert alert-light border">No tenés pedidos en curso.</div>'; }
+        }
       }
     }catch(e){
       location.href=form.action;
@@ -479,5 +537,18 @@
   .timeline-table tr.sep td{border-top:1px solid #ddd; padding-top:.4rem}
   .timeline-table tr.total th{font-size:.95rem}
   .timeline-table .muted{color:#6c757d; font-weight:400}
+
+  /* Dirección truncada elegante */
+  .addr-ellipsis{
+    max-width: min(46vw, 460px);
+    display:inline-block;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    vertical-align:bottom;
+  }
+
+  /* Barra inferior */
+  .cadete-bottom{box-shadow:0 -4px 14px rgba(0,0,0,.05)}
 </style>
 {% endblock %}

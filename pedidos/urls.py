@@ -12,6 +12,8 @@ urlpatterns = [
     path('carrito/', views.ver_carrito, name='ver_carrito'),
     path('carrito/eliminar/<str:item_key>/', views.eliminar_del_carrito, name='eliminar_del_carrito'),
     path('carrito/nota/', views.carrito_set_nota, name='carrito_set_nota'),
+    # Alias de compatibilidad (algunos templates antiguos usan /carrito/set-nota/)
+    path('carrito/set-nota/', views.carrito_set_nota, name='carrito_set_nota_compat'),
     path('pedido_exitoso/', views.pedido_exitoso, name='pedido_exitoso'),
 
     # === API: costo de envío dinámico (usa Google Distance Matrix) ===
@@ -32,9 +34,10 @@ urlpatterns = [
     path('panel-alertas/board/', views.panel_alertas, name='panel_alertas_board'),
     path('panel-alertas/anteriores/', views.panel_alertas_anteriores, name='panel_alertas_anteriores'),
     path('panel-alertas/estado/<int:pedido_id>/', views.panel_alertas_set_estado, name='panel_alertas_set_estado'),
-
     # Confirmación de pedido (tienda)
     path('confirmar-pedido/<int:pedido_id>/', views.confirmar_pedido, name='confirmar_pedido'),
+    # Alias opcional por si algún botón viejo apunta a esta ruta
+    path('panel-alertas/confirmar/<int:pedido_id>/', views.confirmar_pedido, name='confirmar_pedido_panel'),
 
     # --- Panel de cadetes ---
     path('cadete/login/', views.login_cadete, name='login_cadete'),
@@ -46,11 +49,13 @@ urlpatterns = [
     path('cadete/feed/', views.cadete_feed, name='cadete_feed'),
     path('cadete/historial/', views.cadete_historial, name='cadete_historial'),
     path('save-subscription/', views.save_subscription, name='save_subscription'),
+    # Alias de compatibilidad para scripts que usen esta ruta
+    path('cadete/subscription/save/', views.save_subscription, name='save_subscription_compat'),
 
     # --- Mercado Pago ---
     path('pagos/mp/webhook/', views.mp_webhook_view, name='mp_webhook'),
     path('pagos/mp/success/', views.mp_success, name='mp_success'),
-    path('pagos/mp/refund/<int:pedido_id>/', views.mp_refund, name='mp_refund'),  # <-- NUEVO
+    path('pagos/mp/refund/<int:pedido_id>/', views.mp_refund, name='mp_refund'),
 
     # --- Otros ---
     path('sw.js', views.service_worker, name='service_worker'),

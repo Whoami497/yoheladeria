@@ -28,14 +28,18 @@
           </div>
 
           <div class="text-muted small mb-2">
-            {{ p.cliente_nombre }} · {{ p.cliente_direccion|default:"" }} · {{ p.cliente_telefono|default:"" }}
+            {{ p.cliente_nombre }}
+            {% if p.cliente_telefono %} · {{ p.cliente_telefono }}{% endif %}
+            {% if p.direccion_legible or p.cliente_direccion %}
+              · <span class="addr-ellipsis" title="{{ p.direccion_legible|default:p.cliente_direccion }}">
+                  {{ p.direccion_legible|default:p.cliente_direccion }}
+                </span>
+              {% if p.map_url %} · <a href="{{ p.map_url }}" target="_blank">Ver mapa</a>{% endif %}
+            {% endif %}
           </div>
 
-          {% if p.cadete_asignado %}
-            <div class="mb-2">
-              <strong>Cadete:</strong>
-              {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
-            </div>
+          {% if p.costo_envio %}
+            <div class="text-muted small mb-2">Envío: ${{ p.costo_envio|floatformat:2 }}</div>
           {% endif %}
 
           <ul class="small mb-2">
@@ -50,14 +54,33 @@
             {% endfor %}
           </ul>
 
-          <!-- Línea de tiempo (cliente) -->
+          <!-- Línea de tiempo + historial -->
           <details class="mt-2">
-            <summary class="cursor-pointer">Ver tiempos</summary>
+            <summary class="cursor-pointer">Ver tiempos e historial</summary>
             <div class="mt-2 small timeline-box" id="timeline-{{ p.id }}"></div>
+
+            {% if p.logs %}
+              <div class="mt-3">
+                <div class="fw-semibold mb-1">Historial:</div>
+                <ul class="small mb-0">
+                  {% for l in p.logs %}
+                    <li>
+                      <span class="text-muted">{{ l.created_at|date:"Y-m-d H:i" }}</span>
+                      — <span class="badge bg-light text-dark">{{ l.a }}</span>
+                      <span class="text-muted">
+                        {% if l.actor %} ({{ l.actor.get_full_name|default:l.actor.username }}){% endif %}
+                        {% if l.actor_tipo and not l.actor %} ({{ l.actor_tipo }}){% endif %}
+                        {% if l.fuente %} · {{ l.fuente }}{% endif %}
+                      </span>
+                    </li>
+                  {% endfor %}
+                </ul>
+              </div>
+            {% endif %}
           </details>
 
           <div class="d-flex justify-content-between mt-2">
-            <span class="fw-semibold">Total: ${{ p.total_pedido|default_if_none:"0.00" }}</span>
+            <span class="fw-semibold">Total: ${{ p.total_pedido|default_if_none:"0.00"|floatformat:2 }}</span>
             <a class="btn btn-outline-primary btn-sm" href="{% url 'historial_pedidos_cliente' %}">Ver historial</a>
           </div>
         </div>
@@ -70,6 +93,16 @@
 
 <style>
 .badge.bg-purple{background:#6f42c1}
+
+/* Dirección truncada elegante */
+.addr-ellipsis{
+  max-width: min(60vw, 520px);
+  display:inline-block;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  vertical-align:bottom;
+}
 
 /* Timeline */
 .timeline-table{width:100%; border-collapse:collapse}
