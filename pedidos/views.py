@@ -31,10 +31,10 @@ from .models import (
 )
 from django.contrib import messages
 
-# ==> Geocoding util (usa GOOGLE_GEOCODING_KEY en settings)
+# ==> Geocoding util (usa GOOGLE_*_KEY en settings si existe utils/geocoding.py)
 try:
-    from .utils.geocoding import reverse_geocode as gc_reverse  # lat, lng -> dict con formatted_address/map_url/etc.
-except Exception:  # por si aún no existe el módulo, no romper
+    from .utils.geocoding import reverse_geocode as gc_reverse  # lat, lng -> dict
+except Exception:
     gc_reverse = None
 
 
@@ -135,7 +135,6 @@ def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta
         )
     except Exception as e:
         # Modelo no existe o hubo otro error: no rompemos el flujo.
-        # print(f"DEBUG estado_log skip: {e}")
         pass
 
     return pedido
@@ -179,9 +178,6 @@ def _serialize_pedido_for_panel(pedido, include_details=True):
 
 # === NUEVO: serializadores de métricas y logs
 def _serialize_logs(pedido, limit=8):
-    """
-    Devuelve los últimos 'limit' logs de estado del pedido como dicts serializables.
-    """
     out = []
     try:
         qs = pedido.logs_estado.select_related('actor').order_by('-created_at')[:limit]
@@ -200,9 +196,6 @@ def _serialize_logs(pedido, limit=8):
 
 
 def _serialize_metricas(pedido):
-    """
-    Serializa tiempos en minutos (usa el helper del modelo).
-    """
     try:
         return pedido.tiempos_en_minutos()
     except Exception:
@@ -210,17 +203,10 @@ def _serialize_metricas(pedido):
 
 
 def _notify_panel_update(pedido, message='actualizacion_pedido'):
-    """
-    Broadcast para que el panel de alertas (tienda) refresque automáticamente.
-    Reusa el mismo grupo 'pedidos_new_orders'.
-    - Para 'nuevo_pedido' enviamos datos completos.
-    - Para cualquier otro mensaje, mandamos sólo el estado para ser livianos.
-    """
     try:
         channel_layer = get_channel_layer()
         if message == 'nuevo_pedido':
             order_data = _serialize_pedido_for_panel(pedido, include_details=True)
-            # garantizamos métricas/logs
             order_data['metricas'] = _serialize_metricas(pedido)
             order_data['logs'] = _serialize_logs(pedido)
         else:
@@ -228,10 +214,8 @@ def _notify_panel_update(pedido, message='actualizacion_pedido'):
                 'estado': pedido.estado,
                 'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
                 'map_url': _map_url_from_text(pedido.cliente_direccion),
-                # En actualizaciones conviene también enviar el total recalculado con envío persistido.
                 'total_pedido': str(_compute_total(pedido)),
                 'costo_envio': float(pedido.costo_envio or 0),
-                # NUEVO
                 'metricas': _serialize_metricas(pedido),
                 'logs': _serialize_logs(pedido),
             }
@@ -267,7 +251,6 @@ def _notify_cadetes_new_order(request, pedido):
         print("WEBPUSH: Falta VAPID_PRIVATE_KEY en settings.")
         return
 
-    # Excluir cadetes con pedido activo
     activos_qs = Pedido.objects.filter(
         cadete_asignado_id=OuterRef('pk'),
         estado__in=['ASIGNADO', 'EN_CAMINO']
@@ -278,7 +261,6 @@ def _notify_cadetes_new_order(request, pedido):
             .annotate(tiene_activo=Exists(activos_qs))
             .filter(tiene_activo=False))
 
-    # Respetar “disponible=True” si el modelo lo trae
     cadetes = [c for c in cadetes if not hasattr(c, 'disponible') or c.disponible]
 
     payload = {
@@ -306,10 +288,6 @@ def _notify_cadetes_new_order(request, pedido):
 # === ENVÍO (Google Maps)
 # =========================
 def _origin_from_settings() -> str:
-    """
-    Construye el origen para Distance Matrix.
-    Prioriza coordenadas ORIGEN_LAT/LNG; si no, usa SUCURSAL_DIRECCION.
-    """
     lat = str(getattr(settings, 'ORIGEN_LAT', '')).strip()
     lng = str(getattr(settings, 'ORIGEN_LNG', '')).strip()
     if lat and lng:
@@ -323,9 +301,6 @@ def _origin_from_settings() -> str:
 
 
 def _extract_coords(text: str):
-    """
-    Busca lat,lng en un texto. Devuelve (lat, lng) como strings o None.
-    """
     if not text:
         return None
     m = re.search(r'(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)', text)
@@ -335,39 +310,97 @@ def _extract_coords(text: str):
 
 
 def _direccion_legible_from_text(text: str) -> str:
-    """
-    De una cadena "Av. X 123 — GPS: -28.44,-65.77 — Nota: yyy", devuelve solo la parte de dirección.
-    Si no hay separadores, devuelve todo el texto.
-    """
     if not text:
         return ""
-    # Cortar antes del " — GPS:" si existe
     parts = text.split(' — GPS:')
     return parts[0].strip()
 
 
 def _map_url_from_text(text: str) -> str:
-    """
-    Construye una URL de Google Maps desde un texto que puede contener lat,lng.
-    """
     coords = _extract_coords(text)
     if coords:
         lat, lng = coords
         return f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
-    # fallback: buscar por la dirección entera
     q = quote_plus(_direccion_legible_from_text(text) or text)
     return f"https://www.google.com/maps/search/?api=1&query={q}"
+
+
+# ======= REVERSE GEOCODING (nuevo: fallback local + wrapper) =======
+def _reverse_geocode_local(lat: float, lng: float) -> dict:
+    """
+    Llama directamente a Geocoding API y devuelve:
+    {'formatted_address', 'map_url', 'plus_code', 'locality', 'postal_code'}
+    """
+    api_key = (
+        getattr(settings, 'GOOGLE_MAPS_API_KEY', '') or
+        getattr(settings, 'GOOGLE_GEOCODING_KEY', '') or
+        getattr(settings, 'GOOGLE_API_KEY', '')
+    )
+    if not api_key:
+        if settings.DEBUG:
+            print("GEOCODING DEBUG: falta API key (GOOGLE_MAPS_API_KEY/GOOGLE_GEOCODING_KEY/GOOGLE_API_KEY)")
+        return {}
+
+    params = {
+        'latlng': f'{float(lat):.6f},{float(lng):.6f}',
+        'key': api_key,
+        'language': getattr(settings, 'MAPS_LANGUAGE', 'es'),
+        'region': getattr(settings, 'MAPS_REGION', 'AR'),
+    }
+    try:
+        r = requests.get("https://maps.googleapis.com/maps/api/geocode/json", params=params, timeout=8)
+        if settings.DEBUG:
+            print(f"GEOCODING DEBUG: HTTP {r.status_code} → {r.url}")
+        r.raise_for_status()
+        data = r.json()
+        status = data.get('status')
+        results = data.get('results') or []
+        if settings.DEBUG:
+            print(f"GEOCODING DEBUG: status={status} results={len(results)}")
+
+        out = {
+            'map_url': f"https://www.google.com/maps/search/?api=1&query={float(lat):.6f},{float(lng):.6f}"
+        }
+
+        if status == 'OK' and results:
+            res0 = results[0]
+            out['formatted_address'] = res0.get('formatted_address')
+            comps = res0.get('address_components') or []
+            for c in comps:
+                types = c.get('types') or []
+                if 'locality' in types and 'sublocality' not in types:
+                    out['locality'] = c.get('long_name')
+                if 'postal_code' in types:
+                    out['postal_code'] = c.get('long_name')
+
+        pc = data.get('plus_code') or {}
+        out['plus_code'] = pc.get('compound_code') or pc.get('global_code')
+
+        return {k: v for k, v in out.items() if v}
+    except Exception as e:
+        if settings.DEBUG:
+            print(f"GEOCODING ERROR: {e}")
+        return {}
+
+
+def _reverse_geocode_any(lat: float, lng: float) -> dict:
+    """
+    Usa utils.geocoding.reverse_geocode si existe; si no, usa el fallback local.
+    """
+    if callable(gc_reverse):
+        try:
+            data = gc_reverse(lat, lng)
+            if data:
+                return data
+        except Exception as e:
+            if settings.DEBUG:
+                print(f"GEOCODING DEBUG: gc_reverse falló: {e}")
+    return _reverse_geocode_local(lat, lng)
 
 
 def _calcular_costo_envio(direccion_cliente: str):
     """
     Devuelve (costo_envio_decimal, distancia_km_float) usando Distance Matrix.
-
-    Usa variables de settings.py:
-      ENVIO_BASE (ARS), ENVIO_POR_KM (ARS/km), ENVIO_MIN, ENVIO_MAX
-      ENVIO_KM_MIN (piso km), ENVIO_KM_OFFSET (km fantasma)
-      ENVIO_REDONDEO (múltiplo ARS; '0' => sin redondeo)
-    Soporta destino como dirección o 'lat,lng'. Origen por ORIGEN_LAT/LNG si están definidos.
     """
     dest = (direccion_cliente or '').strip()
     if not dest:
@@ -378,32 +411,27 @@ def _calcular_costo_envio(direccion_cliente: str):
     region   = getattr(settings, 'MAPS_REGION', 'AR')
     origen   = _origin_from_settings()
 
-    # Config de costos (strings -> Decimal)
     base     = Decimal(str(getattr(settings, 'ENVIO_BASE', '300')))
     por_km   = Decimal(str(getattr(settings, 'ENVIO_POR_KM', '50')))
     km_min   = Decimal(str(getattr(settings, 'ENVIO_KM_MIN', '0')))
     km_off   = Decimal(str(getattr(settings, 'ENVIO_KM_OFFSET', '0')))
 
-    # Mínimo/Máximo pueden venir como '' -> None
     _min = str(getattr(settings, 'ENVIO_MIN', '0')).strip()
     _max = str(getattr(settings, 'ENVIO_MAX', '')).strip()
     costo_min = Decimal(_min) if _min and _min != '0' else None
     costo_max = Decimal(_max) if _max else None
 
-    # Redondeo a múltiplos (0 => sin redondeo)
     _mul = str(getattr(settings, 'ENVIO_REDONDEO', '0')).strip()
     try:
         multiple = Decimal(_mul)
     except Exception:
         multiple = Decimal('0')
 
-    # Sin API o sin origen -> fallback al base
     if not api_key or not origen:
         return (base.quantize(Decimal('0.01')), 0.0)
 
     destino = dest  # puede ser 'lat,lng' o dirección
 
-    # Llamada a Distance Matrix
     try:
         url = "https://maps.googleapis.com/maps/api/distancematrix/json"
         params = {
@@ -420,25 +448,20 @@ def _calcular_costo_envio(direccion_cliente: str):
         data = r.json()
         el = ((data.get('rows') or [{}])[0].get('elements') or [{}])[0]
         if el.get('status') != 'OK':
-            # No se pudo resolver -> fallback
             return (base.quantize(Decimal('0.01')), 0.0)
 
         metros = int(el['distance']['value'])
         km_reales = Decimal(metros) / Decimal('1000')
 
-        # km efectivos = max(km_reales, km_min) + km_off
         km_efectivos = (km_reales if km_reales > km_min else km_min) + km_off
 
-        # costo base + por_km * km_efectivos
         costo = base + (por_km * km_efectivos)
 
-        # Aplicar min/max si corresponde
         if costo_min is not None and costo < costo_min:
             costo = costo_min
         if costo_max is not None and costo > costo_max:
             costo = costo_max
 
-        # Redondeo a múltiplos (nearest)
         if multiple > 0:
             costo = (costo / multiple).to_integral_value(rounding=ROUND_HALF_UP) * multiple
 
@@ -464,10 +487,10 @@ def api_costo_envio(request):
     # Info de geocoding opcional (no rompe si falla)
     addr = {}
     coords = _extract_coords(direccion)
-    if coords and gc_reverse:
+    if coords:
         try:
             lat, lng = float(coords[0]), float(coords[1])
-            addr = gc_reverse(lat, lng) or {}
+            addr = _reverse_geocode_any(lat, lng) or {}
         except Exception as e:
             print(f"GEOCODING reverse error: {e}")
             addr = {}
@@ -774,22 +797,19 @@ def ver_carrito(request):
         es_pickup = (modo_envio == 'pickup') or (not direccion_input and not geo_latlng)
 
         if es_pickup:
-            # Retiro en local: NO calculamos envío ni usamos fallback del perfil
-            direccion_para_maps = ''  # importante para que _calcular_costo_envio no se dispare
+            direccion_para_maps = ''
             direccion_legible = "Retiro en local"
         else:
-            # Delivery: usamos coords si hay, sino el texto cargado por el usuario
             direccion_para_maps = geo_latlng if geo_latlng else direccion_input
             direccion_legible = None
-            if geo_latlng and gc_reverse:
+            if geo_latlng:
                 try:
                     lat_str, lng_str = geo_latlng.split(",", 1)
-                    g = gc_reverse(float(lat_str), float(lng_str)) or {}
+                    g = _reverse_geocode_any(float(lat_str), float(lng_str)) or {}
                     direccion_legible = g.get("formatted_address")
                 except Exception:
                     direccion_legible = None
 
-        # String que guardamos en el Pedido
         base_dir = direccion_legible or direccion_input
         if not base_dir and geo_latlng:
             base_dir = f"Cerca de {geo_latlng}"
@@ -802,7 +822,6 @@ def ver_carrito(request):
         if nota_pedido:
             direccion_a_guardar = f"{direccion_a_guardar} — Nota: {nota_pedido}"
 
-        # Cálculo de envío ANTES de crear el pedido
         costo_envio_decimal = Decimal('0.00')
         distancia_km = 0.0
         if direccion_para_maps:
@@ -813,7 +832,7 @@ def ver_carrito(request):
             'cliente_direccion': direccion_a_guardar,
             'cliente_telefono': telefono,
             'metodo_pago': metodo_pago,
-            'costo_envio': costo_envio_decimal,  # persistimos lo calculado (0 si pickup)
+            'costo_envio': costo_envio_decimal,
         }
 
         if request.user.is_authenticated:
@@ -825,9 +844,6 @@ def ver_carrito(request):
                 if not telefono and profile.telefono:
                     pedido_kwargs['cliente_telefono'] = profile.telefono
 
-                # ⚠️ ANTES: si no había dirección/coords, usaba la del perfil = problema.
-                # AHORA: solo usamos la del perfil como fallback si ES DELIVERY explícito
-                # y no llegó nada (p. ej., clickeó "a domicilio" pero dejó vacío).
                 if (not es_pickup) and (not direccion_para_maps) and profile.direccion:
                     pedido_kwargs['cliente_direccion'] = profile.direccion
                     costo_envio_decimal, distancia_km = _calcular_costo_envio(profile.direccion)
@@ -917,7 +933,6 @@ def ver_carrito(request):
                         'distancia_km': float(distancia_km or 0),
                         'nota_pedido': (nota_pedido or None),
                         'detalles': detalles_para_notificacion,
-                        # NUEVO
                         'metricas': _serialize_metricas(nuevo_pedido),
                         'logs': _serialize_logs(nuevo_pedido),
                     }
@@ -936,8 +951,6 @@ def ver_carrito(request):
 
     contexto = {'carrito_items': items_carrito_procesados, 'total': total}
     return render(request, 'pedidos/carrito.html', contexto)
-
-
 
 
 def eliminar_del_carrito(request, item_key):
@@ -1133,7 +1146,6 @@ def panel_alertas(request):
         for p in qs:
             setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
             setattr(p, 'map_url', _map_url_from_text(p.cliente_direccion))
-            # NUEVO:
             setattr(p, 'metricas', _serialize_metricas(p))
             setattr(p, 'logs', p.logs_estado.select_related('actor').order_by('-created_at')[:8])
         return qs
@@ -1170,7 +1182,6 @@ def panel_alertas_data(request):
             .filter(fecha_pedido__date=hoy - timedelta(days=1))
             .order_by('-fecha_pedido'))
     else:
-        # scope como fecha YYYY-MM-DD
         try:
             y, m, d = map(int, scope.split('-'))
             fecha = timezone.datetime(y, m, d).date()
@@ -1188,7 +1199,6 @@ def panel_alertas_data(request):
             'map_url': _map_url_from_text(p.cliente_direccion),
             'cliente_telefono': p.cliente_telefono,
             'metodo_pago': p.metodo_pago,
-            # ⚠️ Total con envío PERSISTIDO
             'total_pedido': str(_compute_total(p)),
             'costo_envio': float(p.costo_envio or 0),
             'cadete': (p.cadete_asignado.user.get_full_name() or p.cadete_asignado.user.username)
@@ -1199,7 +1209,6 @@ def panel_alertas_data(request):
                 'cantidad': d.cantidad,
                 'sabores_nombres': [s.nombre for s in d.sabores.all()],
             } for d in p.detalles.all()],
-            # NUEVO:
             'metricas': _serialize_metricas(p),
             'logs': _serialize_logs(p),
         }
@@ -1210,10 +1219,6 @@ def panel_alertas_data(request):
 
 @staff_member_required
 def panel_alertas_anteriores(request):
-    """
-    Listado simple (HTML directo) de pedidos anteriores a AYER.
-    Lo dejo sin plantilla para que no falle si no existe el template.
-    """
     hoy = timezone.localdate()
     limite = hoy - timedelta(days=1)
     pedidos = (Pedido.objects
@@ -1222,7 +1227,6 @@ def panel_alertas_anteriores(request):
 
     filas = []
     for p in pedidos:
-        # ✅ nombre completo del cadete con fallback a username
         cad = '—'
         if getattr(p, 'cadete_asignado', None):
             cad_user = p.cadete_asignado.user
@@ -1249,12 +1253,6 @@ def panel_alertas_anteriores(request):
 @require_POST
 @login_required
 def panel_alertas_set_estado(request, pedido_id):
-    """
-    Cambia el estado de un pedido.
-    - STAFF: puede poner cualquier estado.
-    - CADETE: sólo puede cambiar su propio pedido a EN_CAMINO o ENTREGADO.
-    Respuestas JSON limpias (403 si no tiene permiso).
-    """
     pedido = get_object_or_404(Pedido, id=pedido_id)
     estado = (request.POST.get('estado') or '').upper()
     validos = {'RECIBIDO', 'EN_PREPARACION', 'ASIGNADO', 'EN_CAMINO', 'ENTREGADO', 'CANCELADO'}
@@ -1264,26 +1262,20 @@ def panel_alertas_set_estado(request, pedido_id):
     es_staff = bool(request.user.is_staff)
     es_cadete = hasattr(request.user, 'cadeteprofile')
 
-    # ¿Tiene permiso?
     permitido = False
     if es_staff:
         permitido = True
     elif es_cadete:
-        # El cadete sólo su propio pedido, y sólo a EN_CAMINO o ENTREGADO
         if pedido.cadete_asignado_id == request.user.cadeteprofile.id and estado in {'EN_CAMINO', 'ENTREGADO'}:
             permitido = True
 
     if not permitido:
-        # Si fue llamada por fetch(), devolvemos JSON 403.
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             return JsonResponse({'ok': False, 'error': 'no_permiso'}, status=403)
-        # Si llega por navegación normal:
         return redirect('login')
 
-    # Guardar con trazabilidad
     _marcar_estado(pedido, estado, actor=request.user, fuente='panel_alertas_set_estado')
 
-    # Notificar a panel para refrescar
     _notify_panel_update(pedido)
 
     cadete_nombre = None
@@ -1296,7 +1288,6 @@ def panel_alertas_set_estado(request, pedido_id):
 # =========================
 # === TIENDA / CADETES
 # =========================
-
 @staff_member_required
 def confirmar_pedido(request, pedido_id):
     pedido = get_object_or_404(Pedido, id=pedido_id)
@@ -1340,13 +1331,11 @@ def confirmar_pedido(request, pedido_id):
     except Exception as e:
         print(f"ERROR al enviar notificación por WebSocket a cadetes: {e}")
 
-    # Push solo a cadetes libres
     try:
         _notify_cadetes_new_order(request, pedido)
     except Exception as e:
         print(f"Notify cadetes error: {e}")
 
-    # Notificar al panel para que refresque listas (enviará info completa por ser 'nuevo_pedido')
     _notify_panel_update(pedido, message='nuevo_pedido')
 
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
@@ -1365,7 +1354,6 @@ def aceptar_pedido(request, pedido_id):
         messages.error(request, "Acción no permitida. No tienes un perfil de cadete.")
         return redirect('index')
 
-    # El cadete no puede aceptar si ya tiene uno en curso
     if Pedido.objects.filter(
         cadete_asignado=request.user.cadeteprofile,
         estado__in=['ASIGNADO', 'EN_CAMINO']
@@ -1373,12 +1361,10 @@ def aceptar_pedido(request, pedido_id):
         messages.warning(request, "Ya tenés un pedido en curso. Entregalo antes de aceptar otro.")
         return redirect('panel_cadete')
 
-    # Sólo aceptable si la tienda lo confirmó y no tiene cadete
     if pedido.estado != 'EN_PREPARACION' or pedido.cadete_asignado_id:
         messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
         return redirect('panel_cadete')
 
-    # Asignar cadete y marcar estado
     pedido.cadete_asignado = request.user.cadeteprofile
     try:
         pedido.save(update_fields=['cadete_asignado'])
@@ -1386,7 +1372,6 @@ def aceptar_pedido(request, pedido_id):
         pedido.save()
     _marcar_estado(pedido, 'ASIGNADO', actor=request.user, fuente='aceptar_pedido')
 
-    # Al aceptar, dejar no-disponible al cadete
     cp = request.user.cadeteprofile
     if hasattr(cp, 'disponible'):
         try:
@@ -1397,7 +1382,6 @@ def aceptar_pedido(request, pedido_id):
     request.session['cadete_disponible'] = False
     request.session.modified = True
 
-    # Notificar a panel para refresco automático
     _notify_panel_update(pedido)
 
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
@@ -1449,11 +1433,9 @@ def panel_cadete(request):
             estado__in=['ASIGNADO', 'EN_CAMINO']
         ).order_by('fecha_pedido')
 
-    # Enriquecer con direccion_legible y map_url (para template)
     for p in pedidos_en_curso:
         setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
         setattr(p, 'map_url', _map_url_from_text(p.cliente_direccion))
-        # NUEVO:
         setattr(p, 'metricas', _serialize_metricas(p))
         setattr(p, 'logs', p.logs_estado.select_related('actor').order_by('-created_at')[:8])
 
@@ -1480,7 +1462,6 @@ def cadete_historial(request):
     try:
         return render(request, 'pedidos/cadete_historial.html', ctx)
     except TemplateDoesNotExist:
-        # Fallback HTML simple si aún no creaste el template
         filas = []
         for p in pedidos:
             filas.append(
@@ -1526,7 +1507,6 @@ def cadete_toggle_disponible(request):
         return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
 
     val = (request.POST.get('disponible') == '1')
-    # Si tiene un pedido activo, no puede ponerse disponible=true hasta que entregue
     if val and cadete_esta_ocupado(request.user.cadeteprofile):
         return JsonResponse({'ok': False, 'error': 'ocupado'}, status=400)
 
@@ -1554,10 +1534,9 @@ def cadete_set_estado(request, pedido_id):
     """
     Permite al cadete avanzar estado de su pedido:
     EN_CAMINO -> ENTREGADO.
-    Devuelve JSON si es AJAX, o redirige al panel si no lo es (para evitar la pantalla negra).
+    Devuelve JSON si es AJAX, o redirige al panel si no lo es.
     """
     if not hasattr(request.user, 'cadeteprofile'):
-        # Si no es AJAX, redirigimos con mensaje; si es AJAX, JSON 403.
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
         messages.error(request, "Acción no permitida. No tenés perfil de cadete.")
@@ -1565,7 +1544,6 @@ def cadete_set_estado(request, pedido_id):
 
     pedido = get_object_or_404(Pedido, id=pedido_id)
 
-    # Debe ser el cadete asignado
     if pedido.cadete_asignado != request.user.cadeteprofile:
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             return JsonResponse({'ok': False, 'error': 'no_autorizado'}, status=403)
@@ -1581,24 +1559,21 @@ def cadete_set_estado(request, pedido_id):
 
     _marcar_estado(pedido, estado, actor=request.user, fuente='cadete_set_estado')
 
-    # Si entregó, NO auto-activar disponibilidad: queda en OFF hasta que el cadete la prenda.
     finalizado = False
     if estado == 'ENTREGADO':
         finalizado = True
         cp = request.user.cadeteprofile
         if hasattr(cp, 'disponible'):
             try:
-                cp.disponible = False  # se mantiene apagado; debe reactivarse manualmente
+                cp.disponible = False
                 cp.save(update_fields=['disponible'])
             except Exception:
                 pass
         request.session['cadete_disponible'] = False
         request.session.modified = True
 
-    # Notificar al panel para refrescar
     _notify_panel_update(pedido)
 
-    # Respuesta según tipo de request
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
         return JsonResponse({
             'ok': True,
@@ -1655,21 +1630,19 @@ def cadete_feed(request):
 
     cp = request.user.cadeteprofile
 
-    # Tiene pedido en curso -> feed vacío
     if Pedido.objects.filter(
         cadete_asignado=cp,
         estado__in=['ASIGNADO', 'EN_CAMINO']
     ).exists():
         return JsonResponse({'ok': True, 'disponible': False, 'pedidos': []})
 
-    # Respetar "disponible": si existe el campo, usarlo; si no, usar sesión
     disponible = None
     if hasattr(cp, 'disponible'):
         try:
             disponible = bool(cp.disponible)
         except Exception:
             disponible = None
-    if disponible is None:  # fallback a sesión
+    if disponible is None:
         disponible = bool(request.session.get('cadete_disponible', False))
 
     if not disponible:
@@ -1687,7 +1660,6 @@ def cadete_feed(request):
             'direccion_legible': _direccion_legible_from_text(p.cliente_direccion),
             'map_url': _map_url_from_text(p.cliente_direccion),
             'cliente_telefono': p.cliente_telefono or '',
-            # ⚠️ Total con envío persistido
             'total': str(_compute_total(p)),
             'detalles': [{
                 'producto': d.producto.nombre,
@@ -1703,12 +1675,7 @@ def cadete_feed(request):
 # =========================
 # === MERCADO PAGO (Refunds + webhook + success)
 # =========================
-
 def _mp_find_latest_approved_payment(external_reference: str):
-    """
-    Busca el último payment APROBADO en MP para un external_reference dado (id de Pedido).
-    Devuelve el dict del payment, o None si no hay approved.
-    """
     if not getattr(settings, "MERCADO_PAGO_ACCESS_TOKEN", None):
         raise RuntimeError("MERCADO_PAGO_ACCESS_TOKEN no está configurado en el servidor")
 
@@ -1720,7 +1687,6 @@ def _mp_find_latest_approved_payment(external_reference: str):
             "criteria": "desc",
         })
         results = (search or {}).get("response", {}).get("results") or []
-        # En algunas versiones viene directo, en otras anidado bajo "payment"
         for it in results:
             p = it.get("payment") if isinstance(it, dict) and "payment" in it else it
             if isinstance(p, dict) and p.get("status") == "approved":
@@ -1733,11 +1699,6 @@ def _mp_find_latest_approved_payment(external_reference: str):
 @staff_member_required
 @require_POST
 def mp_refund(request, pedido_id: int):
-    """
-    Reintegro vía MP.
-    - Total: sin 'monto'
-    - Parcial: POST 'monto' (ARS)
-    """
     if not getattr(settings, "MERCADO_PAGO_ACCESS_TOKEN", None):
         return JsonResponse({'ok': False, 'error': 'missing_access_token'}, status=500)
 
@@ -1775,7 +1736,6 @@ def mp_refund(request, pedido_id: int):
     if status not in (200, 201):
         return JsonResponse({'ok': False, 'error': 'mp_error', 'detail': resp}, status=400)
 
-    # No cambiamos estado acá; dejamos que el webhook de MP lo refleje al llegar la notificación.
     data_out = {
         'ok': True,
         'pedido_id': pedido.id,
@@ -1789,12 +1749,6 @@ def mp_refund(request, pedido_id: int):
 
 @csrf_exempt
 def mp_webhook_view(request):
-    """
-    Mercado Pago nos avisa aquí. Si el pago queda 'approved', enviamos la
-    notificación a la tienda y otorgamos puntos al cliente.
-    Además, si detectamos reintegro total (status 'refunded' o monto refund == total),
-    dejamos el pedido en CANCELADO.
-    """
     try:
         payload = json.loads(request.body.decode('utf-8') or '{}')
     except Exception:
@@ -1816,7 +1770,7 @@ def mp_webhook_view(request):
         return HttpResponse(status=200)
 
     ref = payment.get("external_reference")
-    status = payment.get("status")  # approved | pending | rejected | in_process | refunded | cancelled | charged_back
+    status = payment.get("status")
     if not ref:
         return HttpResponse(status=200)
 
@@ -1826,7 +1780,6 @@ def mp_webhook_view(request):
         print("WEBHOOK MP: Pedido no encontrado por external_reference")
         return HttpResponse(status=200)
 
-    # ---- Actualizar estado según pago / reintegros
     try:
         pedido.metodo_pago = 'MERCADOPAGO'
         try:
@@ -1837,13 +1790,11 @@ def mp_webhook_view(request):
         total_txn = Decimal(str(payment.get("transaction_amount") or "0"))
         refunded_total = Decimal('0')
 
-        # Preferimos transaction_amount_refunded si viene
         try:
             refunded_total = Decimal(str(payment.get("transaction_amount_refunded") or "0"))
         except Exception:
             refunded_total = Decimal('0')
 
-        # Fallback sumando refunds
         if refunded_total == 0 and isinstance(payment.get("refunds"), list):
             try:
                 refunded_total = sum(Decimal(str(r.get("amount") or "0")) for r in payment.get("refunds"))
@@ -1857,17 +1808,14 @@ def mp_webhook_view(request):
                 _marcar_estado(pedido, 'RECIBIDO', actor=None, fuente='webhook_mp', meta={'payment_id': payment_id})
             elif status == 'rejected':
                 _marcar_estado(pedido, 'CANCELADO', actor=None, fuente='webhook_mp', meta={'payment_id': payment_id})
-            # Otros estados no tocan el estado local
     except Exception as e:
         print(f"WEBHOOK MP: error guardando pedido/estado: {e}")
 
-    # ---- Notificar SIEMPRE al panel cuando cambie algo (aprobado, cancelado, refund, etc.)
     try:
         _notify_panel_update(pedido, message='actualizacion_pedido' if status != 'approved' else 'nuevo_pedido')
     except Exception as e:
         print(f"WEBHOOK MP: error enviando WS: {e}")
 
-    # ---- Si approved (alta/confirmación), puntos
     if status == 'approved':
         try:
             if pedido.user and hasattr(pedido.user, 'clienteprofile'):
@@ -1882,10 +1830,6 @@ def mp_webhook_view(request):
 
 
 def mp_success(request):
-    """
-    Página de retorno (back_urls.success). Fallback: si tenemos el ID del pedido
-    en sesión, re-enviamos la notificación al panel por si el webhook tardó.
-    """
     last_id = request.session.pop('mp_last_order_id', None)
     if last_id:
         try:
@@ -1916,7 +1860,6 @@ def mp_success(request):
                         'total_pedido': str(_compute_total(pedido)),
                         'costo_envio': float(pedido.costo_envio or 0),
                         'detalles': detalles_para_notificacion,
-                        # NUEVO
                         'metricas': _serialize_metricas(pedido),
                         'logs': _serialize_logs(pedido),
                     }
