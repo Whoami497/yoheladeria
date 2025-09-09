@@ -31,6 +31,12 @@ from .models import (
 )
 from django.contrib import messages
 
+# ==> Geocoding util (usa GOOGLE_GEOCODING_KEY en settings)
+try:
+    from .utils.geocoding import reverse_geocode as gc_reverse  # lat, lng -> dict con formatted_address/map_url/etc.
+except Exception:  # por si aún no existe el módulo, no romper
+    gc_reverse = None
+
 
 # =========================
 # === util
@@ -353,35 +359,6 @@ def _map_url_from_text(text: str) -> str:
     return f"https://www.google.com/maps/search/?api=1&query={q}"
 
 
-def _reverse_geocode(latlng: str) -> str:
-    """
-    Devuelve una dirección legible para un 'lat,lng' usando Geocoding API.
-    Fallback: 'Cerca de lat,lng'.
-    """
-    api_key = getattr(settings, 'GOOGLE_MAPS_API_KEY', '') or ''
-    language = getattr(settings, 'MAPS_LANGUAGE', 'es')
-    region   = getattr(settings, 'MAPS_REGION', 'AR')
-    if not api_key or not latlng:
-        return f"Cerca de {latlng}"
-    try:
-        url = "https://maps.googleapis.com/maps/api/geocode/json"
-        params = {
-            'latlng': latlng,
-            'key': api_key,
-            'language': language,
-            'region': region,
-        }
-        r = requests.get(url, params=params, timeout=8)
-        r.raise_for_status()
-        data = r.json()
-        results = data.get('results') or []
-        if results:
-            return results[0].get('formatted_address') or f"Cerca de {latlng}"
-    except Exception as e:
-        print(f"GEOCODING ERROR: {e}")
-    return f"Cerca de {latlng}"
-
-
 def _calcular_costo_envio(direccion_cliente: str):
     """
     Devuelve (costo_envio_decimal, distancia_km_float) usando Distance Matrix.
@@ -476,13 +453,36 @@ def api_costo_envio(request):
     """
     Endpoint para estimar costo/distancia desde el carrito.
     GET ?direccion=...  (dirección o 'lat,lng')
+    Ahora también retorna dirección legible/map_url/plus_code si se pasó lat,lng y hay clave de Geocoding.
     """
     direccion = (request.GET.get('direccion') or '').strip()
     if not direccion:
         return JsonResponse({'ok': True, 'costo_envio': 0.0, 'distancia_km': 0.0, 'mode': 'pickup'})
+
     costo, km = _calcular_costo_envio(direccion)
 
-    payload = {'ok': True, 'costo_envio': float(costo), 'distancia_km': float(km), 'mode': 'maps'}
+    # Info de geocoding opcional (no rompe si falla)
+    addr = {}
+    coords = _extract_coords(direccion)
+    if coords and gc_reverse:
+        try:
+            lat, lng = float(coords[0]), float(coords[1])
+            addr = gc_reverse(lat, lng) or {}
+        except Exception as e:
+            print(f"GEOCODING reverse error: {e}")
+            addr = {}
+
+    payload = {
+        'ok': True,
+        'costo_envio': float(costo),
+        'distancia_km': float(km),
+        'mode': 'maps',
+        'direccion_legible': addr.get('formatted_address') or _direccion_legible_from_text(direccion),
+        'map_url': addr.get('map_url') or _map_url_from_text(direccion),
+        'plus_code': addr.get('plus_code'),
+        'locality': addr.get('locality'),
+        'postal_code': addr.get('postal_code'),
+    }
     if settings.DEBUG:
         payload['debug'] = {
             'ENVIO_BASE': getattr(settings, 'ENVIO_BASE', '300'),
@@ -781,9 +781,11 @@ def ver_carrito(request):
             # Delivery: usamos coords si hay, sino el texto cargado por el usuario
             direccion_para_maps = geo_latlng if geo_latlng else direccion_input
             direccion_legible = None
-            if geo_latlng:
+            if geo_latlng and gc_reverse:
                 try:
-                    direccion_legible = _reverse_geocode(geo_latlng)
+                    lat_str, lng_str = geo_latlng.split(",", 1)
+                    g = gc_reverse(float(lat_str), float(lng_str)) or {}
+                    direccion_legible = g.get("formatted_address")
                 except Exception:
                     direccion_legible = None
 
