@@ -235,9 +235,11 @@ def _notify_panel_update(pedido, message='actualizacion_pedido'):
 
 def _notify_cadetes_new_order(request, pedido):
     """
-    Envía WebPush a cadetes sin pedido activo.
-    NUEVO: no exige disponible=True; solo excluye si disponible es False explícito.
-    Así reciben notificaciones en segundo plano aunque no tengan el panel abierto.
+    Envia WebPush SOLO a cadetes:
+      - con subscription_info (ya activaron notificaciones en ese dispositivo),
+      - con disponible=True,
+      - y sin pedido activo (ASIGNADO/EN_CAMINO).
+    Si el modelo no tiene el campo 'disponible', NO envía a nadie (evitamos molestar).
     """
     try:
         from pywebpush import webpush, WebPushException
@@ -257,26 +259,27 @@ def _notify_cadetes_new_order(request, pedido):
         cadete_asignado_id=OuterRef('pk'),
         estado__in=['ASIGNADO', 'EN_CAMINO']
     )
-    cadetes_base = (CadeteProfile.objects
-        .exclude(subscription_info__isnull=True)
-        .annotate(tiene_activo=Exists(activos_qs))
-        .filter(tiene_activo=False))
 
-    # ⤵️ Cambiado: incluir a todos salvo quienes marcaron explícitamente NO disponible
-    cadetes_destino = []
-    for c in cadetes_base:
-        try:
-            # Si el modelo tiene 'disponible' y es False explícito, NO enviar.
-            if hasattr(c, 'disponible') and (c.disponible is False):
-                continue
-            if not isinstance(c.subscription_info, dict):
-                continue
-            cadetes_destino.append(c)
-        except Exception:
-            continue
+    qs = (CadeteProfile.objects
+          .exclude(subscription_info__isnull=True)
+          .annotate(tiene_activo=Exists(activos_qs))
+          .filter(tiene_activo=False))
 
-    if not cadetes_destino:
-        print("WEBPUSH: no hay cadetes destino (sin activos, y ninguno con opt-out explícito).")
+    # Requerimos disponible=True si el campo existe.
+    try:
+        has_disponible = any(f.name == 'disponible' for f in CadeteProfile._meta.get_fields())
+    except Exception:
+        has_disponible = False
+
+    if has_disponible:
+        qs = qs.filter(disponible=True)
+    else:
+        print("WEBPUSH: CadeteProfile no tiene campo 'disponible'; no se enviarán push para no molestar.")
+        qs = qs.none()
+
+    targets = list(qs)
+    if not targets:
+        print("WEBPUSH: no hay cadetes disponibles para notificar.")
         return
 
     payload = {
@@ -285,8 +288,10 @@ def _notify_cadetes_new_order(request, pedido):
         "url": _abs_https(request, reverse('panel_cadete')),
     }
 
-    for cp in cadetes_destino:
-        sub = cp.subscription_info
+    for cp in targets:
+        sub = cp.subscription_info if isinstance(cp.subscription_info, dict) else None
+        if not sub:
+            continue
         try:
             webpush(
                 subscription_info=sub,
@@ -295,16 +300,10 @@ def _notify_cadetes_new_order(request, pedido):
                 vapid_claims={"sub": f"mailto:{admin}"}
             )
         except WebPushException as e:
-            # Si la suscripción está muerta, la limpiamos para no reintentar eternamente
-            code = getattr(getattr(e, "response", None), "status_code", None)
-            print(f"WEBPUSH cadete {cp.user_id} error: {e} (code={code})")
-            if code in (404, 410):
-                try:
-                    CadeteProfile.objects.filter(pk=cp.pk).update(subscription_info=None)
-                except Exception:
-                    pass
+            print(f"WEBPUSH cadete {cp.user_id} error: {e}")
         except Exception as e:
-            print(f"WEBPUSH cadete {cp.user_id} error genérico: {e}")
+            print(f"WEBPUSH cadete {cp.user_id} excepción: {e}")
+
 
 
 # =========================
