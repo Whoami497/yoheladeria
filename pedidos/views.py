@@ -1,4 +1,6 @@
 # pedidos/views.py
+from django.contrib.auth import login
+from .forms import ClienteSignupForm
 from django.db.models import Exists, OuterRef, Q
 from django.conf import settings
 from django.http import JsonResponse, HttpResponse
