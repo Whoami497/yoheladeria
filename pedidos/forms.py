@@ -1,66 +1,110 @@
 # pedidos/forms.py
-
 from django import forms
-from django.contrib.auth.forms import UserCreationForm, UserChangeForm
 from django.contrib.auth.models import User
-from .models import ClienteProfile # Importamos nuestro modelo ClienteProfile
 
-# Formulario para el registro de nuevos usuarios
-class ClienteRegisterForm(UserCreationForm):
-    # Campos básicos del usuario
-    email = forms.EmailField(required=True, help_text='Dirección de correo electrónico (será tu nombre de usuario).')
-    first_name = forms.CharField(max_length=150, required=False, label='Nombre')
-    last_name = forms.CharField(max_length=150, required=False, label='Apellido')
+class ClienteSignupForm(forms.ModelForm):
+    # Quitamos los validadores “estrictos” del username del modelo
+    username = forms.CharField(
+        label="Usuario",
+        max_length=150,
+        widget=forms.TextInput(attrs={
+            "class": "form-control",
+            "placeholder": "Elegí un usuario",
+            "autocomplete": "username",
+        }),
+        help_text="",  # sin textos molestos
+    )
 
-    # Campos adicionales para ClienteProfile
-    direccion = forms.CharField(max_length=255, required=False, label='Dirección')
-    telefono = forms.CharField(max_length=20, required=False, label='Teléfono')
+    first_name = forms.CharField(
+        label="Nombre",
+        max_length=150,
+        widget=forms.TextInput(attrs={
+            "class": "form-control",
+            "placeholder": "Tu nombre",
+            "autocomplete": "given-name",
+        }),
+        help_text="",
+    )
 
-    class Meta(UserCreationForm.Meta):
-        model = User
-        fields = UserCreationForm.Meta.fields + ('email', 'first_name', 'last_name', 'direccion', 'telefono',)
+    last_name = forms.CharField(
+        label="Apellido",
+        max_length=150,
+        widget=forms.TextInput(attrs={
+            "class": "form-control",
+            "placeholder": "Tu apellido",
+            "autocomplete": "family-name",
+        }),
+        help_text="",
+    )
 
-    def save(self, commit=True):
-        user = super().save(commit=False)
-        user.email = self.cleaned_data['email'] # Asegurarse de que el email se guarde en el User
-        if commit:
-            user.save()
-            # Crear o actualizar el ClienteProfile
-            cliente_profile = ClienteProfile.objects.get_or_create(user=user)[0]
-            cliente_profile.direccion = self.cleaned_data['direccion']
-            cliente_profile.telefono = self.cleaned_data['telefono']
-            cliente_profile.save()
-        return user
+    email = forms.EmailField(
+        label="Email",
+        widget=forms.EmailInput(attrs={
+            "class": "form-control",
+            "placeholder": "tuemail@gmail.com",
+            "autocomplete": "email",
+        }),
+        help_text="",
+    )
 
-# Formulario para editar el perfil del cliente
-class ClienteProfileForm(forms.ModelForm):
-    first_name = forms.CharField(max_length=150, required=False, label='Nombre')
-    last_name = forms.CharField(max_length=150, required=False, label='Apellido')
-    email = forms.EmailField(required=True, label='Correo Electrónico')
+    password1 = forms.CharField(
+        label="Contraseña",
+        widget=forms.PasswordInput(attrs={
+            "class": "form-control",
+            "placeholder": "Mínimo 6 caracteres",
+            "autocomplete": "new-password",
+        }),
+        help_text="Mínimo 6 caracteres.",
+    )
+    password2 = forms.CharField(
+        label="Confirmar contraseña",
+        widget=forms.PasswordInput(attrs={
+            "class": "form-control",
+            "placeholder": "Repetí la contraseña",
+            "autocomplete": "new-password",
+        }),
+        help_text="",
+    )
 
     class Meta:
-        model = ClienteProfile
-        fields = ['direccion', 'telefono'] # Solo los campos del perfil
+        model = User
+        fields = ["username", "first_name", "last_name", "email"]
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Pre-cargar los datos del User asociado al perfil
-        if self.instance and self.instance.user:
-            self.initial['first_name'] = self.instance.user.first_name
-            self.initial['last_name'] = self.instance.user.last_name
-            self.initial['email'] = self.instance.user.email
+    # ---- Validaciones simples
+    def clean_username(self):
+        u = (self.cleaned_data.get("username") or "").strip()
+        if not u:
+            raise forms.ValidationError("Ingresá un usuario.")
+        if User.objects.filter(username__iexact=u).exists():
+            raise forms.ValidationError("Ese usuario ya existe.")
+        return u
 
+    def clean_email(self):
+        email = (self.cleaned_data.get("email") or "").strip().lower()
+        if not email:
+            raise forms.ValidationError("Ingresá un email.")
+        if User.objects.filter(email__iexact=email).exists():
+            raise forms.ValidationError("Ya existe una cuenta con ese email.")
+        return email
+
+    def clean(self):
+        cleaned = super().clean()
+        p1 = cleaned.get("password1") or ""
+        p2 = cleaned.get("password2") or ""
+        if len(p1) < 6:
+            self.add_error("password1", "La contraseña debe tener al menos 6 caracteres.")
+        if p1 != p2:
+            self.add_error("password2", "Las contraseñas no coinciden.")
+        return cleaned
+
+    # ---- Guardado (sin validadores “duros” de Django)
     def save(self, commit=True):
-        profile = super().save(commit=False)
-        user = profile.user
-
-        # Actualizar los campos del User
-        user.first_name = self.cleaned_data['first_name']
-        user.last_name = self.cleaned_data['last_name']
-        user.email = self.cleaned_data['email']
-
+        user = super().save(commit=False)
+        user.username = self.cleaned_data["username"].strip()
+        user.email = self.cleaned_data["email"]
+        user.is_staff = False
+        user.is_superuser = False
+        user.set_password(self.cleaned_data["password1"])  # setea hash sin validadores extra
         if commit:
             user.save()
-            profile.save() # Guardar también el perfil
-
-        return profile
+        return user

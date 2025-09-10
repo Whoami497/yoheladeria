@@ -1054,28 +1054,18 @@ def pedido_exitoso(request):
 # === AUTENTICACIÓN Y PERFIL
 # =========================
 def register_cliente(request):
-    if request.user.is_authenticated:
-        messages.info(request, "Ya has iniciado sesión.")
-        return redirect('index')
-
     if request.method == 'POST':
-        form = ClienteRegisterForm(request.POST)
+        form = ClienteSignupForm(request.POST)
         if form.is_valid():
             user = form.save()
-            login(request, user)
-            messages.success(request, f"¡Bienvenido, {user.username}! Tu cuenta ha sido creada y has iniciado sesión.")
-            return redirect('index')
-        else:
-            for field, errors in form.errors.items():
-                for error in errors:
-                    messages.error(request, f"Error en {field}: {error}")
-            for error in form.non_field_errors():
-                messages.error(request, error)
+            login(request, user)  # login automático
+            messages.success(request, "¡Cuenta creada! Bienvenido/a.")
+            return redirect('index')  # o a donde quieras
     else:
-        form = ClienteRegisterForm()
+        form = ClienteSignupForm()
 
-    contexto = {'form': form}
-    return render(request, 'pedidos/register.html', contexto)
+    return render(request, 'pedidos/register.html', {'form': form})
+
 
 
 @login_required
