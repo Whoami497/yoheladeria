@@ -1,9 +1,11 @@
 # pedidos/forms.py
 from django import forms
 from django.contrib.auth.models import User
+from .models import ClienteProfile
+
 
 class ClienteSignupForm(forms.ModelForm):
-    # Quitamos los validadores “estrictos” del username del modelo
+    # Campos visibles del registro simple
     username = forms.CharField(
         label="Usuario",
         max_length=150,
@@ -12,9 +14,8 @@ class ClienteSignupForm(forms.ModelForm):
             "placeholder": "Elegí un usuario",
             "autocomplete": "username",
         }),
-        help_text="",  # sin textos molestos
+        help_text="",
     )
-
     first_name = forms.CharField(
         label="Nombre",
         max_length=150,
@@ -25,7 +26,6 @@ class ClienteSignupForm(forms.ModelForm):
         }),
         help_text="",
     )
-
     last_name = forms.CharField(
         label="Apellido",
         max_length=150,
@@ -36,7 +36,6 @@ class ClienteSignupForm(forms.ModelForm):
         }),
         help_text="",
     )
-
     email = forms.EmailField(
         label="Email",
         widget=forms.EmailInput(attrs={
@@ -46,7 +45,6 @@ class ClienteSignupForm(forms.ModelForm):
         }),
         help_text="",
     )
-
     password1 = forms.CharField(
         label="Contraseña",
         widget=forms.PasswordInput(attrs={
@@ -69,8 +67,15 @@ class ClienteSignupForm(forms.ModelForm):
     class Meta:
         model = User
         fields = ["username", "first_name", "last_name", "email"]
+        # Por si algún template mostrara help_text del modelo:
+        help_texts = {
+            "username": "",
+            "first_name": "",
+            "last_name": "",
+            "email": "",
+        }
 
-    # ---- Validaciones simples
+    # ---------- Validaciones simples ----------
     def clean_username(self):
         u = (self.cleaned_data.get("username") or "").strip()
         if not u:
@@ -78,6 +83,12 @@ class ClienteSignupForm(forms.ModelForm):
         if User.objects.filter(username__iexact=u).exists():
             raise forms.ValidationError("Ese usuario ya existe.")
         return u
+
+    def clean_first_name(self):
+        return (self.cleaned_data.get("first_name") or "").strip()
+
+    def clean_last_name(self):
+        return (self.cleaned_data.get("last_name") or "").strip()
 
     def clean_email(self):
         email = (self.cleaned_data.get("email") or "").strip().lower()
@@ -97,14 +108,59 @@ class ClienteSignupForm(forms.ModelForm):
             self.add_error("password2", "Las contraseñas no coinciden.")
         return cleaned
 
-    # ---- Guardado (sin validadores “duros” de Django)
+    # ---------- Guardado ----------
     def save(self, commit=True):
         user = super().save(commit=False)
         user.username = self.cleaned_data["username"].strip()
+        user.first_name = self.cleaned_data["first_name"].strip()
+        user.last_name = self.cleaned_data["last_name"].strip()
         user.email = self.cleaned_data["email"]
         user.is_staff = False
         user.is_superuser = False
-        user.set_password(self.cleaned_data["password1"])  # setea hash sin validadores extra
+        user.set_password(self.cleaned_data["password1"])
         if commit:
             user.save()
         return user
+
+
+class ClienteProfileForm(forms.ModelForm):
+    """
+    Form de perfil usado en views.perfil_cliente:
+    edita teléfono/dirección del perfil y, en el mismo form,
+    nombre, apellido y email del User.
+    """
+    first_name = forms.CharField(
+        label="Nombre",
+        max_length=150,
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+        required=False,
+    )
+    last_name = forms.CharField(
+        label="Apellido",
+        max_length=150,
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+        required=False,
+    )
+    email = forms.EmailField(
+        label="Email",
+        widget=forms.EmailInput(attrs={"class": "form-control"}),
+        required=False,
+    )
+
+    class Meta:
+        model = ClienteProfile
+        fields = ["telefono", "direccion"]
+        widgets = {
+            "telefono": forms.TextInput(attrs={"class": "form-control", "placeholder": "Ej: 3834 123456"}),
+            "direccion": forms.TextInput(attrs={"class": "form-control", "placeholder": "Calle y número"}),
+        }
+        help_texts = {"telefono": "", "direccion": ""}
+
+    def clean_email(self):
+        email = (self.cleaned_data.get("email") or "").strip().lower()
+        if not email:
+            return email
+        qs = User.objects.exclude(pk=getattr(self.instance, "user_id", None))
+        if qs.filter(email__iexact=email).exists():
+            raise forms.ValidationError("Ya existe una cuenta con ese email.")
+        return email
