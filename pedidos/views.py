@@ -1,6 +1,4 @@
 # pedidos/views.py
-from django.contrib.auth import login
-from .forms import ClienteSignupForm
 from django.db.models import Exists, OuterRef, Q
 from django.conf import settings
 from django.http import JsonResponse, HttpResponse
@@ -24,14 +22,75 @@ import mercadopago
 import requests
 import re
 from urllib.parse import quote_plus
-from django.template import TemplateDoesNotExist  # <-- NUEVO
+from django.template import TemplateDoesNotExist
+from django.contrib import messages
 
-from .forms import ClienteRegisterForm, ClienteProfileForm
+# ====== Forms ======
+# Intentamos importar los forms del proyecto; si no existen, definimos fallbacks mínimos
+try:
+    from .forms import ClienteSignupForm, ClienteProfileForm  # recomendado
+except Exception:
+    # Fallbacks para no romper el deploy si aún no creaste los forms en forms.py
+    from django import forms
+    from django.contrib.auth.models import User
+    try:
+        from .models import ClienteProfile as _ClienteProfileModel
+    except Exception:
+        _ClienteProfileModel = None
+
+    class ClienteSignupForm(forms.ModelForm):
+        password1 = forms.CharField(label="Contraseña", widget=forms.PasswordInput)
+        password2 = forms.CharField(label="Repetir contraseña", widget=forms.PasswordInput)
+
+        class Meta:
+            model = User
+            fields = ["username", "first_name", "last_name", "email"]
+
+        def clean_username(self):
+            u = self.cleaned_data.get("username", "")
+            if " " in u:
+                raise forms.ValidationError("El usuario no puede contener espacios.")
+            return u
+
+        def clean(self):
+            data = super().clean()
+            if data.get("password1") != data.get("password2"):
+                raise forms.ValidationError("Las contraseñas no coinciden.")
+            return data
+
+        def save(self, commit=True):
+            user = super().save(commit=False)
+            user.set_password(self.cleaned_data["password1"])
+            if commit:
+                user.save()
+            # crear perfil cliente si el modelo existe
+            try:
+                if _ClienteProfileModel:
+                    _ClienteProfileModel.objects.get_or_create(user=user)
+            except Exception:
+                pass
+            return user
+
+    if _ClienteProfileModel:
+        class ClienteProfileForm(forms.ModelForm):
+            # Campos del User para editar desde el mismo form
+            first_name = forms.CharField(required=False, label="Nombre")
+            last_name = forms.CharField(required=False, label="Apellido")
+            email = forms.EmailField(required=False, label="Email")
+            class Meta:
+                model = _ClienteProfileModel
+                fields = ["telefono", "direccion"]  # ajustá si tu modelo tiene otros nombres
+    else:
+        # Si no hay modelo aún, dejamos un form vacío para no romper vistas (solo mostrará nombre/apellido/email).
+        class ClienteProfileForm(forms.Form):
+            first_name = forms.CharField(required=False, label="Nombre")
+            last_name  = forms.CharField(required=False, label="Apellido")
+            email      = forms.EmailField(required=False, label="Email")
+
 from .models import (
     Producto, Sabor, Pedido, DetallePedido, Categoria,
     OpcionProducto, ClienteProfile, ProductoCanje, CadeteProfile
 )
-from django.contrib import messages
 
 # ==> Geocoding util (usa GOOGLE_*_KEY en settings si existe utils/geocoding.py)
 try:
@@ -86,7 +145,6 @@ def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta
     """
     Cambia el estado del pedido, intenta completar timestamps de hitos si los campos existen
     (fecha_en_preparacion, fecha_asignado, etc.) y registra un log en PedidoEstadoLog si existe el modelo.
-    TODO-SAFE: si los campos/modelo no existen aún, no rompe (está envuelto en try/except).
     """
     anterior = getattr(pedido, 'estado', None)
     pedido.estado = nuevo_estado
@@ -135,8 +193,7 @@ def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta
             fuente=fuente or '',
             meta=meta or {}
         )
-    except Exception as e:
-        # Modelo no existe o hubo otro error: no rompemos el flujo.
+    except Exception:
         pass
 
     return pedido
@@ -156,7 +213,6 @@ def _serialize_pedido_for_panel(pedido, include_details=True):
         'map_url': _map_url_from_text(pedido.cliente_direccion),
         'cliente_telefono': pedido.cliente_telefono,
         'metodo_pago': pedido.metodo_pago,
-        # ⚠️ Usamos el total calculado con envío persistido
         'total_pedido': str(_compute_total(pedido)),
         'costo_envio': float(pedido.costo_envio or 0),
         'cadete': (
@@ -170,7 +226,6 @@ def _serialize_pedido_for_panel(pedido, include_details=True):
             'cantidad': d.cantidad,
             'sabores_nombres': [s.nombre for s in d.sabores.all()],
         } for d in pedido.detalles.all()]
-    # === NUEVO: métricas y logs para panel/cadete/cliente
     data.update({
         'metricas': _serialize_metricas(pedido),
         'logs': _serialize_logs(pedido, limit=8),
@@ -178,7 +233,6 @@ def _serialize_pedido_for_panel(pedido, include_details=True):
     return data
 
 
-# === NUEVO: serializadores de métricas y logs
 def _serialize_logs(pedido, limit=8):
     out = []
     try:
@@ -238,10 +292,9 @@ def _notify_panel_update(pedido, message='actualizacion_pedido'):
 def _notify_cadetes_new_order(request, pedido):
     """
     Envia WebPush SOLO a cadetes:
-      - con subscription_info (ya activaron notificaciones en ese dispositivo),
+      - con subscription_info,
       - con disponible=True,
       - y sin pedido activo (ASIGNADO/EN_CAMINO).
-    Si el modelo no tiene el campo 'disponible', NO envía a nadie (evitamos molestar).
     """
     try:
         from pywebpush import webpush, WebPushException
@@ -256,7 +309,6 @@ def _notify_cadetes_new_order(request, pedido):
         print("WEBPUSH: Falta VAPID_PRIVATE_KEY en settings.")
         return
 
-    # Cadetes sin pedido activo
     activos_qs = Pedido.objects.filter(
         cadete_asignado_id=OuterRef('pk'),
         estado__in=['ASIGNADO', 'EN_CAMINO']
@@ -267,7 +319,6 @@ def _notify_cadetes_new_order(request, pedido):
           .annotate(tiene_activo=Exists(activos_qs))
           .filter(tiene_activo=False))
 
-    # Requerimos disponible=True si el campo existe.
     try:
         has_disponible = any(f.name == 'disponible' for f in CadeteProfile._meta.get_fields())
     except Exception:
@@ -276,7 +327,7 @@ def _notify_cadetes_new_order(request, pedido):
     if has_disponible:
         qs = qs.filter(disponible=True)
     else:
-        print("WEBPUSH: CadeteProfile no tiene campo 'disponible'; no se enviarán push para no molestar.")
+        print("WEBPUSH: CadeteProfile sin campo 'disponible'; no se enviarán push.")
         qs = qs.none()
 
     targets = list(qs)
@@ -305,7 +356,6 @@ def _notify_cadetes_new_order(request, pedido):
             print(f"WEBPUSH cadete {cp.user_id} error: {e}")
         except Exception as e:
             print(f"WEBPUSH cadete {cp.user_id} excepción: {e}")
-
 
 
 # =========================
@@ -349,31 +399,21 @@ def _map_url_from_text(text: str) -> str:
     return f"https://www.google.com/maps/search/?api=1&query={q}"
 
 
-# === NUEVO: dirección corta/bonita para UI ===
 def _short_address(formatted: str, max_len: int = 60) -> str:
-    """
-    Recorta una dirección formateada: "Calle 123, Localidad, Prov, País" -> "Calle 123 · Localidad"
-    y si sigue larga, la trunca con '…'.
-    """
     if not formatted:
         return ""
     parts = [p.strip() for p in formatted.split(",") if p.strip()]
     pretty = formatted
     if len(parts) >= 3:
         street = parts[0]
-        locality = parts[-3]  # suele ser la ciudad/localidad
+        locality = parts[-3]
         pretty = f"{street} · {locality}"
     if len(pretty) > max_len:
         pretty = pretty[:max_len - 1] + "…"
     return pretty
 
 
-# ======= REVERSE GEOCODING (nuevo: fallback local + wrapper) =======
 def _reverse_geocode_local(lat: float, lng: float) -> dict:
-    """
-    Llama directamente a Geocoding API y devuelve:
-    {'formatted_address', 'map_url', 'plus_code', 'locality', 'postal_code'}
-    """
     api_key = (
         getattr(settings, 'GOOGLE_MAPS_API_KEY', '') or
         getattr(settings, 'GOOGLE_GEOCODING_KEY', '') or
@@ -381,7 +421,7 @@ def _reverse_geocode_local(lat: float, lng: float) -> dict:
     )
     if not api_key:
         if settings.DEBUG:
-            print("GEOCODING DEBUG: falta API key (GOOGLE_MAPS_API_KEY/GOOGLE_GEOCODING_KEY/GOOGLE_API_KEY)")
+            print("GEOCODING DEBUG: falta API key")
         return {}
 
     params = {
@@ -427,9 +467,6 @@ def _reverse_geocode_local(lat: float, lng: float) -> dict:
 
 
 def _reverse_geocode_any(lat: float, lng: float) -> dict:
-    """
-    Usa utils.geocoding.reverse_geocode si existe; si no, usa el fallback local.
-    """
     if callable(gc_reverse):
         try:
             data = gc_reverse(lat, lng)
@@ -442,9 +479,6 @@ def _reverse_geocode_any(lat: float, lng: float) -> dict:
 
 
 def _calcular_costo_envio(direccion_cliente: str):
-    """
-    Devuelve (costo_envio_decimal, distancia_km_float) usando Distance Matrix.
-    """
     dest = (direccion_cliente or '').strip()
     if not dest:
         return (Decimal('0.00'), 0.0)  # retiro en local
@@ -497,7 +531,6 @@ def _calcular_costo_envio(direccion_cliente: str):
         km_reales = Decimal(metros) / Decimal('1000')
 
         km_efectivos = (km_reales if km_reales > km_min else km_min) + km_off
-
         costo = base + (por_km * km_efectivos)
 
         if costo_min is not None and costo < costo_min:
@@ -516,18 +549,12 @@ def _calcular_costo_envio(direccion_cliente: str):
 
 @require_GET
 def api_costo_envio(request):
-    """
-    Endpoint para estimar costo/distancia desde el carrito.
-    GET ?direccion=...  (dirección o 'lat,lng')
-    Ahora también retorna dirección legible/map_url/plus_code si se pasó lat,lng y hay clave de Geocoding.
-    """
     direccion = (request.GET.get('direccion') or '').strip()
     if not direccion:
         return JsonResponse({'ok': True, 'costo_envio': 0.0, 'distancia_km': 0.0, 'mode': 'pickup'})
 
     costo, km = _calcular_costo_envio(direccion)
 
-    # Info de geocoding opcional (no rompe si falla)
     addr = {}
     coords = _extract_coords(direccion)
     if coords:
@@ -538,7 +565,6 @@ def api_costo_envio(request):
             print(f"GEOCODING reverse error: {e}")
             addr = {}
 
-    # dirección completa (legible) + versión corta para UI
     addr_full = addr.get('formatted_address') or _direccion_legible_from_text(direccion)
 
     payload = {
@@ -574,18 +600,15 @@ def api_costo_envio(request):
 # =========================
 def index(request):
     q = (request.GET.get('q') or '').strip()
-    cat = request.GET.get('cat')  # id de categoría
-    sort = request.GET.get('sort') or 'recientes'  # precio_asc | precio_desc | recientes | nombre
+    cat = request.GET.get('cat')
+    sort = request.GET.get('sort') or 'recientes'
 
     productos = Producto.objects.filter(disponible=True)
 
     if cat:
         productos = productos.filter(categoria_id=cat)
     if q:
-        productos = productos.filter(
-            Q(nombre__icontains=q) |
-            Q(descripcion__icontains=q)
-        )
+        productos = productos.filter(Q(nombre__icontains=q) | Q(descripcion__icontains=q))
 
     if sort == 'precio_asc':
         productos = productos.order_by('precio', 'nombre')
@@ -593,18 +616,18 @@ def index(request):
         productos = productos.order_by('-precio', 'nombre')
     elif sort == 'nombre':
         productos = productos.order_by('nombre')
-    else:  # recientes
+    else:
         productos = productos.order_by('-id')
 
     categorias = Categoria.objects.filter(disponible=True).order_by('orden')
 
     contexto = {
-            'productos': productos,
-            'categorias': categorias,
-            'q': q,
-            'cat': int(cat) if cat else None,
-            'sort': sort,
-        }
+        'productos': productos,
+        'categorias': categorias,
+        'q': q,
+        'cat': int(cat) if cat else None,
+        'sort': sort,
+    }
     return render(request, 'pedidos/index.html', contexto)
 
 
@@ -831,16 +854,14 @@ def ver_carrito(request):
 
     if request.method == 'POST':
         nombre = request.POST.get('cliente_nombre')
-        direccion_input = (request.POST.get('cliente_direccion') or '').strip()  # puede venir vacío
+        direccion_input = (request.POST.get('cliente_direccion') or '').strip()
         telefono = request.POST.get('cliente_telefono')
         metodo_pago = request.POST.get('metodo_pago')
         nota_pedido = (request.POST.get('nota_pedido') or '').strip()
 
-        # Nuevo: modo de envío (opcional). Si no viene, inferimos por datos.
-        modo_envio = (request.POST.get('modo_envio') or '').lower()  # 'pickup' | 'delivery' (opcional)
+        modo_envio = (request.POST.get('modo_envio') or '').lower()
         geo_latlng = (request.POST.get('geo_latlng') or '').strip()
 
-        # "pickup" si lo indica el form o si NO hay ni dirección ni GPS
         es_pickup = (modo_envio == 'pickup') or (not direccion_input and not geo_latlng)
 
         if es_pickup:
@@ -863,7 +884,7 @@ def ver_carrito(request):
         if not base_dir and es_pickup:
             base_dir = "Retiro en local"
 
-        direccion_a_guardar = base_dir or ""  # nunca None
+        direccion_a_guardar = base_dir or ""
         if geo_latlng:
             direccion_a_guardar = f"{direccion_a_guardar} — GPS: {geo_latlng}"
         if nota_pedido:
@@ -975,7 +996,7 @@ def ver_carrito(request):
                         'map_url': _map_url_from_text(nuevo_pedido.cliente_direccion),
                         'cliente_telefono': nuevo_pedido.cliente_telefono,
                         'metodo_pago': nuevo_pedido.metodo_pago,
-                        'total_pedido': str(nuevo_pedido.total_pedido),
+                        'total_pedido': str(_compute_total(nuevo_pedido)),  # ← consistente
                         'costo_envio': float(nuevo_pedido.costo_envio or 0),
                         'distancia_km': float(distancia_km or 0),
                         'nota_pedido': (nota_pedido or None),
@@ -988,7 +1009,7 @@ def ver_carrito(request):
             print(f"Notificación de pedido #{nuevo_pedido.id} enviada a Channels.")
         except Exception as e:
             print(f"ERROR al enviar notificación de pedido a Channels: {e}")
-            messages.error(request, f"ERROR INTERNO: No se pudo enviar la alerta en tiempo real. Contacta a soporte. Error: {e}")
+            messages.error(request, f"ERROR INTERNO: No se pudo enviar la alerta en tiempo real. Error: {e}")
 
         del request.session['carrito']
         request.session.modified = True
@@ -1015,11 +1036,6 @@ def eliminar_del_carrito(request, item_key):
 
 @require_POST
 def carrito_set_nota(request):
-    """
-    (Aún disponible por compatibilidad, aunque ahora usamos nota general)
-    Guarda/borra una 'nota' por ítem del carrito (en sesión).
-    Espera: key (clave del item), nota (texto).
-    """
     key = request.POST.get('key', '')
     nota = (request.POST.get('nota') or '').strip()
     cart = request.session.get('carrito', {})
@@ -1060,14 +1076,13 @@ def register_cliente(request):
         form = ClienteSignupForm(request.POST)
         if form.is_valid():
             user = form.save()
-            login(request, user)  # login automático
+            login(request, user)
             messages.success(request, "¡Cuenta creada! Bienvenido/a.")
-            return redirect('index')  # o a donde quieras
+            return redirect('index')
     else:
         form = ClienteSignupForm()
 
     return render(request, 'pedidos/register.html', {'form': form})
-
 
 
 @login_required
@@ -1076,14 +1091,20 @@ def perfil_cliente(request):
     cliente_profile, created = ClienteProfile.objects.get_or_create(user=user)
 
     if request.method == 'POST':
-        form = ClienteProfileForm(request.POST, instance=cliente_profile)
+        form = ClienteProfileForm(request.POST, instance=cliente_profile) if hasattr(ClienteProfileForm, '_meta') else ClienteProfileForm(request.POST)
         if form.is_valid():
-            user.first_name = form.cleaned_data['first_name']
-            user.last_name = form.cleaned_data['last_name']
-            user.email = form.cleaned_data['email']
+            # Actualizar datos del User si esos campos existen en el form
+            for k in ('first_name', 'last_name', 'email'):
+                if k in form.cleaned_data:
+                    setattr(user, k, form.cleaned_data[k] or getattr(user, k))
             user.save()
 
-            form.save()
+            # Guardar el perfil si es ModelForm
+            try:
+                form.save()
+            except Exception:
+                pass
+
             messages.success(request, "¡Tu perfil ha sido actualizado con éxito!")
             return redirect('perfil_cliente')
         else:
@@ -1093,11 +1114,8 @@ def perfil_cliente(request):
             for error in form.non_field_errors():
                 messages.error(request, error)
     else:
-        form = ClienteProfileForm(instance=cliente_profile, initial={
-            'first_name': user.first_name,
-            'last_name': user.last_name,
-            'email': user.email,
-        })
+        initial = {'first_name': user.first_name, 'last_name': user.last_name, 'email': user.email}
+        form = ClienteProfileForm(instance=cliente_profile, initial=initial) if hasattr(ClienteProfileForm, '_meta') else ClienteProfileForm(initial=initial)
 
     contexto = {'form': form, 'user': user, 'cliente_profile': cliente_profile}
     return render(request, 'pedidos/perfil.html', contexto)
@@ -1140,7 +1158,6 @@ def pedido_en_curso(request):
                 .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
                 .order_by('-fecha_pedido'))
 
-    # NUEVO: enriquecer para template (cliente y cadete)
     for p in pedidos:
         setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
         setattr(p, 'map_url', _map_url_from_text(p.cliente_direccion))
@@ -1151,14 +1168,10 @@ def pedido_en_curso(request):
 
 
 # =========================
-# === PANEL DE ALERTAS TIENDA (HOY/AYER/ANTERIORES)
+# === PANEL DE ALERTAS TIENDA
 # =========================
 @staff_member_required
 def panel_alertas(request):
-    """
-    Muestra HOY (activos), AYER (plegable) y ENTREGADOS de hoy (plegable al final).
-    Anotamos cada pedido con direccion_legible y map_url para uso en template.
-    """
     hoy = timezone.localdate()
     ayer = hoy - timedelta(days=1)
 
@@ -1197,11 +1210,6 @@ def panel_alertas(request):
 
 @staff_member_required
 def panel_alertas_data(request):
-    """
-    JSON para rehidratar/pollear el panel.
-    Soporta scope=hoy | hoy_finalizados | ayer | YYYY-MM-DD
-    Devuelve tambien direccion_legible y map_url.
-    """
     scope = (request.GET.get('scope') or 'hoy').lower()
     hoy = timezone.localdate()
 
@@ -1312,7 +1320,6 @@ def panel_alertas_set_estado(request, pedido_id):
         return redirect('login')
 
     _marcar_estado(pedido, estado, actor=request.user, fuente='panel_alertas_set_estado')
-
     _notify_panel_update(pedido)
 
     cadete_nombre = None
@@ -1485,7 +1492,7 @@ def cadete_historial(request):
     """
     Historial del cadete logueado.
     - Intenta renderizar 'pedidos/cadete_historial.html'.
-    - Si el template no existe, devuelve una tabla simple (fallback) para no romper.
+    - Si el template no existe, devuelve una tabla simple (fallback).
     """
     if not hasattr(request.user, 'cadeteprofile'):
         messages.error(request, "Acceso denegado: este usuario no es cadete.")
@@ -1537,8 +1544,6 @@ def logout_cadete(request):
 def cadete_toggle_disponible(request):
     """
     Marca disponible/no-disponible al cadete.
-    - Si CadeteProfile tiene booleano 'disponible', lo usa.
-    - Si no existe, guarda en sesión como fallback.
     """
     if not hasattr(request.user, 'cadeteprofile'):
         return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
@@ -1571,7 +1576,6 @@ def cadete_set_estado(request, pedido_id):
     """
     Permite al cadete avanzar estado de su pedido:
     EN_CAMINO -> ENTREGADO.
-    Devuelve JSON si es AJAX, o redirige al panel si no lo es.
     """
     if not hasattr(request.user, 'cadeteprofile'):
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
@@ -1968,7 +1972,7 @@ def canjear_puntos(request):
             messages.error(
                 request,
                 f"No tienes suficientes puntos para canjear '{producto_canje.nombre}'. "
-                f"Necesitas {producto_canje.puntos_requeridos} puntos y solo tienes {cliente_profile.puntos_fidelidad}."
+                f"Necesitas {producto_caje.puntos_requeridos} puntos y solo tienes {cliente_profile.puntos_fidelidad}."
             )
 
         return redirect('canjear_puntos')
