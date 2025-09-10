@@ -5,156 +5,144 @@
 <div class="container my-4">
   <h2 class="mb-3">Tu Carrito</h2>
 
-  <div class="row g-4">
-    <!-- Ítems -->
-    <div class="col-lg-8">
-      <div id="cart-list">
-        {% for item in carrito_items %}
-          <div class="card cart-item mb-3 shadow-sm">
-            <div class="card-body p-3">
-              <div class="d-flex align-items-start gap-3">
-                <div class="thumb-wrap">
-                  {% if item.imagen_mostrada %}
-                    <img class="thumb" src="{% static item.imagen_mostrada %}" alt="{{ item.producto_nombre }}">
-                  {% else %}
-                    <div class="thumb thumb-placeholder">IMG</div>
-                  {% endif %}
+  <!-- Ítems -->
+  <div id="cart-list" class="mb-4">
+    {% for item in carrito_items %}
+      <div class="card cart-item mb-3 shadow-sm">
+        <div class="card-body p-3">
+          <div class="d-flex align-items-start gap-3">
+            <div class="thumb-wrap">
+              {% if item.imagen_mostrada %}
+                <img class="thumb" src="{% static item.imagen_mostrada %}" alt="{{ item.producto_nombre }}">
+              {% else %}
+                <div class="thumb thumb-placeholder">IMG</div>
+              {% endif %}
+            </div>
+
+            <div class="flex-grow-1">
+              <div class="d-flex justify-content-between align-items-start">
+                <h6 class="mb-1">{{ item.producto_nombre }}</h6>
+                <div class="text-end">
+                  <div class="fw-semibold">${{ item.subtotal|floatformat:2 }}</div>
+                  <div class="text-muted small">x{{ item.cantidad }} · ${{ item.precio_unidad|floatformat:2 }}</div>
                 </div>
+              </div>
 
-                <div class="flex-grow-1">
-                  <div class="d-flex justify-content-between align-items-start">
-                    <h6 class="mb-1">{{ item.producto_nombre }}</h6>
-                    <div class="text-end">
-                      <div class="fw-semibold">${{ item.subtotal|floatformat:2 }}</div>
-                      <div class="text-muted small">x{{ item.cantidad }} · ${{ item.precio_unidad|floatformat:2 }}</div>
-                    </div>
-                  </div>
+              <div class="small text-muted">
+                {% if item.opcion_nombre %}<span class="me-1">Opción: {{ item.opcion_nombre }}</span>·{% endif %}
+                Sabores:
+                {% if item.sabores_nombres %}
+                  {{ item.sabores_nombres|join:", " }}
+                {% else %}N/A{% endif %}
+              </div>
 
-                  <div class="small text-muted">
-                    {% if item.opcion_nombre %}<span class="me-1">Opción: {{ item.opcion_nombre }}</span>·{% endif %}
-                    Sabores:
-                    {% if item.sabores_nombres %}
-                      {{ item.sabores_nombres|join:", " }}
-                    {% else %}N/A{% endif %}
-                  </div>
-
-                  <div class="mt-2 d-flex justify-content-end">
-                    <a href="{% url 'eliminar_del_carrito' item.key %}" class="btn btn-sm btn-outline-danger">
-                      <i class="bi bi-trash"></i> Eliminar
-                    </a>
-                  </div>
-                </div>
+              <div class="mt-2 d-flex justify-content-end">
+                <a href="{% url 'eliminar_del_carrito' item.key %}" class="btn btn-sm btn-outline-danger">
+                  <i class="bi bi-trash"></i> Eliminar
+                </a>
               </div>
             </div>
           </div>
-        {% empty %}
-          <div class="alert alert-info">Tu carrito está vacío.</div>
-        {% endfor %}
+        </div>
       </div>
-    </div>
+    {% empty %}
+      <div class="alert alert-info">Tu carrito está vacío.</div>
+    {% endfor %}
+  </div>
 
-    <!-- Sidebar: resumen + formulario -->
-    <div class="col-lg-4">
-      <!-- Resumen -->
-      <div class="card summary shadow-sm mb-3">
-        <div class="card-body p-3">
-          <div class="d-flex justify-content-between mb-2">
-            <span class="text-muted">Subtotal</span>
-            <strong id="subtotal-amount">${{ total|floatformat:2 }}</strong>
-          </div>
+  <!-- Entrega, pago y totales (abajo) -->
+  <div class="card shadow-sm">
+    <div class="card-body p-3">
+      <h5 class="mb-3">Entrega y pago</h5>
 
-          <!-- Fila envío: selector más pequeño + precio alineado -->
-          <div class="d-flex align-items-center justify-content-between gap-2 mb-1 flex-wrap">
-            <div class="d-flex align-items-center gap-2 flex-grow-1 min-w-0">
-              <span class="text-muted">Envío</span>
-              <select id="envio" class="form-select form-select-sm w-auto envio-select">
-                <option value="0" selected>Retiro en local</option>
-                <!-- La opción “Auto (mapa)” la agrega JS -->
-              </select>
-            </div>
-            <div class="text-end flex-shrink-0">
+      <form id="checkout-form" method="post">
+        {% csrf_token %}
+
+        <!-- Campos que espera la vista -->
+        <input type="hidden" name="modo_envio" id="modo_envio" value="pickup">
+        <input type="hidden" name="geo_latlng" id="geo-latlng" value="">
+        <input type="hidden" name="cliente_direccion" id="cliente_direccion" value="">
+
+        <!-- Envío -->
+        <div class="mb-3">
+          <label class="form-label">Envío</label>
+          <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+            <select id="envio" class="form-select form-select-sm w-auto envio-select">
+              <option value="0" selected>Retiro en local</option>
+              <!-- La opción “≈ X km” la agrega JS -->
+            </select>
+            <div class="text-end">
               <div class="small text-muted lh-1">Costo</div>
               <div class="fw-semibold fs-6" id="envio-amount">$0.00</div>
             </div>
           </div>
 
-          <!-- Vista previa de dirección (compacta) -->
-          <div id="addrPreview" class="addr d-none">
-            <div class="d-flex align-items-center justify-content-between gap-2">
-              <div class="addr-text text-truncate" id="addrText">—</div>
-              <a id="addrMap" href="#" target="_blank" rel="noopener" class="small">Ver mapa</a>
-            </div>
+          <!-- Vista previa de dirección (solo texto, sin link ni coords) -->
+          <div id="addrPreview" class="addr d-none mt-2">
+            <div class="addr-text text-truncate" id="addrText">—</div>
           </div>
 
-          <hr class="my-2">
-
-          <div class="d-flex justify-content-between align-items-center">
-            <span class="fs-6 fw-semibold">Total estimado</span>
-            <span class="fs-4 fw-bold" id="total-final">${{ total|floatformat:2 }}</span>
+          <div class="mt-2">
+            <button type="button" class="btn btn-outline-success btn-sm" id="btn-map">📍 Elegir ubicación</button>
           </div>
         </div>
-      </div>
 
-      <!-- Formulario -->
-      <div class="card shadow-sm">
-        <div class="card-body p-3">
-          <h5 class="mb-3">Datos de entrega y contacto</h5>
+        <!-- Datos de contacto -->
+        <div class="mb-3">
+          <label class="form-label">Nombre completo</label>
+          <input type="text" class="form-control" name="cliente_nombre"
+                  value="{{ request.user.get_full_name|default:request.user.username }}" required>
+        </div>
 
-          <form id="checkout-form" method="post">
-            {% csrf_token %}
+        <div class="mb-3">
+          <label class="form-label">Teléfono</label>
+          <input type="tel" class="form-control" name="cliente_telefono" placeholder="Ej: 3834 123456"
+                 autocomplete="tel" inputmode="tel" required>
+        </div>
 
-            <!-- Campos que espera la vista -->
-            <input type="hidden" name="modo_envio" id="modo_envio" value="pickup">
-            <input type="hidden" name="geo_latlng" id="geo-latlng" value="">
-            <input type="hidden" name="cliente_direccion" id="cliente_direccion" value="">
+        <div class="mb-3">
+          <label class="form-label">Referencias (opcional)</label>
+          <input class="form-control" name="nota_pedido" placeholder="Ej: Timbre negro; torre B; dpto 2">
+        </div>
 
-            <!-- Nombre -->
-            <div class="mb-3">
-              <label class="form-label">Nombre completo</label>
-              <input type="text" class="form-control" name="cliente_nombre"
-                     value="{{ request.user.get_full_name|default:request.user.username }}" required>
+        <!-- Pago -->
+        <div class="mb-3">
+          <label class="form-label">Método de pago</label>
+          <select class="form-select" name="metodo_pago" required>
+            <option value="EFECTIVO">Efectivo</option>
+            <option value="MERCADOPAGO">Mercado Pago</option>
+          </select>
+        </div>
+
+        <!-- Totales -->
+        <div class="card summary border-0 bg-light">
+          <div class="card-body p-3">
+            <div class="d-flex justify-content-between mb-1">
+              <span class="text-muted">Subtotal</span>
+              <strong id="subtotal-amount">${{ total|floatformat:2 }}</strong>
             </div>
-
-            <!-- Botón mapa + chip coords -->
-            <div class="mb-2 d-flex align-items-center gap-2">
-              <button type="button" class="btn btn-outline-success btn-sm" id="btn-map">📍 Elegir ubicación</button>
-              <span class="badge bg-light text-dark" id="coords-preview" style="display:none;"></span>
+            <div class="d-flex justify-content-between mb-1">
+              <span class="text-muted">Envío</span>
+              <strong id="envio-amount-inline">$0.00</strong>
             </div>
-
-            <!-- Referencias -->
-            <div class="mb-3">
-              <label class="form-label">Referencias (opcional)</label>
-              <input class="form-control" name="nota_pedido" placeholder="Ej: Timbre negro; torre B; dpto 2">
+            <hr class="my-2">
+            <div class="d-flex justify-content-between align-items-center">
+              <span class="fs-6 fw-semibold">Total</span>
+              <span class="fs-4 fw-bold" id="total-final">${{ total|floatformat:2 }}</span>
             </div>
-
-            <!-- Teléfono -->
-            <div class="mb-3">
-              <label class="form-label">Teléfono</label>
-              <input type="tel" class="form-control" name="cliente_telefono" placeholder="Ej: 3834 123456"
-                     autocomplete="tel" inputmode="tel" required>
-            </div>
-
-            <!-- Pago -->
-            <div class="mb-4">
-              <label class="form-label">Método de pago</label>
-              <select class="form-select" name="metodo_pago" required>
-                <option value="EFECTIVO">Efectivo</option>
-                <option value="MERCADOPAGO">Mercado Pago</option>
-              </select>
-            </div>
-
-            <button id="btn-submit" type="submit" class="btn btn-primary w-100 py-2" disabled>
-              Finalizar Pedido
-            </button>
-            <div class="small text-danger mt-2" id="submit-warn" style="display:none;">
-              Seleccioná una ubicación en el mapa o elegí “Retiro en local”.
-            </div>
-          </form>
-
-          <div class="text-center mt-3">
-            <a href="{% url 'index' %}" class="btn btn-link">← Volver al inicio</a>
           </div>
         </div>
+
+        <button id="btn-submit" type="submit" class="btn btn-primary w-100 py-2 mt-3" disabled>
+          Finalizar Pedido
+        </button>
+        <div class="small text-danger mt-2" id="submit-warn" style="display:none;">
+          Seleccioná una ubicación en el mapa o elegí “Retiro en local”.
+        </div>
+      </form>
+
+      <div class="text-center mt-3">
+        <a href="{% url 'index' %}" class="btn btn-link">← Volver al inicio</a>
       </div>
     </div>
   </div>
@@ -192,31 +180,29 @@
 <script>
 (function(){
   // ---------- CONFIG ----------
-  const STORE = { lat: -28.4705234, lng: -65.7937524 };   // sucursal
-  const SERVICE_RADIUS_M = 8000;                           // 0 = sin límite visual
+  const STORE = { lat: -28.4705234, lng: -65.7937524 };
+  const SERVICE_RADIUS_M = 8000; // 0 = sin límite visual
 
   // ---------- LocalStorage ----------
   const LS_GEO  = 'yl_geo_latlng';
   const LS_COST = 'yl_envio_cost';
   const LS_KM   = 'yl_envio_km';
 
-  const fmt = (n) => '$' + Number(n).toFixed(2);
+  const fmtMoney = (n) => '$' + Number(n).toFixed(2);
   const subtotal = parseFloat('{{ total|floatformat:2 }}') || 0;
 
   const envioSel   = document.getElementById('envio');
-  const envioEl    = document.getElementById('envio-amount');
+  const envioEl    = document.getElementById('envio-amount');         // costo en bloque envío
+  const envioInline= document.getElementById('envio-amount-inline');  // costo en resumen
   const totalEl    = document.getElementById('total-final');
   const subEl      = document.getElementById('subtotal-amount');
 
   const geoHidden  = document.getElementById('geo-latlng');
-  const coordsPreview = document.getElementById('coords-preview');
   const modoHidden = document.getElementById('modo_envio');
   const clienteDirHidden = document.getElementById('cliente_direccion');
 
-  // Vista previa de dirección
   const addrWrap = document.getElementById('addrPreview');
   const addrText = document.getElementById('addrText');
-  const addrLink = document.getElementById('addrMap');
 
   const btnMap   = document.getElementById('btn-map');
   const btnSubmit= document.getElementById('btn-submit');
@@ -231,42 +217,37 @@
   function hideAddr(){
     addrWrap.classList.add('d-none');
     addrText.textContent = '—';
-    addrLink.removeAttribute('href');
     clienteDirHidden.value = '';
   }
   function showAddr(data, latlng){
-    const legible = (data && (data.direccion_corta || data.direccion_legible)) || `GPS ${latlng}`;
-    const mapUrl  = (data && data.map_url) || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(latlng)}`;
+    const legible = (data && (data.direccion_corta || data.direccion_legible)) || 'Ubicación seleccionada';
     addrText.textContent = '📍 ' + legible;
-    addrLink.href = mapUrl;
     addrWrap.classList.remove('d-none');
-    // Guardamos legible para el server como fallback
     if (data && data.direccion_legible) {
       clienteDirHidden.value = data.direccion_legible;
     }
   }
 
   function recalc(){
-    const envio = parseFloat(envioSel.value || '0') || 0;
-    envioEl.textContent  = fmt(envio);
-    totalEl.textContent  = fmt(subtotal + envio);
-    subEl.textContent    = fmt(subtotal);
+    const envioCost = parseFloat(envioSel.value || '0') || 0;
+    envioEl.textContent     = fmtMoney(envioCost);
+    envioInline.textContent = fmtMoney(envioCost);
+    totalEl.textContent     = fmtMoney(subtotal + envioCost);
+    subEl.textContent       = fmtMoney(subtotal);
 
     const isPickup = envioSel.value === '0';
     modoHidden.value = isPickup ? 'pickup' : 'delivery';
-
-    // Si es retiro, ocultamos vista previa
     if (isPickup) hideAddr();
 
     const hasPoint = !!geoHidden.value;
-    setSubmitEnabled(isPickup || (hasPoint && envio > 0));
+    setSubmitEnabled(isPickup || (hasPoint && envioCost > 0));
   }
   envioSel.addEventListener('change', recalc);
 
-  // Nota: hacemos el label corto para que el select sea angosto.
+  // Opción automática: SOLO mostrar los km (sin “Auto”)
   function setAutoOption(costo, km){
     let opt = document.getElementById('opt-auto-envio');
-    const label = `Auto (≈ ${Number(km||0).toFixed(2)} km)`;
+    const label = `≈ ${Number(km||0).toFixed(2)} km`;
     if(!opt){
       opt = document.createElement('option');
       opt.id = 'opt-auto-envio';
@@ -302,10 +283,8 @@
   const btnMapUse   = document.getElementById('map-use');
 
   function haversineKm(a, b){
-    const R = 6371e3; // m
-    const toRad = x => x*Math.PI/180;
-    const dLat = toRad(b.lat - a.lat);
-    const dLng = toRad(b.lng - a.lng);
+    const R = 6371e3; const toRad = x => x*Math.PI/180;
+    const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
     const s1 = Math.sin(dLat/2), s2 = Math.sin(dLng/2);
     const A = s1*s1 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*s2*s2;
     const c = 2*Math.atan2(Math.sqrt(A), Math.sqrt(1-A));
@@ -324,8 +303,7 @@
 
     map = L.map('map').setView(DEFAULT_CENTER, 14);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap'
+      maxZoom: 19, attribution: '&copy; OpenStreetMap'
     }).addTo(map);
 
     marker = L.marker(DEFAULT_CENTER, {draggable:true}).addTo(map);
@@ -403,8 +381,6 @@
     const latlng = `${lat},${lng}`;
 
     geoHidden.value = latlng;
-    coordsPreview.style.display = '';
-    coordsPreview.textContent = `📌 ${latlng}`;
     localStorage.setItem(LS_GEO, latlng);
 
     try{
@@ -441,8 +417,6 @@
     const saved = localStorage.getItem(LS_GEO);
     if(saved){
       geoHidden.value = saved;
-      coordsPreview.style.display = '';
-      coordsPreview.textContent = `📌 ${saved}`;
 
       const savedCost = localStorage.getItem(LS_COST);
       const savedKm   = localStorage.getItem(LS_KM);
@@ -465,7 +439,6 @@
 </script>
 
 <style>
-  /* Más limpio y elegante en mobile */
   h2{ letter-spacing:.2px; }
   .card{ border-radius:14px; }
   .card-body{ padding:1rem 1.1rem; }
@@ -478,20 +451,13 @@
     width:84px;height:84px;font-size:.8rem;
   }
 
-  .summary{ position:sticky; top:.75rem; }
-  @media (min-width:992px){ .summary{ top:1rem; } }
-
-  /* Selector de envío más chico y que no empuje el precio fuera del card */
   .envio-select{ max-width: 220px; }
   @media (max-width: 400px){ .envio-select{ max-width: 180px; } }
 
   #btn-map{ padding:.35rem .6rem;font-weight:600; }
-  #coords-preview{ font-size:.8rem; }
-  #map{ min-height:360px;border-radius:8px; }
 
-  /* Línea de dirección compacta */
+  /* Línea de dirección compacta (sin link/coords) */
   .addr{ margin:.35rem 0 .25rem; }
-  .addr-text{ max-width: 75%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  @media (max-width: 420px){ .addr-text{ max-width: 66%; } }
+  .addr-text{ max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
 {% endblock %}
