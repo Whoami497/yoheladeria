@@ -28,6 +28,14 @@ urlpatterns = [
     path('historial-pedidos/', views.historial_pedidos_cliente, name='historial_pedidos_cliente'),
     path('canjear/', views.canjear_puntos, name='canjear_puntos'),
 
+    # --- Estado de TIENDA (abierta/cerrada) ---
+    # JSON público con el estado (alias canónico y alias de compatibilidad)
+    path('tienda/estado/', views.tienda_estado, name='tienda_estado'),                 # alias usado por JS viejo
+    path('tienda/estado.json', views.tienda_estado_json, name='tienda_estado_json'),   # canónico JSON
+    # Set y toggle (solo staff)
+    path('tienda/set/', views.tienda_set_estado, name='tienda_set_estado'),
+    path('tienda/toggle/', views.tienda_toggle, name='tienda_toggle'),
+
     # --- Panel de alertas (tienda) ---
     path('panel-alertas/', views.panel_alertas, name='panel_alertas'),
     path('panel-alertas/data/', views.panel_alertas_data, name='panel_alertas_data'),
@@ -38,10 +46,6 @@ urlpatterns = [
     path('confirmar-pedido/<int:pedido_id>/', views.confirmar_pedido, name='confirmar_pedido'),
     # Alias opcional por si algún botón viejo apunta a esta ruta
     path('panel-alertas/confirmar/<int:pedido_id>/', views.confirmar_pedido, name='confirmar_pedido_panel'),
-
-    # --- NUEVO: abrir/cerrar tienda ---
-    path('tienda/estado/', views.tienda_estado, name='tienda_estado'),  # GET: devuelve flags en JSON
-    path('panel-alertas/tienda/toggle/', views.tienda_toggle, name='tienda_toggle'),  # POST staff: abre/cierra
 
     # --- Panel de cadetes ---
     path('cadete/login/', views.login_cadete, name='login_cadete'),
@@ -61,7 +65,10 @@ urlpatterns = [
     path('pagos/mp/success/', views.mp_success, name='mp_success'),
     path('pagos/mp/refund/<int:pedido_id>/', views.mp_refund, name='mp_refund'),
 
-    # --- Otros ---
+    # --- Service Worker (ambos alias por si alguno te queda cacheado) ---
     path('sw.js', views.service_worker, name='service_worker'),
+    path('service-worker.js', views.service_worker, name='service_worker_root'),
+
+    # --- Otros ---
     path('pedido/en-curso/', views.pedido_en_curso, name='pedido_en_curso'),
 ]

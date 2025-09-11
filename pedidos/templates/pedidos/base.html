@@ -67,6 +67,10 @@
         .content-inner{max-width:100%}
         .home-hero,#nuestro-catalogo{max-width:var(--shell);margin-inline:auto}
       }
+
+      /* ===== Banner público de estado de tienda ===== */
+      .tienda-banner{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.75rem;padding:.4rem .75rem}
+      .tienda-banner .small-help{font-weight:500;opacity:.85}
     </style>
   </head>
   <body>
@@ -155,6 +159,23 @@
                 {% endfor %}
               </div>
             {% endif %}
+
+            {# ===== Banner público de estado de tienda (informativo) ===== #}
+            <div id="tienda-banner"
+                 class="tienda-banner alert {% if TIENDA_ABIERTA %}alert-success{% else %}alert-warning{% endif %} py-2"
+                 data-open="{% if TIENDA_ABIERTA %}1{% else %}0{% endif %}">
+              <div id="tienda-banner-text">
+                {% if TIENDA_ABIERTA %}
+                  <strong>🟢 Estamos tomando pedidos online ahora.</strong>
+                {% else %}
+                  <strong>🔴 No estamos tomando pedidos online en este momento.</strong>
+                {% endif %}
+              </div>
+              <div class="small-help text-muted">
+                Podés ver el catálogo y armar el carrito.
+                {% if not TIENDA_ABIERTA %} El checkout se habilita cuando abrimos.{% endif %}
+              </div>
+            </div>
 
             {% block content %}{% endblock %}
           </div>
@@ -388,7 +409,6 @@
   })();
 </script>
 
-
     <!-- Debug overflow opcional -->
     <script>
       (function(){
@@ -406,6 +426,49 @@
         }
       })();
     </script>
+
+    {# ===== WS: actualiza el banner de tienda en vivo (no interfiere con nada existente) ===== #}
+    <script>
+      (function(){
+        const banner = document.getElementById('tienda-banner');
+        if(!banner) return;
+
+        const textEl = document.getElementById('tienda-banner-text');
+        function applyBannerState(isOpen){
+          banner.dataset.open = isOpen ? '1' : '0';
+          banner.classList.toggle('alert-success', !!isOpen);
+          banner.classList.toggle('alert-warning', !isOpen);
+          textEl.innerHTML = isOpen
+            ? '<strong>🟢 Estamos tomando pedidos online ahora.</strong>'
+            : '<strong>🔴 No estamos tomando pedidos online en este momento.</strong>';
+          const help = banner.querySelector('.small-help');
+          if(help){
+            help.innerHTML = isOpen
+              ? 'Podés ver el catálogo y armar el carrito.'
+              : 'Podés ver el catálogo y armar el carrito. El checkout se habilita cuando abrimos.';
+          }
+        }
+
+        // Inicia con lo que vino del server (context processor)
+        applyBannerState(banner.dataset.open === '1');
+
+        // WebSocket para reflejar cambios en vivo
+        try{
+          const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+          const websocketUrl = wsProtocol + window.location.host + '/ws/pedidos/notifications/';
+          const sock = new WebSocket(websocketUrl);
+          sock.onmessage = function(e){
+            try{
+              const data = JSON.parse(e.data || '{}');
+              if(data && data.message === 'tienda_estado' && data.order_data){
+                applyBannerState(!!data.order_data.abierta);
+              }
+            }catch(_){}
+          };
+        }catch(_){}
+      })();
+    </script>
+
     {% block extra_js %}{% endblock %}
   </body>
 </html>

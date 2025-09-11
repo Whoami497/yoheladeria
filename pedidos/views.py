@@ -241,6 +241,29 @@ def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta
     return pedido
 
 
+# --- Guard: bloquear checkout si la tienda está cerrada (respuesta coherente para HTML y AJAX)
+def _abort_if_store_closed(request):
+    """
+    Devuelve una respuesta (redirect/JSON/403) si la tienda está cerrada.
+    Retorna None si está abierta (seguir normal).
+    """
+    try:
+        abierta = _get_tienda_abierta()
+    except Exception:
+        abierta = True  # por si algo falla, no romper checkout
+
+    if abierta:
+        return None
+
+    # Si viene por AJAX, devolvemos JSON con 403
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+        return JsonResponse({'ok': False, 'error': 'tienda_cerrada'}, status=403)
+
+    # Mensaje + redirect si es navegación normal
+    messages.error(request, "En este momento no estamos tomando pedidos online. Probá dentro del horario de atención.")
+    return redirect('ver_carrito')
+
+
 def _serialize_pedido_for_panel(pedido, include_details=True):
     """
     Serializa un Pedido para mandarlo al panel por WS/JSON.
@@ -913,10 +936,10 @@ def ver_carrito(request):
             continue
 
     if request.method == 'POST':
-        # 🚦 Bloqueo si la tienda está cerrada
-        if not _get_tienda_abierta():
-            messages.error(request, "En este momento no estamos tomando pedidos online. Por favor, volvé a intentar dentro del horario de atención.")
-            return redirect('ver_carrito')
+        # 🚦 Bloqueo si la tienda está cerrada (guard central, maneja HTML/AJAX)
+        resp = _abort_if_store_closed(request)
+        if resp:
+            return resp
 
         nombre = request.POST.get('cliente_nombre')
         direccion_input = (request.POST.get('cliente_direccion') or '').strip()
@@ -2040,6 +2063,11 @@ def canjear_puntos(request):
     productos_canje = ProductoCanje.objects.filter(disponible=True).order_by('puntos_requeridos')
 
     if request.method == 'POST':
+        # 🚦 Bloqueo si la tienda está cerrada
+        resp = _abort_if_store_closed(request)
+        if resp:
+            return resp
+
         producto_canje_id = request.POST.get('producto_canje_id')
         try:
             producto_canje = ProductoCanje.objects.get(id=producto_canje_id, disponible=True)

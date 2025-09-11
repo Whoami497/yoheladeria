@@ -314,11 +314,13 @@
           method: 'POST',
           headers: { 'X-CSRFToken': csrftoken, 'X-Requested-With': 'XMLHttpRequest' }
         });
-        const data = await res.json();
-        if(data && data.ok !== undefined && 'abierta' in data){
-          applyStoreState(Boolean(data.abierta));
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        if(ct.includes('application/json')){
+          const data = await res.json();
+          if(data && 'abierta' in data){ applyStoreState(!!data.abierta); }
+          else { e.target.submit(); }
         }else{
-          // Si no viene JSON (por ejemplo, CSRF o login), seguimos el submit normal
+          // No es JSON: probablemente redirect a login/CSRF -> submit normal
           e.target.submit();
         }
       }catch(err){
@@ -370,11 +372,12 @@
         <tr class="total"><th>Total</th><td>${fmt(m.m_total)}</td><td></td></tr>
       </table>`;
 
-    const logsHtml = (logs && logs.length)
+    const logsArr = logs || [];
+    const logsHtml = (logsArr && logsArr.length)
       ? `<div class="timeline-logs mt-2">
           <div class="fw-semibold mb-1">Historial:</div>
           <ul class="small mb-0">
-            ${logs.map(l => `<li><span class="muted">${l.created_at||''}</span> — <span class="badge badge-sm ${badgeClass(l.a)}">${l.a}</span> <span class="muted">(${l.actor || l.actor_tipo || ''}${l.fuente ? ' · '+l.fuente : ''})</span></li>`).join('')}
+            ${logsArr.map(l => `<li><span class="muted">${l.created_at||''}</span> — <span class="badge badge-sm ${badgeClass(l.a)}">${l.a}</span> <span class="muted">(${l.actor || l.actor_tipo || ''}${l.fuente ? ' · '+l.fuente : ''})</span></li>`).join('')}
           </ul>
         </div>`
       : '';
@@ -395,7 +398,8 @@
       fecha_cancelado: root.dataset.tsCancelado || null,
     };
     const metricas = enriched && enriched.metricas ? enriched.metricas : null;
-    const logs = enriched && enriched.logs_estado ? enriched.logs_estado : null;
+    // ✅ aceptar tanto logs_estado (plantillas viejas) como logs (WS/nuevas vistas)
+    const logs = enriched && (enriched.logs_estado || enriched.logs) ? (enriched.logs_estado || enriched.logs) : null;
     box.innerHTML = renderTimelineHTML(ts, metricas, logs);
   }
 
