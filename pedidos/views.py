@@ -1411,6 +1411,11 @@ def tienda_estado_json(request):
     """Devuelve el estado actual de la tienda (público)."""
     return JsonResponse({'abierta': _get_tienda_abierta()})
 
+# Alias de compatibilidad para URLs antiguas que esperan 'tienda_estado'
+@require_GET
+def tienda_estado(request):
+    return tienda_estado_json(request)
+
 
 @staff_member_required
 @require_POST
