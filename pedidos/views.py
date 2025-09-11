@@ -24,6 +24,7 @@ import re
 from urllib.parse import quote_plus
 from django.template import TemplateDoesNotExist
 from django.contrib import messages
+import logging  # ← añadido
 
 # ====== Forms ======
 # Intentamos importar los forms del proyecto; si no existen, definimos fallbacks mínimos
@@ -376,6 +377,31 @@ def _notify_panel_update(pedido, message='actualizacion_pedido'):
         )
     except Exception as e:
         print(f"WS panel update error: {e}")
+
+
+# === NUEVO: broadcast del estado de la tienda (para el panel / WS)
+_logger = logging.getLogger(__name__)
+
+def _broadcast_tienda_estado(abierta: bool):
+    """
+    Envía por Channels un mensaje 'tienda_estado' al grupo de panel para
+    refrescar el badge/estado en tiempo real.
+    """
+    try:
+        channel_layer = get_channel_layer()
+        if not channel_layer:
+            return
+        async_to_sync(channel_layer.group_send)(
+            "pedidos_new_orders",
+            {
+                "type": "send_order_notification",
+                "message": "tienda_estado",
+                "order_id": 0,
+                "order_data": {"abierta": bool(abierta)},
+            },
+        )
+    except Exception as e:
+        _logger.warning("No se pudo broadcastear tienda_estado: %s", e)
 
 
 def _notify_cadetes_new_order(request, pedido):
