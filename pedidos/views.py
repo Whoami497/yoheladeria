@@ -142,45 +142,69 @@ def _compute_total(pedido) -> Decimal:
 
 
 # ---------- TIENDA ABIERTA / CERRADA (helpers)
+
 def _get_tienda_abierta() -> bool:
-    """Lee el flag global (DB si existe, si no usa settings)."""
+    """
+    Lee el flag global desde DB:
+      1) GlobalSetting.TIENDA_ABIERTA si existe ese modelo
+      2) StoreStatus (fila única)
+      3) fallback a settings.TIENDA_ABIERTA_DEFAULT (True por defecto)
+    """
     default_val = bool(getattr(settings, 'TIENDA_ABIERTA_DEFAULT', True))
+
+    # 1) GlobalSetting (si existe)
     try:
-        from .models import GlobalSetting  # puede no existir aún si no migraste
+        from .models import GlobalSetting
         try:
-            return GlobalSetting.get_bool('TIENDA_ABIERTA', default=default_val)
+            return bool(GlobalSetting.get_bool('TIENDA_ABIERTA', default=default_val))
         except Exception:
-            return default_val
+            pass
     except Exception:
-        return default_val
+        pass
+
+    # 2) StoreStatus (fila única)
+    try:
+        from .models import StoreStatus
+        ss = StoreStatus.get()  # get_or_create(pk=1)
+        return bool(ss.is_open)
+    except Exception:
+        pass
+
+    # 3) fallback
+    return default_val
 
 
 def _set_tienda_abierta(value: bool) -> bool:
-    """Persiste el flag en DB si está el modelo; devuelve el valor final."""
+    """
+    Persiste el flag en DB:
+      1) GlobalSetting si existe
+      2) StoreStatus (fila única)
+      3) si nada existe, devuelve el valor sin persistir
+    """
+    val = bool(value)
+
+    # 1) GlobalSetting
     try:
         from .models import GlobalSetting
-        GlobalSetting.set_bool('TIENDA_ABIERTA', bool(value))
-        return bool(value)
+        GlobalSetting.set_bool('TIENDA_ABIERTA', val)
+        return val
     except Exception:
-        # Si el modelo no existe, no podemos persistir.
-        return bool(value)
+        pass
 
-
-def _broadcast_tienda_estado(abierta: bool):
-    """Notifica a los paneles por WebSocket el nuevo estado de tienda."""
+    # 2) StoreStatus
     try:
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            'pedidos_new_orders',
-            {
-                'type': 'send_order_notification',
-                'message': 'tienda_estado',
-                'order_id': 0,
-                'order_data': {'abierta': bool(abierta)},
-            }
-        )
-    except Exception as e:
-        print(f"WS tienda_estado error: {e}")
+        from .models import StoreStatus
+        ss = StoreStatus.get()
+        if ss.is_open != val:
+            ss.is_open = val
+            ss.save(update_fields=['is_open'])
+        return val
+    except Exception:
+        pass
+
+    # 3) no se pudo persistir (p.ej. antes de migrar)
+    return val
+
 
 
 def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta: dict | None = None):

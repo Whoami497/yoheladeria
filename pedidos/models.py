@@ -32,6 +32,61 @@ class StoreStatus(models.Model):
 
 
 # =========================
+# Configuración global (clave-valor) — usado por las vistas para TIENDA_ABIERTA
+# =========================
+class GlobalSetting(models.Model):
+    """
+    Clave-valor simple persistente.
+    Las vistas usan GlobalSetting.get_bool('TIENDA_ABIERTA', default=True/False)
+    para leer si la tienda está abierta. Esto evita que vuelva al default al recargar.
+    """
+    key = models.CharField(max_length=64, unique=True)
+    value_text = models.CharField(max_length=255, blank=True, default='')
+
+    class Meta:
+        verbose_name = "Configuración global"
+        verbose_name_plural = "Configuraciones globales"
+
+    def __str__(self):
+        return f"{self.key}={self.value_text}"
+
+    # Helpers
+    @classmethod
+    def get(cls, key: str, default: str = "") -> str:
+        try:
+            return cls.objects.only("value_text").get(key=key).value_text
+        except cls.DoesNotExist:
+            return default
+
+    @classmethod
+    def set(cls, key: str, value: str) -> None:
+        cls.objects.update_or_create(key=key, defaults={"value_text": value})
+
+    @classmethod
+    def get_bool(cls, key: str, default: bool = False) -> bool:
+        """
+        Lee un booleano. Si la clave es 'TIENDA_ABIERTA' y no existe aún en esta tabla,
+        intenta caer al valor de StoreStatus (si lo tenés cargado) como compatibilidad.
+        """
+        raw = cls.get(key, None)
+        if raw is None:
+            if key == "TIENDA_ABIERTA":
+                try:
+                    ss = StoreStatus.get()
+                    return bool(ss.is_open)
+                except Exception:
+                    return bool(default)
+            return bool(default)
+        raw = (raw or "").strip().lower()
+        return raw in ("1", "true", "t", "yes", "y", "si", "sí", "on")
+
+    @classmethod
+    def set_bool(cls, key: str, value: bool) -> bool:
+        cls.set(key, "1" if value else "0")
+        return bool(value)
+
+
+# =========================
 # Catálogo online
 # =========================
 
