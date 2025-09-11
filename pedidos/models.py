@@ -8,6 +8,30 @@ from django.utils import timezone
 from decimal import Decimal
 
 # =========================
+# Estado de la tienda (interruptor maestro)
+# =========================
+class StoreStatus(models.Model):
+    # Fila única (pk=1)
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    is_open = models.BooleanField(default=True, help_text="Si está apagado, no se aceptan nuevos pedidos.")
+    message = models.CharField(max_length=200, blank=True, help_text="Mensaje opcional para mostrar en la web.")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Estado de la tienda"
+        verbose_name_plural = "Estado de la tienda"
+
+    def __str__(self):
+        return "Tienda abierta" if self.is_open else "Tienda pausada"
+
+    @classmethod
+    def get(cls):
+        """Devuelve la única fila de estado (la crea si no existe)."""
+        obj, _ = cls.objects.get_or_create(pk=1, defaults={"is_open": True})
+        return obj
+
+
+# =========================
 # Catálogo online
 # =========================
 

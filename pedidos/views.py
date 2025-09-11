@@ -141,6 +141,48 @@ def _compute_total(pedido) -> Decimal:
     return total.quantize(Decimal('0.01'))
 
 
+# ---------- TIENDA ABIERTA / CERRADA (helpers)
+def _get_tienda_abierta() -> bool:
+    """Lee el flag global (DB si existe, si no usa settings)."""
+    default_val = bool(getattr(settings, 'TIENDA_ABIERTA_DEFAULT', True))
+    try:
+        from .models import GlobalSetting  # puede no existir aún si no migraste
+        try:
+            return GlobalSetting.get_bool('TIENDA_ABIERTA', default=default_val)
+        except Exception:
+            return default_val
+    except Exception:
+        return default_val
+
+
+def _set_tienda_abierta(value: bool) -> bool:
+    """Persiste el flag en DB si está el modelo; devuelve el valor final."""
+    try:
+        from .models import GlobalSetting
+        GlobalSetting.set_bool('TIENDA_ABIERTA', bool(value))
+        return bool(value)
+    except Exception:
+        # Si el modelo no existe, no podemos persistir.
+        return bool(value)
+
+
+def _broadcast_tienda_estado(abierta: bool):
+    """Notifica a los paneles por WebSocket el nuevo estado de tienda."""
+    try:
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            'pedidos_new_orders',
+            {
+                'type': 'send_order_notification',
+                'message': 'tienda_estado',
+                'order_id': 0,
+                'order_data': {'abierta': bool(abierta)},
+            }
+        )
+    except Exception as e:
+        print(f"WS tienda_estado error: {e}")
+
+
 def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta: dict | None = None):
     """
     Cambia el estado del pedido, intenta completar timestamps de hitos si los campos existen
@@ -621,12 +663,18 @@ def index(request):
 
     categorias = Categoria.objects.filter(disponible=True).order_by('orden')
 
+    try:
+        cat_val = int(cat) if cat else None
+    except Exception:
+        cat_val = None
+
     contexto = {
         'productos': productos,
         'categorias': categorias,
         'q': q,
-        'cat': int(cat) if cat else None,
+        'cat': cat_val,
         'sort': sort,
+        # el banner/estado ya viene por context processor como TIENDA_ABIERTA
     }
     return render(request, 'pedidos/index.html', contexto)
 
@@ -780,6 +828,18 @@ def crear_preferencia_mp(request, pedido):
             "currency_id": "ARS",
         })
 
+    # Incluir costo de envío como ítem adicional si corresponde
+    try:
+        if pedido.costo_envio and pedido.costo_envio > 0:
+            items.append({
+                "title": "Envío",
+                "quantity": 1,
+                "unit_price": float(pedido.costo_envio),
+                "currency_id": "ARS",
+            })
+    except Exception:
+        pass
+
     success_url = _abs_https(request, reverse("mp_success"))
     failure_url = _abs_https(request, reverse("index"))
     pending_url = _abs_https(request, reverse("index"))
@@ -853,6 +913,11 @@ def ver_carrito(request):
             continue
 
     if request.method == 'POST':
+        # 🚦 Bloqueo si la tienda está cerrada
+        if not _get_tienda_abierta():
+            messages.error(request, "En este momento no estamos tomando pedidos online. Por favor, volvé a intentar dentro del horario de atención.")
+            return redirect('ver_carrito')
+
         nombre = request.POST.get('cliente_nombre')
         direccion_input = (request.POST.get('cliente_direccion') or '').strip()
         telefono = request.POST.get('cliente_telefono')
@@ -973,6 +1038,14 @@ def ver_carrito(request):
             except Exception as e:
                 messages.error(request, f"No pudimos iniciar el pago con Mercado Pago. Probá de nuevo o elegí otro método. Detalle: {e}")
                 return redirect('ver_carrito')
+
+        # Si NO es MercadoPago, marcamos como RECIBIDO inmediatamente (entra a cocina).
+        try:
+            _marcar_estado(nuevo_pedido, 'RECIBIDO',
+                           actor=request.user if request.user.is_authenticated else None,
+                           fuente='checkout_no_mp')
+        except Exception:
+            pass
 
         if request.user.is_authenticated and hasattr(request.user, 'clienteprofile'):
             puntos_ganados = int(total_del_pedido_para_puntos / Decimal('500')) * 100
@@ -1204,6 +1277,7 @@ def panel_alertas(request):
         'pedidos_hoy': enrich(pedidos_hoy),
         'pedidos_ayer': enrich(pedidos_ayer),
         'entregados_hoy': enrich(entregados_hoy),
+        # El estado de tienda llega al template como TIENDA_ABIERTA vía context processor
     }
     return render(request, 'pedidos/panel_alertas.html', ctx)
 
@@ -1327,6 +1401,39 @@ def panel_alertas_set_estado(request, pedido_id):
         cadete_nombre = pedido.cadete_asignado.user.get_full_name() or pedido.cadete_asignado.user.username
 
     return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': pedido.estado, 'cadete': cadete_nombre})
+
+
+# =========================
+# === TIENDA (toggle abierta/cerrada)
+# =========================
+@require_GET
+def tienda_estado_json(request):
+    """Devuelve el estado actual de la tienda (público)."""
+    return JsonResponse({'abierta': _get_tienda_abierta()})
+
+
+@staff_member_required
+@require_POST
+def tienda_set_estado(request):
+    """
+    Setea el estado de la tienda (solo staff).
+    POST param: abierta=1|0|true|false
+    """
+    raw = (request.POST.get('abierta') or '').strip().lower()
+    val = True if raw in ('1', 'true', 't', 'yes', 'y', 'si', 'sí') else False
+    abierta = _set_tienda_abierta(val)
+    _broadcast_tienda_estado(abierta)
+    return JsonResponse({'ok': True, 'abierta': abierta})
+
+
+@staff_member_required
+@require_POST
+def tienda_toggle(request):
+    """Invierte el estado (solo staff). Útil para un botón ON/OFF."""
+    nueva = not _get_tienda_abierta()
+    abierta = _set_tienda_abierta(nueva)
+    _broadcast_tienda_estado(abierta)
+    return JsonResponse({'ok': True, 'abierta': abierta})
 
 
 # =========================
@@ -1548,7 +1655,9 @@ def cadete_toggle_disponible(request):
     if not hasattr(request.user, 'cadeteprofile'):
         return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
 
-    val = (request.POST.get('disponible') == '1')
+    raw = (request.POST.get('disponible') or '').strip().lower()
+    val = raw in ('1', 'true', 't', 'si', 'sí', 'yes', 'y')
+
     if val and cadete_esta_ocupado(request.user.cadeteprofile):
         return JsonResponse({'ok': False, 'error': 'ocupado'}, status=400)
 
@@ -1972,7 +2081,7 @@ def canjear_puntos(request):
             messages.error(
                 request,
                 f"No tienes suficientes puntos para canjear '{producto_canje.nombre}'. "
-                f"Necesitas {producto_caje.puntos_requeridos} puntos y solo tienes {cliente_profile.puntos_fidelidad}."
+                f"Necesitas {producto_canje.puntos_requeridos} puntos y solo tienes {cliente_profile.puntos_fidelidad}."
             )
 
         return redirect('canjear_puntos')

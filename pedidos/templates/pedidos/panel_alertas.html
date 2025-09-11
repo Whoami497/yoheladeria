@@ -5,6 +5,25 @@
 <div class="container my-5">
   <h2 class="section-title text-center mb-1">Panel de Alertas de Pedidos</h2>
   <p class="text-center text-muted mb-4">Llegan en tiempo real y quedan visibles aun si recargás la página.</p>
+
+  <!-- ===== ESTADO TIENDA + TOGGLE (NUEVO) ===== -->
+  <div class="d-flex align-items-center justify-content-center gap-3 mb-3 flex-wrap">
+    <span id="tienda-estado-badge"
+          class="badge {% if TIENDA_ABIERTA %}bg-success{% else %}bg-danger{% endif %}">
+      {% if TIENDA_ABIERTA %}Tienda ABIERTA{% else %}Tienda CERRADA{% endif %}
+    </span>
+
+    <form id="form-toggle-tienda" method="post" action="{% url 'tienda_toggle' %}" class="d-inline">
+      {% csrf_token %}
+      <button type="submit" id="btn-toggle-tienda"
+              class="btn {% if TIENDA_ABIERTA %}btn-outline-danger{% else %}btn-outline-success{% endif %}">
+        {% if TIENDA_ABIERTA %}Apagar sistema{% else %}Encender sistema{% endif %}
+      </button>
+    </form>
+
+    <small class="text-muted">El checkout queda bloqueado cuando la tienda está cerrada.</small>
+  </div>
+
   <hr>
 
   <!-- ===== HOY (ACTIVOS) ===== -->
@@ -270,6 +289,46 @@
   const alertsHoyFinalizados=document.getElementById('alerts-hoy-finalizados');
   const alertsAyer=document.getElementById('alerts-ayer');
   const wsStatus=document.getElementById('ws-status');
+
+  // ===== NUEVO: refs estado tienda =====
+  const tiendaBadge = document.getElementById('tienda-estado-badge');
+  const tiendaForm  = document.getElementById('form-toggle-tienda');
+  const tiendaBtn   = document.getElementById('btn-toggle-tienda');
+
+  function applyStoreState(isOpen){
+    if(!tiendaBadge || !tiendaBtn) return;
+    tiendaBadge.classList.toggle('bg-success', !!isOpen);
+    tiendaBadge.classList.toggle('bg-danger', !isOpen);
+    tiendaBadge.textContent = isOpen ? 'Tienda ABIERTA' : 'Tienda CERRADA';
+    tiendaBtn.classList.toggle('btn-outline-danger', !!isOpen);
+    tiendaBtn.classList.toggle('btn-outline-success', !isOpen);
+    tiendaBtn.textContent = isOpen ? 'Apagar sistema' : 'Encender sistema';
+  }
+
+  if(tiendaForm){
+    tiendaForm.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      tiendaBtn.disabled = true;
+      try{
+        const res = await fetch(tiendaForm.action, {
+          method: 'POST',
+          headers: { 'X-CSRFToken': csrftoken, 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const data = await res.json();
+        if(data && data.ok !== undefined && 'abierta' in data){
+          applyStoreState(Boolean(data.abierta));
+        }else{
+          // Si no viene JSON (por ejemplo, CSRF o login), seguimos el submit normal
+          e.target.submit();
+        }
+      }catch(err){
+        // fallback: submit normal
+        e.target.submit();
+      }finally{
+        tiendaBtn.disabled = false;
+      }
+    });
+  }
 
   function badgeClass(estado){return `bg-status-${(estado||'').toLowerCase()}`}
   function orderExists(id){
@@ -571,6 +630,13 @@
     const kind=(data.message||'');
     const orderId=data.order_id;
     const orderData=data.order_data||{};
+
+    // ===== NUEVO: cambio de estado de tienda por WS
+    if(kind==='tienda_estado'){
+      const abierta = !!(orderData && orderData.abierta);
+      applyStoreState(abierta);
+      return;
+    }
 
     function moveToFinalizadosFromCard(card, estadoActual){
       const total = card.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';

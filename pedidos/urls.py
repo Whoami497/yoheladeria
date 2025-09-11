@@ -39,6 +39,10 @@ urlpatterns = [
     # Alias opcional por si algún botón viejo apunta a esta ruta
     path('panel-alertas/confirmar/<int:pedido_id>/', views.confirmar_pedido, name='confirmar_pedido_panel'),
 
+    # --- NUEVO: abrir/cerrar tienda ---
+    path('tienda/estado/', views.tienda_estado, name='tienda_estado'),  # GET: devuelve flags en JSON
+    path('panel-alertas/tienda/toggle/', views.tienda_toggle, name='tienda_toggle'),  # POST staff: abre/cierra
+
     # --- Panel de cadetes ---
     path('cadete/login/', views.login_cadete, name='login_cadete'),
     path('cadete/panel/', views.panel_cadete, name='panel_cadete'),
