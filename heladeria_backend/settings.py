@@ -9,11 +9,18 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # --- Claves y modo ---
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-tu-clave-secreta-local')
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '127.0.0.1,yoheladeria.onrender.com').split(',')
+
+# 🔐 HOSTS permitidos (incluye Render + tu dominio raíz y www)
+ALLOWED_HOSTS = os.environ.get(
+    'ALLOWED_HOSTS',
+    '127.0.0.1,localhost,yoheladeria.onrender.com,pedidosyoheladerias.com,www.pedidosyoheladerias.com'
+).split(',')
 
 # CSRF (producción + dev local)
 CSRF_TRUSTED_ORIGINS = [
     'https://yoheladeria.onrender.com',
+    'https://pedidosyoheladerias.com',
+    'https://www.pedidosyoheladerias.com',
 ]
 if DEBUG:
     CSRF_TRUSTED_ORIGINS += ['http://127.0.0.1:8000', 'http://localhost:8000']
@@ -155,12 +162,9 @@ GOOGLE_GEOCODING_KEY = os.environ.get("GOOGLE_GEOCODING_KEY", "")
 SUCURSAL_DIRECCION = os.environ.get('SUCURSAL_DIRECCION', 'San Martín 123, Catamarca, Argentina')
 MAPS_LANGUAGE = os.environ.get('MAPS_LANGUAGE', 'es')
 MAPS_REGION   = os.environ.get('MAPS_REGION', 'AR')
-# Sesgo opcional para geocoding (no estrictamente usado, pero útil si lo activamos)
 MAPS_COMPONENTS = os.environ.get('MAPS_COMPONENTS', 'country:AR|administrative_area:Catamarca')
 
 # --- ENVÍOS (calibrables) ---
-# costo = ENVIO_BASE + ENVIO_POR_KM * (km_efectivos)
-# km_efectivos = max(km, ENVIO_KM_MIN) + ENVIO_KM_OFFSET
 ENVIO_BASE = os.environ.get('ENVIO_BASE', '300')          # ARS
 ENVIO_POR_KM = os.environ.get('ENVIO_POR_KM', '50')       # ARS por km
 ENVIO_REDONDEO = os.environ.get('ENVIO_REDONDEO', '100')  # múltiplos (0 = sin redondeo)
