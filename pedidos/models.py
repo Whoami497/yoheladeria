@@ -196,6 +196,7 @@ class CadeteProfile(models.Model):
 
 class Pedido(models.Model):
     ESTADO_CHOICES = [
+        ('PENDIENTE_PAGO', 'Pendiente de pago'),   # ← NUEVO estado para MP
         ('RECIBIDO', 'Recibido'),
         ('EN_PREPARACION', 'En Preparación'),
         ('ASIGNADO', 'Asignado a Cadete'),
@@ -378,12 +379,19 @@ class PedidoEstadoLog(models.Model):
         return f"Pedido #{self.pedido_id}: {self.de or '—'} → {self.a} @ {self.created_at:%Y-%m-%d %H:%M}"
 
 
-# ---------- 🆕 Al crear un pedido en RECIBIDO (efectivo), fijamos inicio
+# ---------- 🆕 Señales
 @receiver(post_save, sender=Pedido)
 def pedido_set_inicio_si_corresponde(sender, instance: Pedido, created, **kwargs):
-    if created and instance.estado == 'RECIBIDO' and not instance.fecha_pago_aprobado:
-        try:
+    """
+    Al crear un pedido:
+      - Para EFECTIVO: si quedó en RECIBIDO, fijamos fecha_pago_aprobado = fecha_pedido.
+      - Para MERCADOPAGO: NO marcamos aprobado acá (queda PENDIENTE_PAGO hasta el webhook).
+    """
+    if not created:
+        return
+    try:
+        if instance.metodo_pago != 'MERCADOPAGO' and instance.estado == 'RECIBIDO' and not instance.fecha_pago_aprobado:
             instance.fecha_pago_aprobado = instance.fecha_pedido
             instance.save(update_fields=['fecha_pago_aprobado'])
-        except Exception:
-            pass
+    except Exception:
+        pass

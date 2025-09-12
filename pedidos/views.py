@@ -226,6 +226,7 @@ def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta
             'EN_CAMINO': 'fecha_en_camino',
             'ENTREGADO': 'fecha_entregado',
             'CANCELADO': 'fecha_cancelado',
+            # 'PENDIENTE_PAGO': 'fecha_pendiente_pago',  # si tenés este campo, podés activarlo
         }
         campo = mapping.get(nuevo_estado)
         update_fields = ['estado']
@@ -832,7 +833,12 @@ def detalle_producto(request, producto_id):
             nombre_item_carrito = f"{producto.nombre} - {opcion_seleccionada_obj.nombre_opcion}"
             opcion_id_para_carrito = opcion_seleccionada_obj.id
             opcion_nombre_para_carrito = opcion_seleccionada_obj.nombre_opcion
-            opcion_imagen_para_carrito = opcion_seleccionada_obj.imagen_opcion if opcion_seleccionada_obj.imagen_opcion else producto.imagen
+            # FIX: línea corregida
+            opcion_imagen_para_carrito = (
+                opcion_seleccionada_obj.imagen_opcion
+                if (opcion_seleccionada_obj and getattr(opcion_seleccionada_obj, 'imagen_opcion', None))
+                else producto.imagen
+            )
 
         item_key = f"{producto.id}_"
         if opcion_id_para_carrito:
@@ -994,7 +1000,7 @@ def ver_carrito(request):
         nombre = request.POST.get('cliente_nombre')
         direccion_input = (request.POST.get('cliente_direccion') or '').strip()
         telefono = request.POST.get('cliente_telefono')
-        metodo_pago = request.POST.get('metodo_pago')
+        metodo_pago = (request.POST.get('metodo_pago') or '').strip()
         nota_pedido = (request.POST.get('nota_pedido') or '').strip()
 
         modo_envio = (request.POST.get('modo_envio') or '').lower()
@@ -1096,23 +1102,33 @@ def ver_carrito(request):
                 messages.error(request, f"Error al procesar el detalle del pedido para {item_data.get('producto_nombre', 'un producto')}: {e}")
                 continue
 
-        if metodo_pago == 'MERCADOPAGO':
+        # === FLUJO MP ===
+        if metodo_pago.strip().upper() in ('MP', 'MERCADOPAGO', 'MERCADO_PAGO', 'MERCADO PAGO'):
             try:
+                # marcar pedido como pendiente de pago (NO entra al panel aún)
+                _marcar_estado(nuevo_pedido, 'PENDIENTE_PAGO',
+                               actor=request.user if request.user.is_authenticated else None,
+                               fuente='checkout_mp')
+
                 nuevo_pedido.metodo_pago = 'MERCADOPAGO'
-                nuevo_pedido.save()
+                nuevo_pedido.save(update_fields=['metodo_pago'])
+
                 request.session['mp_last_order_id'] = nuevo_pedido.id
                 request.session.modified = True
+
                 init_point = crear_preferencia_mp(request, nuevo_pedido)
+
                 if 'carrito' in request.session:
                     del request.session['carrito']
                     request.session.modified = True
+
                 messages.info(request, f"Redirigiendo a Mercado Pago para completar el pago del pedido #{nuevo_pedido.id}.")
                 return redirect(init_point)
             except Exception as e:
                 messages.error(request, f"No pudimos iniciar el pago con Mercado Pago. Probá de nuevo o elegí otro método. Detalle: {e}")
                 return redirect('ver_carrito')
 
-        # Si NO es MercadoPago, marcamos como RECIBIDO inmediatamente (entra a cocina).
+        # === SIN MP → entra a cocina ya mismo ===
         try:
             _marcar_estado(nuevo_pedido, 'RECIBIDO',
                            actor=request.user if request.user.is_authenticated else None,
@@ -1142,7 +1158,7 @@ def ver_carrito(request):
                         'map_url': _map_url_from_text(nuevo_pedido.cliente_direccion),
                         'cliente_telefono': nuevo_pedido.cliente_telefono,
                         'metodo_pago': nuevo_pedido.metodo_pago,
-                        'total_pedido': str(_compute_total(nuevo_pedido)),  # ← consistente
+                        'total_pedido': str(_compute_total(nuevo_pedido)),
                         'costo_envio': float(nuevo_pedido.costo_envio or 0),
                         'distancia_km': float(distancia_km or 0),
                         'nota_pedido': (nota_pedido or None),
@@ -1261,6 +1277,7 @@ def perfil_cliente(request):
                 messages.error(request, error)
     else:
         initial = {'first_name': user.first_name, 'last_name': user.last_name, 'email': user.email}
+        # FIX: línea corregida
         form = ClienteProfileForm(instance=cliente_profile, initial=initial) if hasattr(ClienteProfileForm, '_meta') else ClienteProfileForm(initial=initial)
 
     contexto = {'form': form, 'user': user, 'cliente_profile': cliente_profile}
@@ -1324,7 +1341,7 @@ def panel_alertas(request):
     pedidos_hoy = (
         Pedido.objects
         .filter(fecha_pedido__date=hoy)
-        .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
+        .exclude(estado__in=['ENTREGADO', 'CANCELADO', 'PENDIENTE_PAGO'])  # ← no mostrar pendientes
         .order_by('-fecha_pedido')
     )
     pedidos_ayer = (
@@ -1363,7 +1380,7 @@ def panel_alertas_data(request):
     if scope == 'hoy':
         qs = (Pedido.objects
             .filter(fecha_pedido__date=hoy)
-            .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
+            .exclude(estado__in=['ENTREGADO', 'CANCELADO', 'PENDIENTE_PAGO'])  # ← no mostrar pendientes
             .order_by('-fecha_pedido'))
     elif scope == 'hoy_finalizados':
         qs = (Pedido.objects
@@ -2036,11 +2053,15 @@ def mp_webhook_view(request):
                 _marcar_estado(pedido, 'RECIBIDO', actor=None, fuente='webhook_mp', meta={'payment_id': payment_id})
             elif status == 'rejected':
                 _marcar_estado(pedido, 'CANCELADO', actor=None, fuente='webhook_mp', meta={'payment_id': payment_id})
+            else:
+                # pending / in_process -> lo dejamos en PENDIENTE_PAGO
+                _marcar_estado(pedido, 'PENDIENTE_PAGO', actor=None, fuente='webhook_mp', meta={'payment_id': payment_id})
     except Exception as e:
         print(f"WEBHOOK MP: error guardando pedido/estado: {e}")
 
     try:
-        _notify_panel_update(pedido, message='actualizacion_pedido' if status != 'approved' else 'nuevo_pedido')
+        # si aprobó: 'nuevo_pedido' (aparece en panel), si no: solo actualización
+        _notify_panel_update(pedido, message='nuevo_pedido' if status == 'approved' else 'actualizacion_pedido')
     except Exception as e:
         print(f"WEBHOOK MP: error enviando WS: {e}")
 
@@ -2058,45 +2079,24 @@ def mp_webhook_view(request):
 
 
 def mp_success(request):
+    """
+    Página de retorno de MP. No forzamos la creación en panel a menos que verifiquemos
+    que ya hay un pago aprobado (fallback en caso de webhook perdido).
+    """
     last_id = request.session.pop('mp_last_order_id', None)
     if last_id:
         try:
             pedido = Pedido.objects.get(id=last_id)
-            channel_layer = get_channel_layer()
-            detalles_para_notificacion = []
-            for d in pedido.detalles.all():
-                detalles_para_notificacion.append({
-                    'producto_nombre': d.producto.nombre,
-                    'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
-                    'cantidad': d.cantidad,
-                    'sabores_nombres': [s.nombre for s in d.sabores.all()],
-                })
-
-            async_to_sync(channel_layer.group_send)(
-                'pedidos_new_orders',
-                {
-                    'type': 'send_order_notification',
-                    'message': 'nuevo_pedido',
-                    'order_id': pedido.id,
-                    'order_data': {
-                        'cliente_nombre': pedido.cliente_nombre,
-                        'cliente_direccion': pedido.cliente_direccion,
-                        'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
-                        'map_url': _map_url_from_text(pedido.cliente_direccion),
-                        'cliente_telefono': pedido.cliente_telefono,
-                        'metodo_pago': 'MERCADOPAGO',
-                        'total_pedido': str(_compute_total(pedido)),
-                        'costo_envio': float(pedido.costo_envio or 0),
-                        'detalles': detalles_para_notificacion,
-                        'metricas': _serialize_metricas(pedido),
-                        'logs': _serialize_logs(pedido),
-                    }
-                }
-            )
-            print(f"MP SUCCESS: notificación fallback enviada para pedido #{pedido.id}")
+            # Verificación opcional: si ya fue aprobado (o el webhook se perdió), levantamos el pedido.
+            payment = _mp_find_latest_approved_payment(str(last_id))
+            if payment:
+                # si aún estuviese pendiente, lo pasamos a RECIBIDO y notificamos
+                if pedido.estado != 'RECIBIDO':
+                    _marcar_estado(pedido, 'RECIBIDO', actor=None, fuente='mp_success_fallback', meta={'payment_id': payment.get('id')})
+                _notify_panel_update(pedido, message='nuevo_pedido')
         except Exception as e:
-            print(f"MP SUCCESS: error en fallback WS: {e}")
-    messages.info(request, "Gracias. Estamos confirmando tu pago. En breve verás tu pedido en cocina.")
+            print(f"MP SUCCESS: error en verificación/WS fallback: {e}")
+    messages.info(request, "Gracias. Estamos confirmando tu pago. Si ya fue aprobado, tu pedido entrará a cocina.")
     return redirect('pedido_exitoso')
 
 
@@ -2143,6 +2143,7 @@ def canjear_puntos(request):
                         user=request.user,
                         cliente_nombre=request.user.get_full_name() or request.user.username,
                         cliente_direccion=f"Canje de Puntos: {producto_canje.nombre}",
+                        # FIX: línea corregida
                         cliente_telefono=cliente_profile.telefono or "",
                         estado='RECIBIDO',
                     )
