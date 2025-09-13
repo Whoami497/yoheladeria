@@ -107,6 +107,13 @@
                         data-order-id="{{ p.id }}">
                   <i class="bi bi-check-circle-fill"></i> Confirmar
                 </button>
+                <!-- NUEVO: botón Imprimir -->
+                <a href="{% url 'ticket_pedido' p.id %}?auto=1&qz=1"
+                   target="_blank"
+                   class="btn btn-outline-secondary mt-2 btn-print-ticket"
+                   data-order-id="{{ p.id }}">
+                  <i class="bi bi-printer"></i> Imprimir
+                </a>
                 <div class="text-muted small mt-1">Notifica a cadetes</div>
               {% else %}
                 <div class="dropdown">
@@ -122,6 +129,13 @@
                     <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Cancelar</button></li>
                   </ul>
                 </div>
+                <!-- NUEVO: botón Imprimir -->
+                <a href="{% url 'ticket_pedido' p.id %}?auto=1&qz=1"
+                   target="_blank"
+                   class="btn btn-outline-secondary mt-2 btn-print-ticket"
+                   data-order-id="{{ p.id }}">
+                  <i class="bi bi-printer"></i> Imprimir
+                </a>
               {% endif %}
             </div>
           </div>
@@ -398,7 +412,6 @@
       fecha_cancelado: root.dataset.tsCancelado || null,
     };
     const metricas = enriched && enriched.metricas ? enriched.metricas : null;
-    // ✅ aceptar tanto logs_estado (plantillas viejas) como logs (WS/nuevas vistas)
     const logs = enriched && (enriched.logs_estado || enriched.logs) ? (enriched.logs_estado || enriched.logs) : null;
     box.innerHTML = renderTimelineHTML(ts, metricas, logs);
   }
@@ -414,7 +427,6 @@
     wrapper.id=`order-${order.id}`;
     wrapper.dataset.orderId=order.id;
 
-    // dataset de timestamps (si vienen desde WS)
     if(order.timestamps){
       wrapper.dataset.tsPedido      = order.timestamps.fecha_pedido || '';
       wrapper.dataset.tsPago        = order.timestamps.fecha_pago_aprobado || '';
@@ -446,12 +458,15 @@
     const direccion = order.direccion_legible || order.cliente_direccion || '—';
     const mapUrl = order.map_url || '';
 
+    const printBtnHtml = `<a href="/ticket/${order.id}/?auto=1&qz=1" target="_blank" class="btn btn-outline-secondary mt-2 btn-print-ticket" data-order-id="${order.id}"><i class="bi bi-printer"></i> Imprimir</a>`;
+
     const rightControls = estado==='RECIBIDO'
       ? `<button class="btn btn-success fw-bold btn-confirm"
                  data-confirm-url="/confirmar-pedido/${order.id}/"
                  data-order-id="${order.id}">
            <i class="bi bi-check-circle-fill"></i> Confirmar
          </button>
+         ${printBtnHtml}
          <div class="text-muted small mt-1">Notifica a cadetes</div>`
       : `<div class="dropdown">
            <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
@@ -463,7 +478,8 @@
              <li><hr class="dropdown-divider"></li>
              <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="/panel-alertas/estado/${order.id}/">Cancelar</button></li>
            </ul>
-         </div>`;
+         </div>
+         ${printBtnHtml}`;
 
     wrapper.innerHTML = `
       <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
@@ -491,7 +507,6 @@
       <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     `;
 
-    // pintar timeline si vino info enriquecida
     renderTimelineInto(wrapper, order);
     return wrapper;
   }
@@ -536,6 +551,7 @@
     try { return await res.json(); } catch { window.location.href = fallbackUrl; return null; }
   }
 
+  // ===== Confirmar → actualiza UI + imprime ticket automático
   document.addEventListener('click', async (ev)=>{
     const btn=ev.target.closest('.btn-confirm'); if(!btn) return;
     ev.preventDefault();
@@ -557,13 +573,27 @@
               <li><hr class="dropdown-divider"></li>
               <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="${url.replace('/confirmar-pedido','/panel-alertas/estado')}">Cancelar</button></li>
             </ul>
-          </div>`;
+          </div>
+          <a href="/ticket/${btn.dataset.orderId}/?auto=1&qz=1" target="_blank" class="btn btn-outline-secondary mt-2 btn-print-ticket" data-order-id="${btn.dataset.orderId}">
+            <i class="bi bi-printer"></i> Imprimir
+          </a>`;
+        // 🖨️ abrir ticket e imprimir automáticamente
+        window.open(`/ticket/${btn.dataset.orderId}/?auto=1&qz=1`, '_blank', 'width=420,height=640');
       }else{
         window.location.href=url;
       }
     }catch(e){ window.location.href=url; }
   });
 
+  // ===== Botón "Imprimir" manual (mismo popup consistente)
+  document.addEventListener('click', (ev)=>{
+    const a = ev.target.closest('.btn-print-ticket'); if(!a) return;
+    ev.preventDefault();
+    const id = a.dataset.orderId;
+    window.open(`/ticket/${id}/?auto=1&qz=1`, '_blank', 'width=420,height=640');
+  });
+
+  // ===== Cambios de estado desde dropdown
   document.addEventListener('click', async (ev)=>{
     const item=ev.target.closest('.btn-set-state'); if(!item) return;
     const url=item.dataset.url, estado=item.dataset.state;
