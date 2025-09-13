@@ -28,7 +28,7 @@ from django.contrib import messages
 import logging  # ← añadido
 from django.views.decorators.http import require_GET
 from django.contrib.admin.views.decorators import staff_member_required
-
+import socket  # ← NUEVO: para impresión TCP/RAW
 
 # ====== Forms ======
 # Intentamos importar los forms del proyecto; si no existen, definimos fallbacks mínimos
@@ -1620,16 +1620,66 @@ def _send_ticket_printnode(text: str, title: str = "Pedido a cocina", copies: in
         print(f"PRINTNODE exception: {e}")
     return False
 
+# === NUEVO: envío directo TCP/RAW a impresora ESC/POS ===
+def _normalize_for_encoding(s: str, encoding: str) -> bytes:
+    """
+    Intenta codificar con la codificación elegida y cae a latin-1 si falla.
+    Reemplaza caracteres no soportados para evitar '?'.
+    """
+    try:
+        return s.encode(encoding, errors='replace')
+    except Exception:
+        try:
+            return s.encode('latin-1', errors='replace')
+        except Exception:
+            return s.encode('ascii', errors='replace')
+
+def _escpos_wrap_text(text: str, encoding: str) -> bytes:
+    """
+    Arma bytes ESC/POS básicos:
+      - Init
+      - Texto
+      - Corte completo
+    """
+    ESC = b'\x1b'
+    GS  = b'\x1d'
+    data = bytearray()
+    data += ESC + b'@'            # init
+    data += _normalize_for_encoding(text + "\n\n", encoding)
+    data += GS + b'V' + b'\x00'   # corte completo
+    return bytes(data)
+
+def _send_ticket_tcp_escpos(text: str, title: str = "Pedido a cocina", copies: int = 1) -> bool:
+    host = getattr(settings, 'COMANDERA_PRINTER_HOST', '') or ''
+    port = int(getattr(settings, 'COMANDERA_PRINTER_PORT', 9100) or 9100)
+    if not host:
+        return False
+
+    encoding = getattr(settings, 'COMANDERA_ENCODING', 'cp437')  # cp437 suele andar bien con español
+    payload = _escpos_wrap_text(text, encoding)
+    try:
+        for _ in range(int(copies or 1)):
+            with socket.create_connection((host, port), timeout=5) as s:
+                s.sendall(payload)
+        return True
+    except Exception as e:
+        print(f"ESC/POS TCP error ({host}:{port}): {e}")
+        return False
+
 def _print_ticket_for_pedido(pedido):
     """
     Construye y manda el ticket. No levanta excepciones (no rompe el flujo).
+    Prioridad: TCP directo → Webhook propio → PrintNode.
     """
     try:
         copies = int(getattr(settings, 'COMANDERA_COPIES', 1) or 1)
     except Exception:
         copies = 1
     text = _build_ticket_text(pedido)
-    # Prioridad: webhook propio -> PrintNode
+
+    if _send_ticket_tcp_escpos(text, title=f"Pedido #{pedido.id}", copies=copies):
+        print(f"COMANDERA: ticket #{pedido.id} enviado por TCP/RAW.")
+        return
     if _send_ticket_webhook(text, title=f"Pedido #{pedido.id}", copies=copies):
         print(f"COMANDERA: ticket #{pedido.id} enviado por webhook.")
         return
@@ -1753,7 +1803,7 @@ def confirmar_pedido(request, pedido_id):
 
     _marcar_estado(pedido, 'EN_PREPARACION', actor=request.user, fuente='confirmar_pedido')
 
-    # ← sigue tu impresión actual (webhook/PrintNode). No rompe si no está configurada.
+    # ← impresión (TCP / webhook / PrintNode). No rompe si no está configurada.
     try:
         _print_ticket_for_pedido(pedido)
     except Exception as e:
@@ -1798,7 +1848,7 @@ def confirmar_pedido(request, pedido_id):
     _notify_panel_update(pedido, message='nuevo_pedido')
 
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-        # === NUEVO: devolvemos URL de ticket HTML para imprimir desde el panel
+        # === devolvemos URL de ticket HTML para imprimir desde el panel si quieren
         ticket_url = _abs_https(request, reverse('ticket_pedido', args=[pedido.id])) + "?auto=1"
         return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': 'EN_PREPARACION', 'ticket_url': ticket_url})
 

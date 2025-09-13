@@ -16,7 +16,7 @@ ALLOWED_HOSTS = os.environ.get(
     '127.0.0.1,localhost,yoheladeria.onrender.com,pedidosyoheladerias.com,www.pedidosyoheladerias.com'
 ).split(',')
 
-# CSRF (producción + dev local)
+# CSRF (producción + dev local) — se puede extender por ENV con CSRF_TRUSTED_ORIGINS
 CSRF_TRUSTED_ORIGINS = [
     'https://yoheladeria.onrender.com',
     'https://pedidosyoheladerias.com',
@@ -24,17 +24,25 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 if DEBUG:
     CSRF_TRUSTED_ORIGINS += ['http://127.0.0.1:8000', 'http://localhost:8000']
+# Permitir agregar orígenes extra por variable de entorno (coma-separados)
+_csrf_env = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
+if _csrf_env:
+    CSRF_TRUSTED_ORIGINS += [o.strip() for o in _csrf_env.split(',') if o.strip()]
 
 # Para proxies (Render) y HTTPS correcto en request.is_secure()
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 USE_X_FORWARDED_HOST = True
 
-# Cookies seguras en prod
+# Cookies/HTTPS en prod
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
 SECURE_SSL_REDIRECT = not DEBUG
+
+# Opcional: cabeceras de seguridad suaves (no rompen dev)
+SECURE_REFERRER_POLICY = os.environ.get('SECURE_REFERRER_POLICY', 'same-origin')
+X_FRAME_OPTIONS = os.environ.get('X_FRAME_OPTIONS', 'SAMEORIGIN')
 
 # --- Apps ---
 INSTALLED_APPS = [
@@ -78,7 +86,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
-                'pedidos.context_processors.store_status',  # ← agregado
+                'pedidos.context_processors.store_status',  # banner/estado tienda abierta/cerrada
             ],
         },
     },
@@ -109,7 +117,7 @@ USE_I18N = True
 USE_TZ = True
 
 # --- Archivos estáticos y media ---
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [
     BASE_DIR / 'static',
@@ -124,7 +132,9 @@ STORAGES = {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
     },
     "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        # Ajuste dinámico según modo: en dev evita errores de manifest
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage" if not DEBUG
+                   else "whitenoise.storage.CompressedStaticFilesStorage",
     },
 }
 
@@ -138,6 +148,9 @@ ASGI_APPLICATION = 'heladeria_backend.asgi.application'
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels.layers.InMemoryChannelLayer',  # OK para 1 dyno / MVP
+        # Para múltiples réplicas: usar Redis y configurar URL por env
+        # 'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        # 'CONFIG': {'hosts': [os.environ.get('REDIS_URL', 'redis://localhost:6379/0')]},
     },
 }
 
@@ -177,7 +190,7 @@ ENVIO_KM_OFFSET = os.environ.get('ENVIO_KM_OFFSET', '0')  # km fantasma
 ORIGEN_LAT = os.environ.get('ORIGEN_LAT', '')             # ej: -28.468500
 ORIGEN_LNG = os.environ.get('ORIGEN_LNG', '')             # ej: -65.779900
 
-# --- Sitio / flags varios (usados en views) ---
+# --- Sitio / flags varios ---
 SITE_NAME = os.environ.get('SITE_NAME', 'YO HELADERÍAS')
 TIENDA_ABIERTA_DEFAULT = os.environ.get('TIENDA_ABIERTA_DEFAULT', 'True') == 'True'
 
@@ -190,3 +203,31 @@ COMANDERA_COPIES = int(os.environ.get('COMANDERA_COPIES', '1'))      # copias po
 # Alternativa por PrintNode (si querés usar su agente en la PC de caja)
 PRINTNODE_API_KEY = os.environ.get('PRINTNODE_API_KEY', '')
 PRINTNODE_PRINTER_ID = os.environ.get('PRINTNODE_PRINTER_ID', '')
+
+# --- Logging a consola (útil en Render/heroku-like) ---
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO' if not DEBUG else 'DEBUG')
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "simple": {
+            "format": "[{levelname}] {name}: {message}",
+            "style": "{",
+        },
+        "verbose": {
+            "format": "[{levelname}] {asctime} {name} | {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose" if not DEBUG else "simple",
+        },
+    },
+    "root": {"handlers": ["console"], "level": LOG_LEVEL},
+    "loggers": {
+        "django": {"level": os.environ.get('DJANGO_LOG_LEVEL', LOG_LEVEL)},
+        "pedidos": {"level": LOG_LEVEL},
+    },
+}
