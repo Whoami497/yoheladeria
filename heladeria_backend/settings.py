@@ -24,7 +24,6 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 if DEBUG:
     CSRF_TRUSTED_ORIGINS += ['http://127.0.0.1:8000', 'http://localhost:8000']
-# Permitir agregar orígenes extra por variable de entorno (coma-separados)
 _csrf_env = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
 if _csrf_env:
     CSRF_TRUSTED_ORIGINS += [o.strip() for o in _csrf_env.split(',') if o.strip()]
@@ -132,7 +131,7 @@ STORAGES = {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
     },
     "staticfiles": {
-        # Ajuste dinámico según modo: en dev evita errores de manifest
+        # En prod usa manifest, en dev evita errores de hash
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage" if not DEBUG
                    else "whitenoise.storage.CompressedStaticFilesStorage",
     },
@@ -147,8 +146,8 @@ LOGIN_URL = '/accounts/login/'
 ASGI_APPLICATION = 'heladeria_backend.asgi.application'
 CHANNEL_LAYERS = {
     'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',  # OK para 1 dyno / MVP
-        # Para múltiples réplicas: usar Redis y configurar URL por env
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',  # 1 dyno / MVP
+        # Para múltiples réplicas: usar Redis
         # 'BACKEND': 'channels_redis.core.RedisChannelLayer',
         # 'CONFIG': {'hosts': [os.environ.get('REDIS_URL', 'redis://localhost:6379/0')]},
     },
@@ -194,15 +193,26 @@ ORIGEN_LNG = os.environ.get('ORIGEN_LNG', '')             # ej: -65.779900
 SITE_NAME = os.environ.get('SITE_NAME', 'YO HELADERÍAS')
 TIENDA_ABIERTA_DEFAULT = os.environ.get('TIENDA_ABIERTA_DEFAULT', 'True') == 'True'
 
-# --- COMANDERA / TICKETS (integración con tu POS o PrintNode) ---
-# Si tu POS ya imprime por un endpoint HTTP, configurá este webhook:
-COMANDERA_WEBHOOK_URL = os.environ.get('COMANDERA_WEBHOOK_URL', '')  # ej: http://IP_LOCAL:5000/print
-COMANDERA_TOKEN = os.environ.get('COMANDERA_TOKEN', '')              # si tu POS requiere token (opcional)
-COMANDERA_COPIES = int(os.environ.get('COMANDERA_COPIES', '1'))      # copias por ticket
+# --- COMANDERA / TICKETS ---
+# 1) Envío directo TCP/RAW a impresora ESC/POS (lo usa _send_ticket_tcp_escpos)
+COMANDERA_PRINTER_HOST = os.environ.get('COMANDERA_PRINTER_HOST', '')      # ej: '192.168.0.50'
+COMANDERA_PRINTER_PORT = int(os.environ.get('COMANDERA_PRINTER_PORT', '9100'))
 
-# Alternativa por PrintNode (si querés usar su agente en la PC de caja)
+# 2) Webhook HTTP (si tu POS imprime por un endpoint)
+COMANDERA_WEBHOOK_URL = os.environ.get('COMANDERA_WEBHOOK_URL', '')  # ej: http://IP_LOCAL:5000/print
+COMANDERA_TOKEN = os.environ.get('COMANDERA_TOKEN', '')
+
+# 3) PrintNode (agente instalado en la PC de caja)
 PRINTNODE_API_KEY = os.environ.get('PRINTNODE_API_KEY', '')
 PRINTNODE_PRINTER_ID = os.environ.get('PRINTNODE_PRINTER_ID', '')
+
+# Comunes
+COMANDERA_COPIES = int(os.environ.get('COMANDERA_COPIES', '1'))
+
+# Parámetros de compatibilidad de papel/corte (los consumen _escpos_wrap_text y _send_ticket_tcp_escpos)
+COMANDERA_FEED_LINES = int(os.environ.get('COMANDERA_FEED_LINES', '10'))   # 8–12 suele andar bien
+COMANDERA_CUT_MODE   = (os.environ.get('COMANDERA_CUT_MODE', 'auto') or 'auto').lower()  # 'auto'|'gs_v'|'esc_i'|'esc_m'
+COMANDERA_ENCODING   = os.environ.get('COMANDERA_ENCODING', 'cp437')       # probar 'cp850'/'cp858' si acentos raros
 
 # --- Logging a consola (útil en Render/heroku-like) ---
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO' if not DEBUG else 'DEBUG')

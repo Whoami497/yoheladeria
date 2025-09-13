@@ -1644,18 +1644,58 @@ def _normalize_for_encoding(s: str, encoding: str) -> bytes:
 
 def _escpos_wrap_text(text: str, encoding: str) -> bytes:
     """
-    Arma bytes ESC/POS básicos:
+    Arma bytes ESC/POS con:
       - Init
-      - Texto
-      - Corte completo
+      - Texto en CRLF
+      - Alimentación de N líneas (configurable)
+      - Corte (varios comandos para compatibilidad, configurable)
+
+    Ajustes por settings:
+      COMANDERA_FEED_LINES = 8     # líneas a alimentar antes del corte (0–255)
+      COMANDERA_CUT_MODE   = 'auto'  # 'auto' | 'gs_v' | 'esc_i' | 'esc_m'
+      COMANDERA_ENCODING   = 'cp437' # ya lo usás en _send_ticket_tcp_escpos
     """
     ESC = b'\x1b'
     GS  = b'\x1d'
+
+    # Lectura de settings con defaults seguros
+    try:
+        feed_lines = int(getattr(settings, 'COMANDERA_FEED_LINES', 8) or 8)
+    except Exception:
+        feed_lines = 8
+    cut_mode = str(getattr(settings, 'COMANDERA_CUT_MODE', 'auto') or 'auto').lower()
+
+    # Normalizamos saltos de línea a CRLF (muchas térmicas lo prefieren)
+    text_crlf = (text or "").replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+
     data = bytearray()
-    data += ESC + b'@'            # init
-    data += _normalize_for_encoding(text + "\n\n", encoding)
-    data += GS + b'V' + b'\x00'   # corte completo
+    data += ESC + b'@'  # init
+    data += _normalize_for_encoding(text_crlf, encoding)
+
+    # Alimentar papel: ESC d n
+    n = max(0, min(255, feed_lines))
+    data += ESC + b'd' + bytes([n])
+
+    # Corte configurable
+    # 'gs_v': GS V <m> <n> (full/partial) – estándar ESC/POS
+    # 'esc_i' / 'esc_m': atajos Epson para full/partial cut
+    # 'auto': probamos varias variantes para máxima compatibilidad
+    if cut_mode in ('auto', 'gs_v'):
+        # GS V 66 n  (feed and cut); n=0 ya alimentamos arriba
+        data += GS + b'V' + b'\x42' + b'\x00'
+        # GS V 0 (full cut)
+        data += GS + b'V' + b'\x00'
+
+    if cut_mode in ('auto', 'esc_i'):
+        # ESC i (full cut en muchas Epson/compatibles)
+        data += ESC + b'i'
+
+    if cut_mode in ('auto', 'esc_m'):
+        # ESC m (partial cut en muchas Epson/compatibles)
+        data += ESC + b'm'
+
     return bytes(data)
+
 
 def _send_ticket_tcp_escpos(text: str, title: str = "Pedido a cocina", copies: int = 1) -> bool:
     host = getattr(settings, 'COMANDERA_PRINTER_HOST', '') or ''
@@ -1663,16 +1703,18 @@ def _send_ticket_tcp_escpos(text: str, title: str = "Pedido a cocina", copies: i
     if not host:
         return False
 
-    encoding = getattr(settings, 'COMANDERA_ENCODING', 'cp437')  # cp437 suele andar bien con español
-    payload = _escpos_wrap_text(text, encoding)
+    encoding = getattr(settings, 'COMANDERA_ENCODING', 'cp437')  # cp437/cp850/cp858 según tu modelo
+
     try:
+        payload = _escpos_wrap_text(text, encoding)
         for _ in range(int(copies or 1)):
-            with socket.create_connection((host, port), timeout=5) as s:
+            with socket.create_connection((host, port), timeout=6) as s:
                 s.sendall(payload)
         return True
     except Exception as e:
         print(f"ESC/POS TCP error ({host}:{port}): {e}")
         return False
+
 
 def _print_ticket_for_pedido(pedido):
     """
