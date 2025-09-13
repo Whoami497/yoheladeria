@@ -20,47 +20,18 @@
   <!-- ===== Título ===== -->
   <h2 class="py-title">Nuestro Catálogo</h2>
 
-  <!-- ===== Búsqueda ===== -->
-  <form method="get" class="py-search">
-    <i class="bi bi-search"></i>
-    <input name="q" value="{{ q }}" autocomplete="off" placeholder="Buscar productos..." />
-    {% if cat %}<input type="hidden" name="cat" value="{{ cat }}">{% endif %}
-    {% if sort %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
-    {% if q %}
-      <a class="clear" href="?{% if cat %}cat={{ cat }}&{% endif %}{% if sort %}sort={{ sort }}{% endif %}">
-        <i class="bi bi-x-circle"></i>
-      </a>
-    {% endif %}
-  </form>
-
-  <!-- ===== Chips de categorías (SIN “Menú”) ===== -->
-  <div class="py-chips" id="cat-chips">
+  <!-- ===== Chips de categorías (todas visibles, sin scroll) ===== -->
+  <div class="cats-wrap" id="cat-chips">
+    <a href="{% url 'index' %}" class="chip {% if not cat %}active{% endif %}">Todas</a>
     {% for c in categorias %}
       <a
         data-cat="{{ c.id }}"
         data-name="{{ c.nombre }}"
-        href="?cat={{ c.id }}{% if q %}&q={{ q }}{% endif %}{% if sort %}&sort={{ sort }}{% endif %}"
-        class="chip
-          {% if cat == c.id %}
-            active
-          {% elif not cat and c.nombre|lower == 'potes' %}
-            active
-          {% endif %}">
+        href="?cat={{ c.id }}"
+        class="chip {% if cat == c.id %}active{% endif %}">
         {{ c.nombre }}
       </a>
     {% endfor %}
-  </div>
-
-  <!-- ===== Ordenamientos ===== -->
-  <div class="py-filters">
-    <a class="pill {% if sort == 'recientes' %}active{% endif %}"
-       href="?{% if cat %}cat={{ cat }}&{% endif %}{% if q %}q={{ q }}&{% endif %}sort=recientes">Más nuevos</a>
-    <a class="pill {% if sort == 'precio_asc' %}active{% endif %}"
-       href="?{% if cat %}cat={{ cat }}&{% endif %}{% if q %}q={{ q }}&{% endif %}sort=precio_asc">Precio más bajo</a>
-    <a class="pill {% if sort == 'precio_desc' %}active{% endif %}"
-       href="?{% if cat %}cat={{ cat }}&{% endif %}{% if q %}q={{ q }}&{% endif %}sort=precio_desc">Precio más alto</a>
-    <a class="pill {% if sort == 'nombre' %}active{% endif %}"
-       href="?{% if cat %}cat={{ cat }}&{% endif %}{% if q %}q={{ q }}&{% endif %}sort=nombre">A–Z</a>
   </div>
 
   <!-- ===== Lista tipo PedidosYa ===== -->
@@ -88,29 +59,10 @@
         </div>
       </a>
     {% empty %}
-      <div class="alert alert-light border mt-3">No encontramos productos para tu búsqueda.</div>
+      <div class="alert alert-light border mt-3">No encontramos productos disponibles.</div>
     {% endfor %}
   </div>
 </div>
-
-<!-- Redirección suave a “Potes” por defecto si no hay ?cat= -->
-<script>
-(function(){
-  const params = new URLSearchParams(location.search);
-  if (params.has('cat')) return;
-
-  const chips = document.querySelectorAll('#cat-chips a');
-  if (!chips.length) return;
-
-  // Busca “Potes”, si no existe usa la primera categoría
-  let target = Array.from(chips).find(a => (a.dataset.name || '').toLowerCase() === 'potes') || chips[0];
-
-  const p = new URLSearchParams(location.search);
-  p.set('cat', target.dataset.cat);
-  // preserva q y sort si ya estaban
-  location.replace(location.pathname + '?' + p.toString());
-})();
-</script>
 
 <style>
 /* ===== HERO (imagen también en mobile) ===== */
@@ -129,7 +81,7 @@
 .hero-copy h1{
   font-size:1.28rem; line-height:1.18; margin:0 0 6px; font-weight:800; letter-spacing:.2px;
 }
-.hero-copy p{ margin:0; font-size:.95rem; opacity:.95; } /* sin botón, menos margen */
+.hero-copy p{ margin:0; font-size:.95rem; opacity:.95; }
 .hero-illustration img{
   width:92px; height:auto; display:block; object-fit:contain;
   filter: drop-shadow(0 3px 8px rgba(0,0,0,.2));
@@ -141,22 +93,14 @@
   .hero-illustration img{ width:220px; }
 }
 
-/* ===== Catálogo tipo PedidosYa ===== */
+/* ===== Catálogo ===== */
 .py-title{ font-weight:800; font-size:1.4rem; margin:8px 0 10px 2px; }
-.py-search{
-  position:relative; display:flex; align-items:center;
-  background:#fff; border:1px solid #e5e7eb; border-radius:12px;
-  padding:8px 12px; gap:8px; margin:0 2px 8px;
-}
-.py-search i{font-size:1.1rem; color:#6b7280}
-.py-search input{ border:0; outline:none; width:100%; font-size:1rem; background:transparent; }
-.py-search .clear{color:#9ca3af; font-size:1.1rem}
 
-.py-chips{
-  display:flex; gap:8px; overflow-x:auto; padding:4px 2px 8px;
-  scrollbar-width:none; -ms-overflow-style:none; margin:0 2px 6px;
+/* Categorías: todas visibles, múltiples filas (wrap) */
+.cats-wrap{
+  display:flex; flex-wrap:wrap; gap:8px;
+  padding:4px 2px 10px; margin:0 2px 6px;
 }
-.py-chips::-webkit-scrollbar{display:none}
 .chip{
   white-space:nowrap; padding:6px 12px; border-radius:999px;
   border:1px solid #e5e7eb; background:#fff; color:#111827; text-decoration:none;
@@ -164,13 +108,7 @@
 }
 .chip.active{ background:#0d6efd; border-color:#0d6efd; color:#fff }
 
-.py-filters{ display:flex; gap:8px; overflow-x:auto; margin:0 2px 12px }
-.pill{
-  padding:6px 12px; border-radius:999px; background:#f3f4f6; color:#111827;
-  text-decoration:none; font-weight:600; font-size:.9rem; white-space:nowrap;
-}
-.pill.active{ background:#111827; color:#fff }
-
+/* Productos */
 .product-list{ display:grid; grid-template-columns:1fr; gap:12px }
 .tile{
   display:grid; grid-template-columns:1fr 110px; gap:12px; align-items:center;
