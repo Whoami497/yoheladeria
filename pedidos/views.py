@@ -2411,4 +2411,60 @@ def service_worker(request):
     """
     resp = render(request, 'pedidos/sw.js', {})
     resp["Content-Type"] = "application/javascript"
+
+# === Confirmar pedido (llevar a EN_PREPARACION + notificar/impresión) ===
+from django.views.decorators.http import require_http_methods
+
+@staff_member_required
+@require_http_methods(["GET", "POST"])
+def confirmar_pedido(request, pedido_id):
+    """
+    Marca el pedido como EN_PREPARACION (si corresponde), dispara notificación al panel
+    y envía el ticket a la comandera (si está configurada).
+    - Responde JSON si el request es AJAX.
+    - Si ya estaba EN_PREPARACION, reimprime el ticket y solo notifica.
+    """
+    pedido = get_object_or_404(Pedido, id=pedido_id)
+    estado_anterior = pedido.estado
+
+    # Estados finales no se pueden confirmar
+    if estado_anterior in ('ENTREGADO', 'CANCELADO'):
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({'ok': False, 'error': 'estado_final'}, status=400)
+        messages.warning(request, f"El pedido #{pedido.id} está '{estado_anterior}' y no puede confirmarse.")
+        return redirect('panel_alertas')
+
+    # Si aún no estaba en preparación, pasarlo a EN_PREPARACION
+    cambiado = False
+    if estado_anterior != 'EN_PREPARACION':
+        _marcar_estado(pedido, 'EN_PREPARACION', actor=request.user, fuente='confirmar_pedido')
+        cambiado = True
+
+    # Notificar al panel y mandar ticket a la impresora (fallos silenciosos)
+    try:
+        _notify_panel_update(pedido, message='actualizacion_pedido')
+    except Exception:
+        pass
+    try:
+        _print_ticket_for_pedido(pedido)
+    except Exception:
+        pass
+
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+        return JsonResponse({
+            'ok': True,
+            'pedido_id': pedido.id,
+            'estado': pedido.estado,
+            'cambiado': cambiado,
+        })
+
+    if cambiado:
+        messages.success(request, f"Pedido #{pedido.id} confirmado y enviado a cocina.")
+    else:
+        messages.info(request, f"Pedido #{pedido.id} ya estaba en preparación. Ticket enviado nuevamente.")
+    return redirect('panel_alertas')
+
+
     return resp
+
+
