@@ -6,31 +6,30 @@
 <title>Ticket #{{ pedido.id }}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
-<!-- Estilos optimizados para térmica 58mm -->
 <style>
   @page { size: 58mm auto; margin: 0 }
   @media print { html, body { width: 58mm } }
-  html, body {
-    width: 58mm; margin: 0; padding: 0 2mm;
+  html, body{
+    width:58mm; margin:0; padding:0 2mm;
     font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
-    font-size: 12.5px; line-height: 1.25; color: #000;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    font-size:13px; line-height:1.28; color:#000;
+    -webkit-print-color-adjust:exact; print-color-adjust:exact;
+    -webkit-font-smoothing:none; text-rendering:optimizeSpeed;
   }
-  .h1 { text-align:center; font-weight: 800; margin: 2mm 0 0.5mm }
-  .muted { color:#000 } /* sin grises para más contraste */
-  .line { display:flex; justify-content:space-between; gap:4mm }
-  .cut { border-top:1px dashed #000; margin: 2mm 0 }
-  .small { font-size: 11px }
-  .btns { display: none }        /* ocultar botones al imprimir */
-  @media screen { .btns { display:block; margin-top:6mm } }
-  a { color:#000; text-decoration:none }
+  .h1{ text-align:center; font-weight:900; margin:2mm 0 .5mm }
+  .line{ display:flex; justify-content:space-between; gap:4mm }
+  .cut{ border-top:1px dashed #000; margin:2mm 0 }
+  .small{ font-size:11.5px }
+  .btns{ display:none }
+  @media screen { .btns{ display:block; margin-top:6mm } }
+  a{ color:#000; text-decoration:none }
 </style>
 
-<!-- QZ Tray opcional: si no está, se ignora -->
+<!-- QZ Tray opcional -->
 <script src="{% static 'qz-tray/qz-tray.js' %}" defer></script>
 </head>
 <body>
-  <div class="h1"><strong>YO HELADERÍAS</strong></div>
+  <div class="h1">YO HELADERÍAS</div>
   <div class="small" style="text-align:center">PEDIDO A COCINA</div>
   <div class="small" style="text-align:center">#{{ pedido.id }} · {{ pedido.fecha_pedido|date:"d/m H:i" }}</div>
 
@@ -45,21 +44,37 @@
 
   <div class="small"><strong>Items</strong></div>
   <div style="margin-top:2mm">
-    {% for d in detalles %}
-      <div class="line">
-        <span>{{ d.cantidad }} x {{ d.producto_nombre }}{% if d.opcion_nombre %} ({{ d.opcion_nombre }}){% endif %}</span>
-      </div>
-      {% if d.sabores_nombres %}
-        <div class="small">• Sabores: {{ d.sabores_nombres|join:", " }}</div>
-      {% endif %}
-    {% endfor %}
+    {% with dets=detalles|default:pedido.detalles.all %}
+      {% for d in dets %}
+        <div class="line">
+          <span>
+            {{ d.cantidad }} x
+            {% if d.producto_nombre %}{{ d.producto_nombre }}
+            {% else %}{{ d.producto.nombre }}{% endif %}
+            {% if d.opcion_nombre %} ({{ d.opcion_nombre }})
+            {% elif d.opcion_seleccionada %} ({{ d.opcion_seleccionada.nombre_opcion }})
+            {% endif %}
+          </span>
+        </div>
+        <div class="small">
+          • Sabores:
+          {% if d.sabores_nombres %}
+            {{ d.sabores_nombres|join:", " }}
+          {% else %}
+            {% with sab=d.sabores.all %}
+              {% if sab %}{{ sab|join:", " }}{% else %}Sin especificar{% endif %}
+            {% endwith %}
+          {% endif %}
+        </div>
+      {% endfor %}
+    {% endwith %}
   </div>
 
   <div class="cut"></div>
 
   <div class="line">
     <strong>TOTAL</strong>
-    <strong>${{ total }}</strong>
+    <strong>${{ total|default:pedido.total_pedido|floatformat:2 }}</strong>
   </div>
 
   <div style="text-align:center; margin-top:2mm">¡Gracias!</div>
@@ -76,76 +91,67 @@
   const USE_QZ= /^(1|true)$/i.test(params.get('qz')   || '');
   const CLOSE = /^(1|true)$/i.test(params.get('close')|| '');
 
-  // imprime con QZ si está disponible; si no, usa window.print()
   async function printViaQZ(){
     if(!USE_QZ || typeof qz === 'undefined') return false;
     try{
       if(!qz.websocket.isActive()) await qz.websocket.connect();
-
-      // impresora predeterminada
       const printer = await qz.printers.getDefault();
-      const cfg = qz.configs.create(printer, { rasterize: false, encoding: 'CP437' });
+      const cfg = qz.configs.create(printer, { rasterize:false, encoding:'CP437' });
 
-      // Texto simple (se arma desde el DOM)
       function textFromDom(){
-        const sections = [];
-        function line(s=''){ sections.push(s + '\n'); }
-        line('================================');
-        line('YO HELADERÍAS'.padStart(18 + 6)); // centrado aproximado
-        line('PEDIDO A COCINA'.padStart(20 + 2));
-        line('#{{ pedido.id }}  {{ pedido.fecha_pedido|date:"d/m H:i" }}'.padStart(20 + 6));
-        line('================================');
-        line('');
-        line('Cliente : {{ pedido.cliente_nombre|default:"-" }}');
-        line('Entrega : {{ direccion_legible|default:"Retiro en local" }}');
-        line('Tel     : {{ pedido.cliente_telefono|default:"-" }}');
-        line('Pago    : {{ pedido.metodo_pago|default:"-" }}');
-        line('------------------------------');
-        {% for d in detalles %}
-          line('{{ d.cantidad }} x {{ d.producto_nombre|escapejs }}{% if d.opcion_nombre %} ({{ d.opcion_nombre|escapejs }}){% endif %}');
-          {% if d.sabores_nombres %}
-            line('  Sabores: {{ d.sabores_nombres|join:", "|escapejs }}');
-          {% endif %}
-        {% endfor %}
-        line('------------------------------');
-        line('TOTAL:   ${{ total }}');
-        line('');
-        line('¡Gracias!');
-        line('\n');
-        return sections.join('');
+        const lines=[];
+        const push=(s='')=>lines.push(s+'\n');
+        push('==============================');
+        push('YO HELADERÍAS');
+        push('PEDIDO A COCINA');
+        push('#{{ pedido.id }}  {{ pedido.fecha_pedido|date:"d/m H:i" }}');
+        push('==============================');
+        push('');
+        push('Cliente : {{ pedido.cliente_nombre|default:"-" }}');
+        push('Entrega : {{ direccion_legible|default:"Retiro en local" }}');
+        push('Tel     : {{ pedido.cliente_telefono|default:"-" }}');
+        push('Pago    : {{ pedido.metodo_pago|default:"-" }}');
+        push('------------------------------');
+        {% with dets=detalles|default:pedido.detalles.all %}
+          {% for d in dets %}
+            push('{{ d.cantidad }} x {% if d.producto_nombre %}{{ d.producto_nombre|escapejs }}{% else %}{{ d.producto.nombre|escapejs }}{% endif %}{% if d.opcion_nombre %} ({{ d.opcion_nombre|escapejs }}){% elif d.opcion_seleccionada %} ({{ d.opcion_seleccionada.nombre_opcion|escapejs }}){% endif %}');
+            {% if d.sabores_nombres %}
+              push('  Sabores: {{ d.sabores_nombres|join:", "|escapejs }}');
+            {% else %}
+              {% with sab=d.sabores.all %}{% if sab %}push('  Sabores: {{ sab|join:", "|escapejs }}');{% endif %}{% endwith %}
+            {% endif %}
+          {% endfor %}
+        {% endwith %}
+        push('------------------------------');
+        push('TOTAL:   ${{ total|default:pedido.total_pedido|floatformat:2 }}');
+        push('');
+        push('¡Gracias!');
+        push('\n');
+        return lines.join('');
       }
 
-      const cmds = [
-        '\x1B\x40',                 // init
-        { type: 'raw', format: 'command', data: textFromDom() },
-        '\x1D\x56\x01'              // corte parcial
+      const cmds=[
+        '\x1B\x40',
+        {type:'raw',format:'command',data:textFromDom()},
+        '\x1D\x56\x01'
       ];
-
-      await qz.print(cfg, cmds.map(c => (typeof c === 'string') ? { type:'raw', format:'command', data:c } : c));
+      await qz.print(cfg, cmds.map(c=>typeof c==='string'?{type:'raw',format:'command',data:c}:c));
       return true;
     }catch(e){
-      // si algo falla, fallback
       try{ if(qz.websocket.isActive()) await qz.websocket.disconnect(); }catch(_){}
       return false;
     }
   }
 
   window.printTicket = async function(){
-    const okQZ = await printViaQZ();
-    if(!okQZ){
-      window.print();
-    }
+    const ok = await printViaQZ();
+    if(!ok) window.print();
   };
 
-  // auto-print
   if(AUTO){
-    // afterprint → cerrar si se pidió
-    function tryClose(){ if(CLOSE) { setTimeout(()=>{ try{ window.close(); }catch(_){ } }, 150); } }
+    const tryClose = ()=>{ if(CLOSE) setTimeout(()=>{ try{ window.close(); }catch(_){ } }, 150); };
     window.addEventListener('afterprint', tryClose);
-    // fallback por si el evento no dispara (algunas versiones)
     setTimeout(tryClose, 2500);
-
-    // dispara
     printTicket();
   }
 })();
