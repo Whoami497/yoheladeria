@@ -26,10 +26,7 @@ from urllib.parse import quote_plus
 from django.template import TemplateDoesNotExist
 from django.contrib import messages
 import logging  # ← añadido
-from django.views.decorators.http import require_GET
-from django.contrib.admin.views.decorators import staff_member_required
 import socket  # ← NUEVO: para impresión TCP/RAW
-from django.shortcuts import get_object_or_404, redirect
 
 # ====== Forms ======
 # Intentamos importar los forms del proyecto; si no existen, definimos fallbacks mínimos
@@ -1340,7 +1337,12 @@ def pedido_en_curso(request):
         setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
         setattr(p, 'map_url', _map_url_from_text(p.cliente_direccion))
         setattr(p, 'metricas', _serialize_metricas(p))
-        setattr(p, 'logs', p.logs_estado.select_related('actor').order_by('-created_at')[:8])
+        # seguro ante ausencia de logs_estado
+        try:
+            logs_qs = p.logs_estado.select_related('actor').order_by('-created_at')[:8]
+        except Exception:
+            logs_qs = []
+        setattr(p, 'logs', logs_qs)
 
     return render(request, 'pedidos/pedido_en_curso.html', {'pedidos': pedidos})
 
@@ -1375,7 +1377,12 @@ def panel_alertas(request):
             setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
             setattr(p, 'map_url', _map_url_from_text(p.cliente_direccion))
             setattr(p, 'metricas', _serialize_metricas(p))
-            setattr(p, 'logs', p.logs_estado.select_related('actor').order_by('-created_at')[:8])
+            # seguro ante ausencia de logs_estado
+            try:
+                logs_qs = p.logs_estado.select_related('actor').order_by('-created_at')[:8]
+            except Exception:
+                logs_qs = []
+            setattr(p, 'logs', logs_qs)
         return qs
 
     ctx = {
@@ -1792,13 +1799,9 @@ def tienda_toggle(request):
 # =========================
 # === TIENDA / CADETES
 # =========================
-@staff_member_required
-
-
 
 @login_required
 @require_POST
-@staff_member_required
 def aceptar_pedido(request, pedido_id):
     pedido = get_object_or_404(Pedido, id=pedido_id)
 
@@ -1855,7 +1858,6 @@ def aceptar_pedido(request, pedido_id):
     return redirect('panel_cadete')
 
 
-
 def login_cadete(request):
     if request.user.is_authenticated:
         if hasattr(request.user, 'cadeteprofile'):
@@ -1902,7 +1904,12 @@ def panel_cadete(request):
         setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
         setattr(p, 'map_url', _map_url_from_text(p.cliente_direccion))
         setattr(p, 'metricas', _serialize_metricas(p))
-        setattr(p, 'logs', p.logs_estado.select_related('actor').order_by('-created_at')[:8])
+        # seguro ante ausencia de logs_estado
+        try:
+            logs_qs = p.logs_estado.select_related('actor').order_by('-created_at')[:8]
+        except Exception:
+            logs_qs = []
+        setattr(p, 'logs', logs_qs)
 
     contexto = {'vapid_public_key': vapid_public_key, 'pedidos_en_curso': pedidos_en_curso}
     return render(request, 'pedidos/panel_cadete.html', contexto)
@@ -2360,10 +2367,10 @@ def canjear_puntos(request):
 
                     nuevo_pedido_canje = Pedido.objects.create(
                         user=request.user,
-                        cliente_nombre=request.user.get_full_name() or request.user.username,
+                        cliente_nombre=request.user.get_full_name() oR request.user.username,
                         cliente_direccion=f"Canje de Puntos: {producto_canje.nombre}",
                         # FIX: línea corregida
-                        cliente_telefono=cliente_profile.telefono or "",
+                        cliente_telefono=cliente_profile.telefono oR "",
                         estado='RECIBIDO',
                     )
 
