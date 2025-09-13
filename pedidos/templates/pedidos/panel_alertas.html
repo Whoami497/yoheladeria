@@ -107,13 +107,6 @@
                         data-order-id="{{ p.id }}">
                   <i class="bi bi-check-circle-fill"></i> Confirmar
                 </button>
-                <!-- NUEVO: botón Imprimir -->
-                <a href="{% url 'ticket_pedido' p.id %}?auto=1&qz=1"
-                   target="_blank"
-                   class="btn btn-outline-secondary mt-2 btn-print-ticket"
-                   data-order-id="{{ p.id }}">
-                  <i class="bi bi-printer"></i> Imprimir
-                </a>
                 <div class="text-muted small mt-1">Notifica a cadetes</div>
               {% else %}
                 <div class="dropdown">
@@ -129,13 +122,6 @@
                     <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Cancelar</button></li>
                   </ul>
                 </div>
-                <!-- NUEVO: botón Imprimir -->
-                <a href="{% url 'ticket_pedido' p.id %}?auto=1&qz=1"
-                   target="_blank"
-                   class="btn btn-outline-secondary mt-2 btn-print-ticket"
-                   data-order-id="{{ p.id }}">
-                  <i class="bi bi-printer"></i> Imprimir
-                </a>
               {% endif %}
             </div>
           </div>
@@ -334,11 +320,9 @@
           if(data && 'abierta' in data){ applyStoreState(!!data.abierta); }
           else { e.target.submit(); }
         }else{
-          // No es JSON: probablemente redirect a login/CSRF -> submit normal
           e.target.submit();
         }
       }catch(err){
-        // fallback: submit normal
         e.target.submit();
       }finally{
         tiendaBtn.disabled = false;
@@ -416,7 +400,6 @@
     box.innerHTML = renderTimelineHTML(ts, metricas, logs);
   }
 
-  // Render inicial de timelines usando data-attributes del HTML
   document.querySelectorAll('.order-card[data-order-id]').forEach(card => renderTimelineInto(card, null));
 
   /* ===== Construcción de tarjetas/chips ===== */
@@ -458,15 +441,12 @@
     const direccion = order.direccion_legible || order.cliente_direccion || '—';
     const mapUrl = order.map_url || '';
 
-    const printBtnHtml = `<a href="/ticket/${order.id}/?auto=1&qz=1" target="_blank" class="btn btn-outline-secondary mt-2 btn-print-ticket" data-order-id="${order.id}"><i class="bi bi-printer"></i> Imprimir</a>`;
-
     const rightControls = estado==='RECIBIDO'
       ? `<button class="btn btn-success fw-bold btn-confirm"
                  data-confirm-url="/confirmar-pedido/${order.id}/"
                  data-order-id="${order.id}">
            <i class="bi bi-check-circle-fill"></i> Confirmar
          </button>
-         ${printBtnHtml}
          <div class="text-muted small mt-1">Notifica a cadetes</div>`
       : `<div class="dropdown">
            <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
@@ -478,8 +458,7 @@
              <li><hr class="dropdown-divider"></li>
              <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="/panel-alertas/estado/${order.id}/">Cancelar</button></li>
            </ul>
-         </div>
-         ${printBtnHtml}`;
+         </div>`;
 
     wrapper.innerHTML = `
       <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
@@ -551,18 +530,26 @@
     try { return await res.json(); } catch { window.location.href = fallbackUrl; return null; }
   }
 
-  // ===== Confirmar → actualiza UI + imprime ticket automático
+  /* ===== CAMBIO CLAVE: imprimir ticket automáticamente al confirmar ===== */
   document.addEventListener('click', async (ev)=>{
-    const btn=ev.target.closest('.btn-confirm'); if(!btn) return;
+    const btn = ev.target.closest('.btn-confirm'); 
+    if(!btn) return;
     ev.preventDefault();
-    const url=btn.dataset.confirmUrl;
-    const card=btn.closest('.order-card');
-    btn.disabled=true; btn.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Confirmando...';
+
+    const url     = btn.dataset.confirmUrl;
+    const card    = btn.closest('.order-card');
+    const orderId = btn.dataset.orderId;
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Confirmando...';
+
     try{
-      const res=await fetch(url,{method:'POST',headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'}});
+      const res = await fetch(url,{method:'POST',headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'}});
       if(res.ok){
-        const badge=card.querySelector('.badge'); badge.className='badge '+badgeClass('EN_PREPARACION'); badge.textContent='EN_PREPARACION';
-        // controles
+        const badge=card.querySelector('.badge');
+        badge.className='badge '+badgeClass('EN_PREPARACION'); 
+        badge.textContent='EN_PREPARACION';
+
         btn.parentElement.innerHTML = `
           <div class="dropdown">
             <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
@@ -573,27 +560,18 @@
               <li><hr class="dropdown-divider"></li>
               <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="${url.replace('/confirmar-pedido','/panel-alertas/estado')}">Cancelar</button></li>
             </ul>
-          </div>
-          <a href="/ticket/${btn.dataset.orderId}/?auto=1&qz=1" target="_blank" class="btn btn-outline-secondary mt-2 btn-print-ticket" data-order-id="${btn.dataset.orderId}">
-            <i class="bi bi-printer"></i> Imprimir
-          </a>`;
-        // 🖨️ abrir ticket e imprimir automáticamente
-        window.open(`/ticket/${btn.dataset.orderId}/?auto=1&qz=1`, '_blank', 'width=420,height=640');
+          </div>`;
+
+        /* abre el ticket en modo auto + qz + cerrar */
+        const w = window.open(`/ticket/${orderId}/?auto=1&qz=1&close=1`, '_blank', 'width=420,height=680');
+        if (!w) window.open(`/ticket/${orderId}/?auto=1&close=1`, '_blank', 'width=420,height=680');
+
       }else{
         window.location.href=url;
       }
     }catch(e){ window.location.href=url; }
   });
 
-  // ===== Botón "Imprimir" manual (mismo popup consistente)
-  document.addEventListener('click', (ev)=>{
-    const a = ev.target.closest('.btn-print-ticket'); if(!a) return;
-    ev.preventDefault();
-    const id = a.dataset.orderId;
-    window.open(`/ticket/${id}/?auto=1&qz=1`, '_blank', 'width=420,height=640');
-  });
-
-  // ===== Cambios de estado desde dropdown
   document.addEventListener('click', async (ev)=>{
     const item=ev.target.closest('.btn-set-state'); if(!item) return;
     const url=item.dataset.url, estado=item.dataset.state;
@@ -665,7 +643,6 @@
     const orderId=data.order_id;
     const orderData=data.order_data||{};
 
-    // ===== NUEVO: cambio de estado de tienda por WS
     if(kind==='tienda_estado'){
       const abierta = !!(orderData && orderData.abierta);
       applyStoreState(abierta);
@@ -739,7 +716,6 @@
   .compact-line{font-size:.95rem}
   .min-btn-col{min-width:190px}
 
-  /* Direcciones: recorte elegante */
   .addr-ellipsis{
     max-width: min(44vw, 420px);
     display:inline-block;
@@ -756,7 +732,6 @@
   .bg-status-entregado{background:#198754 !important}
   .bg-status-cancelado{background:#dc3545 !important}
 
-  /* Timeline */
   .timeline-table{width:100%; border-collapse:collapse}
   .timeline-table th{font-weight:600; padding:.15rem .35rem 0 0}
   .timeline-table td{padding:.15rem .35rem}
