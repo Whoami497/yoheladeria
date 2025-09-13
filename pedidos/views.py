@@ -2367,10 +2367,10 @@ def canjear_puntos(request):
 
                     nuevo_pedido_canje = Pedido.objects.create(
                         user=request.user,
-                        cliente_nombre=request.user.get_full_name() oR request.user.username,
+                        cliente_nombre=request.user.get_full_name() or request.user.username,
                         cliente_direccion=f"Canje de Puntos: {producto_canje.nombre}",
                         # FIX: línea corregida
-                        cliente_telefono=cliente_profile.telefono oR "",
+                        cliente_telefono=cliente_profile.telefono or "",
                         estado='RECIBIDO',
                     )
 
