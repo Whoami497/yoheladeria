@@ -1798,67 +1798,60 @@ def tienda_toggle(request):
 @login_required
 @require_POST
 @staff_member_required
-def confirmar_pedido(request, pedido_id):
+def aceptar_pedido(request, pedido_id):
     pedido = get_object_or_404(Pedido, id=pedido_id)
 
-    if pedido.estado != 'RECIBIDO':
+    # Solo cadetes pueden aceptar
+    if not hasattr(request.user, 'cadeteprofile'):
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-            return JsonResponse({'ok': False, 'error': 'Pedido ya procesado'}, status=400)
-        messages.warning(request, f"El Pedido #{pedido.id} ya fue procesado.")
-        return redirect('panel_alertas')
+            return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
+        messages.error(request, "Acción no permitida. No tienes un perfil de cadete.")
+        return redirect('index')
 
-    _marcar_estado(pedido, 'EN_PREPARACION', actor=request.user, fuente='confirmar_pedido')
+    # Un cadete no puede tener dos pedidos activos
+    if Pedido.objects.filter(
+        cadete_asignado=request.user.cadeteprofile,
+        estado__in=['ASIGNADO', 'EN_CAMINO']
+    ).exists():
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({'ok': False, 'error': 'ya_tiene_activo'}, status=400)
+        messages.warning(request, "Ya tenés un pedido en curso. Entregalo antes de aceptar otro.")
+        return redirect('panel_cadete')
 
-    # Imprimir por backend (webhook o PrintNode). Si no hay nada configurado, no rompe.
+    # El pedido debe estar disponible
+    if pedido.estado != 'EN_PREPARACION' or pedido.cadete_asignado_id:
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({'ok': False, 'error': 'no_disponible'}, status=400)
+        messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
+        return redirect('panel_cadete')
+
+    # Asignar y cambiar estado
+    pedido.cadete_asignado = request.user.cadeteprofile
     try:
-        _print_ticket_for_pedido(pedido)
-    except Exception as e:
-        print(f"COMANDERA error: {e}")
+        pedido.save(update_fields=['cadete_asignado'])
+    except Exception:
+        pedido.save()
 
-    # WS a tablets/panel y push a cadetes (sin cambios)
-    try:
-        channel_layer = get_channel_layer()
+    _marcar_estado(pedido, 'ASIGNADO', actor=request.user, fuente='aceptar_pedido')
 
-        detalles_para_notificacion = []
-        for detalle in pedido.detalles.all():
-            detalles_para_notificacion.append({
-                'producto_nombre': detalle.producto.nombre,
-                'opcion_nombre': detalle.opcion_seleccionada.nombre_opcion if detalle.opcion_seleccionada else None,
-                'cantidad': detalle.cantidad,
-                'sabores_nombres': [s.nombre for s in detalle.sabores.all()],
-            })
+    # Marcar cadete como no disponible
+    cp = request.user.cadeteprofile
+    if hasattr(cp, 'disponible'):
+        try:
+            cp.disponible = False
+            cp.save(update_fields=['disponible'])
+        except Exception:
+            pass
+    request.session['cadete_disponible'] = False
+    request.session.modified = True
 
-        order_data = {
-            'id': pedido.id,
-            'cliente_nombre': pedido.cliente_nombre,
-            'cliente_direccion': pedido.cliente_direccion,
-            'direccion_legible': _direccion_legible_from_text(pedido.cliente_direccion),
-            'map_url': _map_url_from_text(pedido.cliente_direccion),
-            'total_pedido': str(_compute_total(pedido)),
-            'detalles': detalles_para_notificacion
-        }
+    _notify_panel_update(pedido)
 
-        async_to_sync(channel_layer.group_send)(
-            'cadetes_disponibles',
-            {'type': 'send_cadete_notification', 'order_data': order_data}
-        )
-        print(f"WEBSOCKET: Alerta para Pedido #{pedido.id} enviada al grupo 'cadetes_disponibles'.")
-    except Exception as e:
-        print(f"ERROR al enviar notificación por WebSocket a cadetes: {e}")
-
-    try:
-        _notify_cadetes_new_order(request, pedido)
-    except Exception as e:
-        print(f"Notify cadetes error: {e}")
-
-    _notify_panel_update(pedido, message='nuevo_pedido')
-
-    # ⛔️ IMPORTANTE: ya NO devolvemos ticket_url → así no se abre la ventana de impresión del navegador
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-        return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': 'EN_PREPARACION'})
+        return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': 'ASIGNADO'})
 
-    messages.success(request, f"Pedido #{pedido.id} confirmado. ¡Alerta enviada a los repartidores conectados!")
-    return redirect('panel_alertas')
+    messages.success(request, f"¡Has aceptado el Pedido #{pedido.id}! Por favor, prepárate para retirarlo.")
+    return redirect('panel_cadete')
 
 
 
