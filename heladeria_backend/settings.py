@@ -176,3 +176,17 @@ ENVIO_KM_OFFSET = os.environ.get('ENVIO_KM_OFFSET', '0')  # km fantasma
 # Origen (recomendado usar coordenadas)
 ORIGEN_LAT = os.environ.get('ORIGEN_LAT', '')             # ej: -28.468500
 ORIGEN_LNG = os.environ.get('ORIGEN_LNG', '')             # ej: -65.779900
+
+# --- Sitio / flags varios (usados en views) ---
+SITE_NAME = os.environ.get('SITE_NAME', 'YO HELADERÍAS')
+TIENDA_ABIERTA_DEFAULT = os.environ.get('TIENDA_ABIERTA_DEFAULT', 'True') == 'True'
+
+# --- COMANDERA / TICKETS (integración con tu POS o PrintNode) ---
+# Si tu POS ya imprime por un endpoint HTTP, configurá este webhook:
+COMANDERA_WEBHOOK_URL = os.environ.get('COMANDERA_WEBHOOK_URL', '')  # ej: http://IP_LOCAL:5000/print
+COMANDERA_TOKEN = os.environ.get('COMANDERA_TOKEN', '')              # si tu POS requiere token (opcional)
+COMANDERA_COPIES = int(os.environ.get('COMANDERA_COPIES', '1'))      # copias por ticket
+
+# Alternativa por PrintNode (si querés usar su agente en la PC de caja)
+PRINTNODE_API_KEY = os.environ.get('PRINTNODE_API_KEY', '')
+PRINTNODE_PRINTER_ID = os.environ.get('PRINTNODE_PRINTER_ID', '')

@@ -1,0 +1,164 @@
+{% load static %}
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Ticket #{{ ticket.pedido_id }}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* Papel térmico 80mm */
+  @page { size: 80mm auto; margin: 0; }
+  html, body { width: 80mm; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; font-size: 12px; color: #000; }
+
+  .wrap { padding: 8px 10px; }
+  .center { text-align: center; }
+  .right { text-align: right; }
+  .muted { color: #000; opacity: .8; }
+  .title { font-weight: 700; font-size: 14px; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; }
+  .row + .row { margin-top: 4px; }
+  .cut { border-top: 1px dashed #000; margin: 8px 0; }
+  .small { font-size: 11px; }
+  .item { margin: 6px 0; }
+  .item .desc { max-width: 58mm; }
+  .flavors { margin-left: 6px; }
+  .totals .row { font-weight: 700; }
+  @media print { .noprint { display: none !important; } }
+  button { padding: 6px 10px; }
+</style>
+</head>
+<body>
+  <div class="wrap" id="ticket-root">
+    <div class="center">
+      <div class="title">{{ site|default:"YO HELADERÍAS" }}</div>
+      <div class="small muted">PEDIDO A COCINA</div>
+      <div class="small muted">#{{ ticket.pedido_id }} · {{ ticket.fecha }}</div>
+    </div>
+
+    <div class="cut"></div>
+
+    <div class="small">
+      <div><strong>Cliente:</strong> {{ ticket.cliente|default:"" }}</div>
+      <div><strong>Entrega:</strong> {{ ticket.direccion|default:"Retiro en local" }}</div>
+      {% if ticket.telefono %}<div><strong>Tel:</strong> {{ ticket.telefono }}</div>{% endif %}
+      {% if ticket.metodo_pago %}<div><strong>Pago:</strong> {{ ticket.metodo_pago }}</div>{% endif %}
+    </div>
+
+    <div class="cut"></div>
+
+    <div class="small muted">Items</div>
+    {% for l in lineas %}
+      <div class="item">
+        <div class="row">
+          <div class="desc">{{ l.cantidad }} x {{ l.descripcion }}</div>
+          <div class="right">${{ l.subtotal }}</div>
+        </div>
+        {% if l.sabores %}
+          <div class="flavors small">• Sabores: {{ l.sabores }}</div>
+        {% endif %}
+      </div>
+    {% empty %}
+      <div class="small">— Sin ítems —</div>
+    {% endfor %}
+
+    <div class="cut"></div>
+
+    <div class="totals">
+      <div class="row"><div>TOTAL</div><div>${{ total }}</div></div>
+    </div>
+
+    <div class="center small" style="margin-top:10px;">¡Gracias!</div>
+
+    <div class="noprint center" style="margin-top:10px;">
+      <button id="btn-print">Imprimir</button>
+      <button id="btn-close">Cerrar</button>
+    </div>
+  </div>
+
+  {# --- Datos JSON seguros del ticket --- #}
+  {{ ticket|json_script:"ticket-json" }}
+
+  {# --- QZ Tray (opcional). Si el archivo no existe, se ignora y se usa window.print() --- #}
+  <script src="{% static 'qz-tray/qz-tray.js' %}" defer></script>
+
+  <script>
+    // Flags desde Django (sin yesno para evitar parsing raro)
+    const AUTO  = {% if auto %}true{% else %}false{% endif %};
+    const USE_QZ = {% if use_qz %}true{% else %}false{% endif %};
+
+    // Datos del ticket
+    const TICKET = JSON.parse(document.getElementById('ticket-json').textContent);
+
+    function wait(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+    // ---- QZ Tray helpers ----
+    async function qzReady() {
+      if (!window.qz || !qz.websocket) return false;
+      try {
+        if (!qz.websocket.isActive()) { await qz.websocket.connect(); }
+        return true;
+      } catch(e) { console.warn("QZ connect error:", e); return false; }
+    }
+
+    function buildEscPos(ticket) {
+      const init = '\x1B\x40', center = '\x1B\x61\x01', left = '\x1B\x61\x00', cut = '\x1D\x56\x01';
+      const line = s => (s || '') + '\n';
+      let out = '';
+      out += init + center;
+      out += line(ticket.site || 'YO HELADERÍAS');
+      out += line('PEDIDO A COCINA');
+      out += line(`#${ticket.pedido_id}  ${ticket.fecha}`);
+      out += left;
+      out += line('------------------------------');
+      out += line(`Cliente: ${ticket.cliente || '-'}`);
+      if (ticket.telefono) out += line(`Tel    : ${ticket.telefono}`);
+      out += line(`Entrega: ${ticket.direccion || 'Retiro en local'}`);
+      if (ticket.metodo_pago) out += line(`Pago   : ${ticket.metodo_pago}`);
+      out += line('------------------------------');
+      out += line('Items:');
+      (ticket.items || []).forEach(it => {
+        out += line(`${it.cantidad} x ${it.descripcion}`);
+        if (it.sabores && it.sabores.length) out += line(`  Sabores: ${it.sabores.join(', ')}`);
+      });
+      out += line('------------------------------');
+      out += line(`TOTAL:              $${(ticket.total || 0).toFixed(2)}`);
+      out += line('------------------------------') + center + line('¡Gracias!') + '\n\n\n' + cut;
+      return out;
+    }
+
+    async function printWithQZ(ticket) {
+      const ok = await qzReady();
+      if (!ok) return false;
+      try {
+        let printer = localStorage.getItem('qz_printer');
+        if (!printer) { try { printer = await qz.printers.getDefault(); } catch(_) {} }
+        if (!printer) {
+          const all = await qz.printers.find();
+          printer = all && all.length ? all[0] : null;
+        }
+        if (!printer) throw new Error('No hay impresoras QZ disponibles');
+        const cfg = qz.configs.create(printer, { encoding: 'CP437', copies: ticket.copies || 1 });
+        const data = [{ type: 'raw', format: 'command', data: buildEscPos(ticket) }];
+        await qz.print(cfg, data);
+        return true;
+      } catch (e) { console.warn('QZ print error:', e); return false; }
+    }
+
+    async function doPrint() {
+      if (USE_QZ && window.qz) {
+        const done = await printWithQZ(TICKET);
+        if (done) { window.close(); return; }
+      }
+      window.print();
+      await wait(300);
+      try { window.close(); } catch(_) {}
+    }
+
+    document.getElementById('btn-print').addEventListener('click', doPrint);
+    document.getElementById('btn-close').addEventListener('click', () => window.close());
+
+    if (AUTO) { setTimeout(doPrint, 400); }
+  </script>
+</body>
+</html>

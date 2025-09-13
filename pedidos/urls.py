@@ -47,6 +47,9 @@ urlpatterns = [
     # Alias opcional por si algún botón viejo apunta a esta ruta
     path('panel-alertas/confirmar/<int:pedido_id>/', views.confirmar_pedido, name='confirmar_pedido_panel'),
 
+    # === Ticket HTML 80mm (nuevo) ===
+    path('ticket/<int:pedido_id>/', views.ticket_pedido, name='ticket_pedido'),
+
     # --- Panel de cadetes ---
     path('cadete/login/', views.login_cadete, name='login_cadete'),
     path('cadete/panel/', views.panel_cadete, name='panel_cadete'),

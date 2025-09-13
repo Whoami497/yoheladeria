@@ -21,10 +21,14 @@ import json
 import mercadopago
 import requests
 import re
+import base64  # ← para PrintNode (raw_base64)
 from urllib.parse import quote_plus
 from django.template import TemplateDoesNotExist
 from django.contrib import messages
 import logging  # ← añadido
+from django.views.decorators.http import require_GET
+from django.contrib.admin.views.decorators import staff_member_required
+
 
 # ====== Forms ======
 # Intentamos importar los forms del proyecto; si no existen, definimos fallbacks mínimos
@@ -504,6 +508,16 @@ def _direccion_legible_from_text(text: str) -> str:
         return ""
     parts = text.split(' — GPS:')
     return parts[0].strip()
+
+def _extract_nota_from_direccion(text: str) -> str:
+    """
+    Si guardamos la nota como ' — Nota: ...' al final de cliente_direccion,
+    la extraemos para imprimirla en la comandera.
+    """
+    if not text:
+        return ""
+    m = re.search(r' — Nota:\s*(.+)$', text)
+    return (m.group(1).strip() if m else "")
 
 
 def _map_url_from_text(text: str) -> str:
@@ -1494,6 +1508,199 @@ def panel_alertas_set_estado(request, pedido_id):
 
 
 # =========================
+# === Impresión / Comandera
+# =========================
+def _format_money(v: Decimal) -> str:
+    try:
+        return f"${v.quantize(Decimal('0.01'))}"
+    except Exception:
+        return f"${v}"
+
+def _build_ticket_text(pedido) -> str:
+    """
+    Arma un ticket simple en texto (compatible con impresoras térmicas en modo texto/ESC-POS).
+    No usamos librerías externas para no agregar dependencias.
+    """
+    tienda = getattr(settings, 'SITE_NAME', 'YO HELADERÍAS')
+    ahora = timezone.localtime(pedido.fecha_pedido if getattr(pedido, 'fecha_pedido', None) else timezone.now())
+    header = [
+        "================================",
+        f"{tienda}".center(32),
+        "PEDIDO A COCINA".center(32),
+        f"#{pedido.id}  {ahora:%d/%m %H:%M}".center(32),
+        "================================",
+    ]
+    cliente = [
+        f"Cliente : {pedido.cliente_nombre or '-'}",
+        f"Tel     : {pedido.cliente_telefono or '-'}",
+    ]
+    direccion_legible = _direccion_legible_from_text(pedido.cliente_direccion)
+    nota = _extract_nota_from_direccion(pedido.cliente_direccion)
+    envio = [
+        f"Entrega : {direccion_legible or 'Retiro en local'}",
+    ]
+    if nota:
+        envio.append(f"Nota    : {nota}")
+
+    pago = [f"Pago    : {pedido.metodo_pago or '-'}"]
+
+    # Detalle
+    detalle = ["", "Items:", "------------------------------"]
+    for d in pedido.detalles.all():
+        linea = f"{d.cantidad} x {d.producto.nombre}"
+        if d.opcion_seleccionada:
+            linea += f" ({d.opcion_seleccionada.nombre_opcion})"
+        detalle.append(linea[:32])
+        sabores = [s.nombre for s in d.sabores.all()]
+        if sabores:
+            detalle.append(("  Sabores: " + ", ".join(sabores))[:32])
+
+    totales = ["------------------------------"]
+    if (pedido.costo_envio or Decimal('0')) > 0:
+        totales.append(f"Envío:      {_format_money(pedido.costo_envio)}")
+    totales.append(f"TOTAL:      {_format_money(_compute_total(pedido))}")
+    totales.append("------------------------------")
+    totales.append("           ¡Gracias!          ")
+    totales.append("\n\n")  # margen inferior
+
+    parts = header + [""] + cliente + envio + pago + detalle + totales
+    return "\n".join(parts)
+
+def _send_ticket_webhook(text: str, title: str = "Pedido a cocina", copies: int = 1):
+    """
+    Envía el ticket a un servicio HTTP propio.
+    Requiere COMANDERA_WEBHOOK_URL en settings.
+    """
+    url = getattr(settings, 'COMANDERA_WEBHOOK_URL', '') or ''
+    if not url:
+        return False
+    headers = {'Content-Type': 'application/json'}
+    token = getattr(settings, 'COMANDERA_TOKEN', '') or ''
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    payload = {"title": title, "text": text, "copies": int(copies or 1)}
+    try:
+        r = requests.post(url, json=payload, headers=headers, timeout=7)
+        if r.status_code // 100 == 2:
+            return True
+        print(f"COMANDERA webhook status={r.status_code} body={r.text[:180]}")
+    except Exception as e:
+        print(f"COMANDERA webhook error: {e}")
+    return False
+
+def _send_ticket_printnode(text: str, title: str = "Pedido a cocina", copies: int = 1):
+    """
+    Envía el ticket a PrintNode (https://printnode.com/).
+    Requiere PRINTNODE_API_KEY y PRINTNODE_PRINTER_ID en settings.
+    """
+    api_key = getattr(settings, 'PRINTNODE_API_KEY', '') or ''
+    printer_id = getattr(settings, 'PRINTNODE_PRINTER_ID', None)
+    if not api_key or not printer_id:
+        return False
+    body = {
+        "printerId": int(printer_id),
+        "title": title,
+        "contentType": "raw_base64",
+        # contenido como texto plano; muchas térmicas aceptan directamente UTF-8
+        "content": base64.b64encode(text.encode("utf-8")).decode("ascii"),
+        "source": "yo-heladerias-web",
+        "options": {"copies": int(copies or 1)},
+    }
+    try:
+        r = requests.post(
+            "https://api.printnode.com/printjobs",
+            auth=(api_key, ""),
+            json=body,
+            timeout=10,
+        )
+        if r.status_code // 100 == 2:
+            return True
+        print(f"PRINTNODE error status={r.status_code} body={r.text[:180]}")
+    except Exception as e:
+        print(f"PRINTNODE exception: {e}")
+    return False
+
+def _print_ticket_for_pedido(pedido):
+    """
+    Construye y manda el ticket. No levanta excepciones (no rompe el flujo).
+    """
+    try:
+        copies = int(getattr(settings, 'COMANDERA_COPIES', 1) or 1)
+    except Exception:
+        copies = 1
+    text = _build_ticket_text(pedido)
+    # Prioridad: webhook propio -> PrintNode
+    if _send_ticket_webhook(text, title=f"Pedido #{pedido.id}", copies=copies):
+        print(f"COMANDERA: ticket #{pedido.id} enviado por webhook.")
+        return
+    if _send_ticket_printnode(text, title=f"Pedido #{pedido.id}", copies=copies):
+        print(f"COMANDERA: ticket #{pedido.id} enviado por PrintNode.")
+        return
+    print("COMANDERA: no hay impresora configurada o envío falló.")
+
+
+# === NUEVO: payload + ticket HTML (80mm) ===
+def _build_ticket_payload(pedido):
+    """Payload legible para HTML/QZ."""
+    items = []
+    for d in pedido.detalles.all():
+        precio_unit = d.producto.precio
+        if d.opcion_seleccionada:
+            precio_unit += d.opcion_seleccionada.precio_adicional
+        subtotal = (precio_unit * d.cantidad).quantize(Decimal('0.01'))
+        items.append({
+            "cantidad": int(d.cantidad),
+            "descripcion": f"{d.producto.nombre}" + (f" - {d.opcion_seleccionada.nombre_opcion}" if d.opcion_seleccionada else ""),
+            "sabores": [s.nombre for s in d.sabores.all()],
+            "subtotal": float(subtotal),
+        })
+
+    payload = {
+        "site": getattr(settings, "SITE_NAME", "YO HELADERÍAS"),
+        "pedido_id": pedido.id,
+        "fecha": timezone.localtime(pedido.fecha_pedido).strftime("%d/%m %H:%M") if getattr(pedido, 'fecha_pedido', None) else timezone.localtime().strftime("%d/%m %H:%M"),
+        "cliente": pedido.cliente_nombre or "",
+        "direccion": _direccion_legible_from_text(pedido.cliente_direccion) or "",
+        "telefono": pedido.cliente_telefono or "",
+        "metodo_pago": (pedido.metodo_pago or "").upper(),
+        "total": float(_compute_total(pedido)),
+        "items": items,
+        "copies": int(getattr(settings, "COMANDERA_COPIES", 1)),
+    }
+    return payload
+
+
+@staff_member_required
+def ticket_pedido(request, pedido_id):
+    """
+    Ticket HTML 80mm. Abrís /ticket/<id>/?auto=1 para que se imprima con window.print().
+    Si usás QZ Tray desde el browser, podés abrir /ticket/<id>/?qz=1&auto=1 y el template intentará imprimir con ESC/POS.
+    """
+    pedido = get_object_or_404(Pedido, id=pedido_id)
+    payload = _build_ticket_payload(pedido)
+
+    class _L:
+        def __init__(self, it):
+            self.cantidad = it["cantidad"]
+            self.descripcion = it["descripcion"]
+            self.sabores = ", ".join(it["sabores"]) if it["sabores"] else ""
+            self.subtotal = f"{Decimal(str(it['subtotal'])).quantize(Decimal('0.01'))}"
+
+    lineas = [_L(it) for it in payload["items"]]
+
+    ctx = {
+        "site": payload["site"],
+        "pedido": pedido,
+        "ticket": payload,
+        "lineas": lineas,
+        "total": f"{Decimal(str(payload['total'])).quantize(Decimal('0.01'))}",
+        "auto": (request.GET.get("auto") == "1"),
+        "use_qz": (request.GET.get("qz") == "1"),
+    }
+    return render(request, "pedidos/ticket_pedido.html", ctx)
+
+
+# =========================
 # === TIENDA (toggle abierta/cerrada)
 # =========================
 @require_GET
@@ -1546,6 +1753,12 @@ def confirmar_pedido(request, pedido_id):
 
     _marcar_estado(pedido, 'EN_PREPARACION', actor=request.user, fuente='confirmar_pedido')
 
+    # ← sigue tu impresión actual (webhook/PrintNode). No rompe si no está configurada.
+    try:
+        _print_ticket_for_pedido(pedido)
+    except Exception as e:
+        print(f"COMANDERA error: {e}")
+
     # WebSocket a tablets/tienda + Push a cadetes
     try:
         channel_layer = get_channel_layer()
@@ -1585,7 +1798,9 @@ def confirmar_pedido(request, pedido_id):
     _notify_panel_update(pedido, message='nuevo_pedido')
 
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-        return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': 'EN_PREPARACION'})
+        # === NUEVO: devolvemos URL de ticket HTML para imprimir desde el panel
+        ticket_url = _abs_https(request, reverse('ticket_pedido', args=[pedido.id])) + "?auto=1"
+        return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': 'EN_PREPARACION', 'ticket_url': ticket_url})
 
     messages.success(request, f"Pedido #{pedido.id} confirmado. ¡Alerta enviada a los repartidores conectados!")
     return redirect('panel_alertas')
