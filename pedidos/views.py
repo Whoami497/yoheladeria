@@ -1792,6 +1792,12 @@ def tienda_toggle(request):
 # === TIENDA / CADETES
 # =========================
 @staff_member_required
+
+
+
+@login_required
+@require_POST
+@staff_member_required
 def confirmar_pedido(request, pedido_id):
     pedido = get_object_or_404(Pedido, id=pedido_id)
 
@@ -1803,13 +1809,13 @@ def confirmar_pedido(request, pedido_id):
 
     _marcar_estado(pedido, 'EN_PREPARACION', actor=request.user, fuente='confirmar_pedido')
 
-    # ← impresión (TCP / webhook / PrintNode). No rompe si no está configurada.
+    # Imprimir por backend (webhook o PrintNode). Si no hay nada configurado, no rompe.
     try:
         _print_ticket_for_pedido(pedido)
     except Exception as e:
         print(f"COMANDERA error: {e}")
 
-    # WebSocket a tablets/tienda + Push a cadetes
+    # WS a tablets/panel y push a cadetes (sin cambios)
     try:
         channel_layer = get_channel_layer()
 
@@ -1847,59 +1853,13 @@ def confirmar_pedido(request, pedido_id):
 
     _notify_panel_update(pedido, message='nuevo_pedido')
 
+    # ⛔️ IMPORTANTE: ya NO devolvemos ticket_url → así no se abre la ventana de impresión del navegador
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-        # === devolvemos URL de ticket HTML para imprimir desde el panel si quieren
-        ticket_url = _abs_https(request, reverse('ticket_pedido', args=[pedido.id])) + "?auto=1"
-        return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': 'EN_PREPARACION', 'ticket_url': ticket_url})
+        return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': 'EN_PREPARACION'})
 
     messages.success(request, f"Pedido #{pedido.id} confirmado. ¡Alerta enviada a los repartidores conectados!")
     return redirect('panel_alertas')
 
-
-@login_required
-@require_POST
-def aceptar_pedido(request, pedido_id):
-    pedido = get_object_or_404(Pedido, id=pedido_id)
-
-    if not hasattr(request.user, 'cadeteprofile'):
-        messages.error(request, "Acción no permitida. No tienes un perfil de cadete.")
-        return redirect('index')
-
-    if Pedido.objects.filter(
-        cadete_asignado=request.user.cadeteprofile,
-        estado__in=['ASIGNADO', 'EN_CAMINO']
-    ).exists():
-        messages.warning(request, "Ya tenés un pedido en curso. Entregalo antes de aceptar otro.")
-        return redirect('panel_cadete')
-
-    if pedido.estado != 'EN_PREPARACION' or pedido.cadete_asignado_id:
-        messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
-        return redirect('panel_cadete')
-
-    pedido.cadete_asignado = request.user.cadeteprofile
-    try:
-        pedido.save(update_fields=['cadete_asignado'])
-    except Exception:
-        pedido.save()
-    _marcar_estado(pedido, 'ASIGNADO', actor=request.user, fuente='aceptar_pedido')
-
-    cp = request.user.cadeteprofile
-    if hasattr(cp, 'disponible'):
-        try:
-            cp.disponible = False
-            cp.save(update_fields=['disponible'])
-        except Exception:
-            pass
-    request.session['cadete_disponible'] = False
-    request.session.modified = True
-
-    _notify_panel_update(pedido)
-
-    if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-        return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': 'ASIGNADO'})
-
-    messages.success(request, f"¡Has aceptado el Pedido #{pedido.id}! Por favor, prepárate para retirarlo.")
-    return redirect('panel_cadete')
 
 
 def login_cadete(request):
