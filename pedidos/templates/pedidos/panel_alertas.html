@@ -530,9 +530,11 @@
     try { return await res.json(); } catch { window.location.href = fallbackUrl; return null; }
   }
 
-  /* ===== CAMBIO CLAVE: imprimir ticket automáticamente al confirmar ===== */
+  /* ===== CONFIRMAR: sin abrir ventana de impresión =====
+     El backend (views.confirmar_pedido) ya envía el ticket por PrintNode.
+     Solo actualizamos la UI acá. */
   document.addEventListener('click', async (ev)=>{
-    const btn = ev.target.closest('.btn-confirm'); 
+    const btn = ev.target.closest('.btn-confirm');
     if(!btn) return;
     ev.preventDefault();
 
@@ -547,7 +549,7 @@
       const res = await fetch(url,{method:'POST',headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'}});
       if(res.ok){
         const badge=card.querySelector('.badge');
-        badge.className='badge '+badgeClass('EN_PREPARACION'); 
+        badge.className='badge '+badgeClass('EN_PREPARACION');
         badge.textContent='EN_PREPARACION';
 
         btn.parentElement.innerHTML = `
@@ -562,9 +564,8 @@
             </ul>
           </div>`;
 
-        /* abre el ticket en modo auto + qz + cerrar */
-        const w = window.open(`/ticket/${orderId}/?auto=1&qz=1&close=1`, '_blank', 'width=420,height=680');
-        if (!w) window.open(`/ticket/${orderId}/?auto=1&close=1`, '_blank', 'width=420,height=680');
+        // <-- IMPORTANTE: ya NO abrimos /ticket/... ni mostramos diálogo de impresión
+        // console.log(`Ticket del pedido ${orderId} enviado a impresora por PrintNode`);
 
       }else{
         window.location.href=url;

@@ -29,6 +29,7 @@ import logging  # ← añadido
 from django.views.decorators.http import require_GET
 from django.contrib.admin.views.decorators import staff_member_required
 import socket  # ← NUEVO: para impresión TCP/RAW
+from django.shortcuts import get_object_or_404, redirect
 
 # ====== Forms ======
 # Intentamos importar los forms del proyecto; si no existen, definimos fallbacks mínimos
