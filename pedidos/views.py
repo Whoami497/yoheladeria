@@ -25,15 +25,14 @@ import base64  # ← para PrintNode (raw_base64)
 from urllib.parse import quote_plus
 from django.template import TemplateDoesNotExist
 from django.contrib import messages
-import logging  # ← añadido
-import socket  # ← NUEVO: para impresión TCP/RAW
+import logging
+import socket  # ← impresión TCP/RAW
+import textwrap  # ← NUEVO: wrap de líneas para ticket
 
 # ====== Forms ======
-# Intentamos importar los forms del proyecto; si no existen, definimos fallbacks mínimos
 try:
     from .forms import ClienteSignupForm, ClienteProfileForm  # recomendado
 except Exception:
-    # Fallbacks para no romper el deploy si aún no creaste los forms en forms.py
     from django import forms
     from django.contrib.auth.models import User
     try:
@@ -66,7 +65,6 @@ except Exception:
             user.set_password(self.cleaned_data["password1"])
             if commit:
                 user.save()
-            # crear perfil cliente si el modelo existe
             try:
                 if _ClienteProfileModel:
                     _ClienteProfileModel.objects.get_or_create(user=user)
@@ -76,15 +74,13 @@ except Exception:
 
     if _ClienteProfileModel:
         class ClienteProfileForm(forms.ModelForm):
-            # Campos del User para editar desde el mismo form
             first_name = forms.CharField(required=False, label="Nombre")
             last_name = forms.CharField(required=False, label="Apellido")
             email = forms.EmailField(required=False, label="Email")
             class Meta:
                 model = _ClienteProfileModel
-                fields = ["telefono", "direccion"]  # ajustá si tu modelo tiene otros nombres
+                fields = ["telefono", "direccion"]
     else:
-        # Si no hay modelo aún, dejamos un form vacío para no romper vistas (solo mostrará nombre/apellido/email).
         class ClienteProfileForm(forms.Form):
             first_name = forms.CharField(required=False, label="Nombre")
             last_name  = forms.CharField(required=False, label="Apellido")
@@ -95,9 +91,9 @@ from .models import (
     OpcionProducto, ClienteProfile, ProductoCanje, CadeteProfile
 )
 
-# ==> Geocoding util (usa GOOGLE_*_KEY en settings si existe utils/geocoding.py)
+# ==> Geocoding util
 try:
-    from .utils.geocoding import reverse_geocode as gc_reverse  # lat, lng -> dict
+    from .utils.geocoding import reverse_geocode as gc_reverse
 except Exception:
     gc_reverse = None
 
@@ -106,9 +102,6 @@ except Exception:
 # === util
 # =========================
 def _abs_https(request, url_or_path: str) -> str:
-    """
-    Devuelve una URL absoluta y forzada a https (Render puede dar http en request).
-    """
     if url_or_path.startswith('http://') or url_or_path.startswith('https://'):
         url = url_or_path
     else:
@@ -119,7 +112,6 @@ def _abs_https(request, url_or_path: str) -> str:
 
 
 def cadete_esta_ocupado(cadete_profile) -> bool:
-    """True si el cadete tiene un pedido ASIGNADO o EN_CAMINO."""
     if not cadete_profile:
         return False
     return Pedido.objects.filter(
@@ -129,10 +121,6 @@ def cadete_esta_ocupado(cadete_profile) -> bool:
 
 
 def _compute_total(pedido) -> Decimal:
-    """
-    Suma segura del total con el envío PERSISTIDO (pedido.costo_envio).
-    Evita recalcular envío en propiedades o señales.
-    """
     total = Decimal('0.00')
     for d in pedido.detalles.all():
         precio = d.producto.precio
@@ -144,18 +132,9 @@ def _compute_total(pedido) -> Decimal:
     return total.quantize(Decimal('0.01'))
 
 
-# ---------- TIENDA ABIERTA / CERRADA (helpers)
-
+# ---------- TIENDA ABIERTA / CERRADA
 def _get_tienda_abierta() -> bool:
-    """
-    Lee el flag global desde DB:
-      1) GlobalSetting.TIENDA_ABIERTA si existe ese modelo
-      2) StoreStatus (fila única)
-      3) fallback a settings.TIENDA_ABIERTA_DEFAULT (True por defecto)
-    """
     default_val = bool(getattr(settings, 'TIENDA_ABIERTA_DEFAULT', True))
-
-    # 1) GlobalSetting (si existe)
     try:
         from .models import GlobalSetting
         try:
@@ -165,36 +144,24 @@ def _get_tienda_abierta() -> bool:
     except Exception:
         pass
 
-    # 2) StoreStatus (fila única)
     try:
         from .models import StoreStatus
-        ss = StoreStatus.get()  # get_or_create(pk=1)
+        ss = StoreStatus.get()
         return bool(ss.is_open)
     except Exception:
         pass
 
-    # 3) fallback
     return default_val
 
 
 def _set_tienda_abierta(value: bool) -> bool:
-    """
-    Persiste el flag en DB:
-      1) GlobalSetting si existe
-      2) StoreStatus (fila única)
-      3) si nada existe, devuelve el valor sin persistir
-    """
     val = bool(value)
-
-    # 1) GlobalSetting
     try:
         from .models import GlobalSetting
         GlobalSetting.set_bool('TIENDA_ABIERTA', val)
         return val
     except Exception:
         pass
-
-    # 2) StoreStatus
     try:
         from .models import StoreStatus
         ss = StoreStatus.get()
@@ -204,22 +171,14 @@ def _set_tienda_abierta(value: bool) -> bool:
         return val
     except Exception:
         pass
-
-    # 3) no se pudo persistir (p.ej. antes de migrar)
     return val
 
 
 
 def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta: dict | None = None):
-    """
-    Cambia el estado del pedido, intenta completar timestamps de hitos si los campos existen
-    (fecha_en_preparacion, fecha_asignado, etc.) y registra un log en PedidoEstadoLog si existe el modelo.
-    """
     anterior = getattr(pedido, 'estado', None)
     pedido.estado = nuevo_estado
     ahora = timezone.now()
-
-    # Intentar setear timestamp del hito si el campo existe
     try:
         mapping = {
             'RECIBIDO': 'fecha_pago_aprobado',
@@ -228,7 +187,6 @@ def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta
             'EN_CAMINO': 'fecha_en_camino',
             'ENTREGADO': 'fecha_entregado',
             'CANCELADO': 'fecha_cancelado',
-            # 'PENDIENTE_PAGO': 'fecha_pendiente_pago',  # si tenés este campo, podés activarlo
         }
         campo = mapping.get(nuevo_estado)
         update_fields = ['estado']
@@ -237,15 +195,13 @@ def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta
             update_fields.append(campo)
         pedido.save(update_fields=update_fields)
     except Exception:
-        # Si falla por campos inexistentes, guardamos al menos el estado
         try:
             pedido.save(update_fields=['estado'])
         except Exception:
             pedido.save()
 
-    # Intentar escribir un log si existe el modelo PedidoEstadoLog
     try:
-        from .models import PedidoEstadoLog  # puede no existir aún
+        from .models import PedidoEstadoLog
         actor_tipo = 'sistema'
         if actor is not None and getattr(actor, 'is_authenticated', False):
             if getattr(actor, 'is_staff', False):
@@ -269,34 +225,20 @@ def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta
     return pedido
 
 
-# --- Guard: bloquear checkout si la tienda está cerrada (respuesta coherente para HTML y AJAX)
 def _abort_if_store_closed(request):
-    """
-    Devuelve una respuesta (redirect/JSON/403) si la tienda está cerrada.
-    Retorna None si está abierta (seguir normal).
-    """
     try:
         abierta = _get_tienda_abierta()
     except Exception:
-        abierta = True  # por si algo falla, no romper checkout
-
+        abierta = True
     if abierta:
         return None
-
-    # Si viene por AJAX, devolvemos JSON con 403
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
         return JsonResponse({'ok': False, 'error': 'tienda_cerrada'}, status=403)
-
-    # Mensaje + redirect si es navegación normal
     messages.error(request, "En este momento no estamos tomando pedidos online. Probá dentro del horario de atención.")
     return redirect('ver_carrito')
 
 
 def _serialize_pedido_for_panel(pedido, include_details=True):
-    """
-    Serializa un Pedido para mandarlo al panel por WS/JSON.
-    Incluye costo_envio como float (para que el front lo formatee).
-    """
     data = {
         'id': pedido.id,
         'estado': pedido.estado,
@@ -382,14 +324,9 @@ def _notify_panel_update(pedido, message='actualizacion_pedido'):
         print(f"WS panel update error: {e}")
 
 
-# === NUEVO: broadcast del estado de la tienda (para el panel / WS)
 _logger = logging.getLogger(__name__)
 
 def _broadcast_tienda_estado(abierta: bool):
-    """
-    Envía por Channels un mensaje 'tienda_estado' al grupo de panel para
-    refrescar el badge/estado en tiempo real.
-    """
     try:
         channel_layer = get_channel_layer()
         if not channel_layer:
@@ -408,12 +345,6 @@ def _broadcast_tienda_estado(abierta: bool):
 
 
 def _notify_cadetes_new_order(request, pedido):
-    """
-    Envia WebPush SOLO a cadetes:
-      - con subscription_info,
-      - con disponible=True,
-      - y sin pedido activo (ASIGNADO/EN_CAMINO).
-    """
     try:
         from pywebpush import webpush, WebPushException
     except Exception as e:
@@ -508,10 +439,6 @@ def _direccion_legible_from_text(text: str) -> str:
     return parts[0].strip()
 
 def _extract_nota_from_direccion(text: str) -> str:
-    """
-    Si guardamos la nota como ' — Nota: ...' al final de cliente_direccion,
-    la extraemos para imprimirla en la comandera.
-    """
     if not text:
         return ""
     m = re.search(r' — Nota:\s*(.+)$', text)
@@ -609,7 +536,7 @@ def _reverse_geocode_any(lat: float, lng: float) -> dict:
 def _calcular_costo_envio(direccion_cliente: str):
     dest = (direccion_cliente or '').strip()
     if not dest:
-        return (Decimal('0.00'), 0.0)  # retiro en local
+        return (Decimal('0.00'), 0.0)
 
     api_key = getattr(settings, 'GOOGLE_MAPS_API_KEY', '') or ''
     language = getattr(settings, 'MAPS_LANGUAGE', 'es')
@@ -635,7 +562,7 @@ def _calcular_costo_envio(direccion_cliente: str):
     if not api_key or not origen:
         return (base.quantize(Decimal('0.01')), 0.0)
 
-    destino = dest  # puede ser 'lat,lng' o dirección
+    destino = dest
 
     try:
         url = "https://maps.googleapis.com/maps/api/distancematrix/json"
@@ -760,7 +687,6 @@ def index(request):
         'q': q,
         'cat': cat_val,
         'sort': sort,
-        # el banner/estado ya viene por context processor como TIENDA_ABIERTA
     }
     return render(request, 'pedidos/index.html', contexto)
 
@@ -845,7 +771,6 @@ def detalle_producto(request, producto_id):
             nombre_item_carrito = f"{producto.nombre} - {opcion_seleccionada_obj.nombre_opcion}"
             opcion_id_para_carrito = opcion_seleccionada_obj.id
             opcion_nombre_para_carrito = opcion_seleccionada_obj.nombre_opcion
-            # FIX: línea corregida
             opcion_imagen_para_carrito = (
                 opcion_seleccionada_obj.imagen_opcion
                 if (opcion_seleccionada_obj and getattr(opcion_seleccionada_obj, 'imagen_opcion', None))
@@ -897,11 +822,6 @@ def detalle_producto(request, producto_id):
 # === MERCADO PAGO
 # =========================
 def crear_preferencia_mp(request, pedido):
-    """
-    Crea la preferencia de Mercado Pago y devuelve el link de checkout.
-    Fuerza HTTPS en back_urls/notification_url para evitar el error:
-    'auto_return invalid. back_url.success must be defined'
-    """
     if not getattr(settings, "MERCADO_PAGO_ACCESS_TOKEN", None):
         raise RuntimeError("MERCADO_PAGO_ACCESS_TOKEN no está configurado en el servidor")
 
@@ -919,7 +839,6 @@ def crear_preferencia_mp(request, pedido):
             "currency_id": "ARS",
         })
 
-    # Incluir costo de envío como ítem adicional si corresponde
     try:
         if pedido.costo_envio and pedido.costo_envio > 0:
             items.append({
@@ -1004,7 +923,6 @@ def ver_carrito(request):
             continue
 
     if request.method == 'POST':
-        # 🚦 Bloqueo si la tienda está cerrada (guard central, maneja HTML/AJAX)
         resp = _abort_if_store_closed(request)
         if resp:
             return resp
@@ -1117,7 +1035,6 @@ def ver_carrito(request):
         # === FLUJO MP ===
         if metodo_pago.strip().upper() in ('MP', 'MERCADOPAGO', 'MERCADO_PAGO', 'MERCADO PAGO'):
             try:
-                # marcar pedido como pendiente de pago (NO entra al panel aún)
                 _marcar_estado(nuevo_pedido, 'PENDIENTE_PAGO',
                                actor=request.user if request.user.is_authenticated else None,
                                fuente='checkout_mp')
@@ -1154,7 +1071,6 @@ def ver_carrito(request):
             request.user.clienteprofile.save()
             messages.success(request, f"¡Has ganado {puntos_ganados} puntos de fidelidad con este pedido!")
 
-        # Notificación a panel
         try:
             channel_layer = get_channel_layer()
             async_to_sync(channel_layer.group_send)(
@@ -1267,13 +1183,10 @@ def perfil_cliente(request):
     if request.method == 'POST':
         form = ClienteProfileForm(request.POST, instance=cliente_profile) if hasattr(ClienteProfileForm, '_meta') else ClienteProfileForm(request.POST)
         if form.is_valid():
-            # Actualizar datos del User si esos campos existen en el form
             for k in ('first_name', 'last_name', 'email'):
                 if k in form.cleaned_data:
                     setattr(user, k, form.cleaned_data[k] or getattr(user, k))
             user.save()
-
-            # Guardar el perfil si es ModelForm
             try:
                 form.save()
             except Exception:
@@ -1289,7 +1202,6 @@ def perfil_cliente(request):
                 messages.error(request, error)
     else:
         initial = {'first_name': user.first_name, 'last_name': user.last_name, 'email': user.email}
-        # FIX: línea corregida
         form = ClienteProfileForm(instance=cliente_profile, initial=initial) if hasattr(ClienteProfileForm, '_meta') else ClienteProfileForm(initial=initial)
 
     contexto = {'form': form, 'user': user, 'cliente_profile': cliente_profile}
@@ -1337,7 +1249,6 @@ def pedido_en_curso(request):
         setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
         setattr(p, 'map_url', _map_url_from_text(p.cliente_direccion))
         setattr(p, 'metricas', _serialize_metricas(p))
-        # seguro ante ausencia de logs_estado
         try:
             logs_qs = p.logs_estado.select_related('actor').order_by('-created_at')[:8]
         except Exception:
@@ -1358,7 +1269,7 @@ def panel_alertas(request):
     pedidos_hoy = (
         Pedido.objects
         .filter(fecha_pedido__date=hoy)
-        .exclude(estado__in=['ENTREGADO', 'CANCELADO', 'PENDIENTE_PAGO'])  # ← no mostrar pendientes
+        .exclude(estado__in=['ENTREGADO', 'CANCELADO', 'PENDIENTE_PAGO'])
         .order_by('-fecha_pedido')
     )
     pedidos_ayer = (
@@ -1377,7 +1288,6 @@ def panel_alertas(request):
             setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
             setattr(p, 'map_url', _map_url_from_text(p.cliente_direccion))
             setattr(p, 'metricas', _serialize_metricas(p))
-            # seguro ante ausencia de logs_estado
             try:
                 logs_qs = p.logs_estado.select_related('actor').order_by('-created_at')[:8]
             except Exception:
@@ -1389,7 +1299,6 @@ def panel_alertas(request):
         'pedidos_hoy': enrich(pedidos_hoy),
         'pedidos_ayer': enrich(pedidos_ayer),
         'entregados_hoy': enrich(entregados_hoy),
-        # El estado de tienda llega al template como TIENDA_ABIERTA vía context processor
     }
     return render(request, 'pedidos/panel_alertas.html', ctx)
 
@@ -1402,7 +1311,7 @@ def panel_alertas_data(request):
     if scope == 'hoy':
         qs = (Pedido.objects
             .filter(fecha_pedido__date=hoy)
-            .exclude(estado__in=['ENTREGADO', 'CANCELADO', 'PENDIENTE_PAGO'])  # ← no mostrar pendientes
+            .exclude(estado__in=['ENTREGADO', 'CANCELADO', 'PENDIENTE_PAGO'])
             .order_by('-fecha_pedido'))
     elif scope == 'hoy_finalizados':
         qs = (Pedido.objects
@@ -1524,19 +1433,43 @@ def _format_money(v: Decimal) -> str:
     except Exception:
         return f"${v}"
 
+# ---- helpers de wrap para ticket
+def _ticket_width() -> int:
+    try:
+        return int(getattr(settings, 'COMANDERA_LINE_WIDTH', 32) or 32)
+    except Exception:
+        return 32
+
+def _wrap_lines(target_list, text, initial_indent="", subsequent_indent=""):
+    """Agrega a target_list las líneas envueltas sin partir palabras."""
+    width = max(20, _ticket_width())
+    if not text:
+        target_list.append("")
+        return
+    wrapped = textwrap.wrap(
+        text,
+        width=width,
+        break_long_words=False,
+        break_on_hyphens=False,
+        initial_indent=initial_indent,
+        subsequent_indent=subsequent_indent,
+    )
+    target_list.extend(wrapped if wrapped else [""])
+
 def _build_ticket_text(pedido) -> str:
     """
-    Arma un ticket simple en texto (compatible con impresoras térmicas en modo texto/ESC-POS).
-    No usamos librerías externas para no agregar dependencias.
+    Arma ticket en modo texto/ESC-POS con wrap correcto.
     """
+    width = _ticket_width()
     tienda = getattr(settings, 'SITE_NAME', 'YO HELADERÍAS')
     ahora = timezone.localtime(pedido.fecha_pedido if getattr(pedido, 'fecha_pedido', None) else timezone.now())
+
     header = [
-        "================================",
-        f"{tienda}".center(32),
-        "PEDIDO A COCINA".center(32),
-        f"#{pedido.id}  {ahora:%d/%m %H:%M}".center(32),
-        "================================",
+        "=" * width,
+        f"{tienda}".center(width),
+        "PEDIDO A COCINA".center(width),
+        f"#{pedido.id}  {ahora:%d/%m %H:%M}".center(width),
+        "=" * width,
     ]
     cliente = [
         f"Cliente : {pedido.cliente_nombre or '-'}",
@@ -1544,41 +1477,45 @@ def _build_ticket_text(pedido) -> str:
     ]
     direccion_legible = _direccion_legible_from_text(pedido.cliente_direccion)
     nota = _extract_nota_from_direccion(pedido.cliente_direccion)
-    envio = [
-        f"Entrega : {direccion_legible or 'Retiro en local'}",
-    ]
+    envio = [f"Entrega : {direccion_legible or 'Retiro en local'}"]
     if nota:
-        envio.append(f"Nota    : {nota}")
+        _wrap_lines(envio, f"Nota    : {nota}", initial_indent="", subsequent_indent="          ")
 
     pago = [f"Pago    : {pedido.metodo_pago or '-'}"]
 
-    # Detalle
-    detalle = ["", "Items:", "------------------------------"]
+    detalle = ["", "Items:", "-" * (width - 2)]
     for d in pedido.detalles.all():
-        linea = f"{d.cantidad} x {d.producto.nombre}"
+        linea_base = f"{d.cantidad} x {d.producto.nombre}"
         if d.opcion_seleccionada:
-            linea += f" ({d.opcion_seleccionada.nombre_opcion})"
-        detalle.append(linea[:32])
+            linea_base += f" ({d.opcion_seleccionada.nombre_opcion})"
+        _wrap_lines(detalle, linea_base)
+
         sabores = [s.nombre for s in d.sabores.all()]
         if sabores:
-            detalle.append(("  Sabores: " + ", ".join(sabores))[:32])
+            label = "  Sabores: "
+            _wrap_lines(detalle, label + ", ".join(sabores), initial_indent="", subsequent_indent=" " * len(label))
 
-    totales = ["------------------------------"]
+        # Nota por ítem (si el carrito guardó 'nota')
+        try:
+            nota_item = getattr(d, 'nota', '') or ''
+            if nota_item:
+                label = "  Nota: "
+                _wrap_lines(detalle, label + nota_item, subsequent_indent=" " * len(label))
+        except Exception:
+            pass
+
+    totales = ["-" * (width - 2)]
     if (pedido.costo_envio or Decimal('0')) > 0:
         totales.append(f"Envío:      {_format_money(pedido.costo_envio)}")
     totales.append(f"TOTAL:      {_format_money(_compute_total(pedido))}")
-    totales.append("------------------------------")
-    totales.append("           ¡Gracias!          ")
+    totales.append("-" * (width - 2))
+    totales.append("¡Gracias!".center(width))
     totales.append("\n\n")  # margen inferior
 
     parts = header + [""] + cliente + envio + pago + detalle + totales
     return "\n".join(parts)
 
 def _send_ticket_webhook(text: str, title: str = "Pedido a cocina", copies: int = 1):
-    """
-    Envía el ticket a un servicio HTTP propio.
-    Requiere COMANDERA_WEBHOOK_URL en settings.
-    """
     url = getattr(settings, 'COMANDERA_WEBHOOK_URL', '') or ''
     if not url:
         return False
@@ -1597,24 +1534,18 @@ def _send_ticket_webhook(text: str, title: str = "Pedido a cocina", copies: int 
     return False
 
 def _send_ticket_printnode(text: str, title: str = "Pedido a cocina", copies: int = 1):
-    """
-    Envía el ticket a PrintNode (https://printnode.com/).
-    Requiere PRINTNODE_API_KEY y PRINTNODE_PRINTER_ID en settings.
-    AHORA: envía bytes ESC/POS (RAW) para asegurar feed+corte correcto.
-    """
     api_key = getattr(settings, 'PRINTNODE_API_KEY', '') or ''
     printer_id = getattr(settings, 'PRINTNODE_PRINTER_ID', None)
     if not api_key or not printer_id:
         return False
 
-    # Construimos los bytes ESC/POS (incluye feed + corte) con la misma función que TCP
     payload = _escpos_wrap_text(text, getattr(settings, 'COMANDERA_ENCODING', 'cp437'))
 
     body = {
         "printerId": int(printer_id),
         "title": title,
         "contentType": "raw_base64",
-        "content": base64.b64encode(payload).decode("ascii"),  # ← ESC/POS real
+        "content": base64.b64encode(payload).decode("ascii"),
         "source": "yo-heladerias-web",
         "options": {"copies": int(copies or 1)},
     }
@@ -1632,12 +1563,8 @@ def _send_ticket_printnode(text: str, title: str = "Pedido a cocina", copies: in
         print(f"PRINTNODE exception: {e}")
     return False
 
-# === NUEVO: envío directo TCP/RAW a impresora ESC/POS ===
+# === Envío directo TCP/RAW ESC/POS ===
 def _normalize_for_encoding(s: str, encoding: str) -> bytes:
-    """
-    Intenta codificar con la codificación elegida y cae a latin-1 si falla.
-    Reemplaza caracteres no soportados para evitar '?'.
-    """
     try:
         return s.encode(encoding, errors='replace')
     except Exception:
@@ -1648,55 +1575,42 @@ def _normalize_for_encoding(s: str, encoding: str) -> bytes:
 
 def _escpos_wrap_text(text: str, encoding: str) -> bytes:
     """
-    Arma bytes ESC/POS con:
+    Bytes ESC/POS:
       - Init
-      - Texto en CRLF
-      - Alimentación de N líneas (configurable)
-      - Corte (varios comandos para compatibilidad, configurable)
-
-    Ajustes por settings:
-      COMANDERA_FEED_LINES = 8     # líneas a alimentar antes del corte (0–255)
-      COMANDERA_CUT_MODE   = 'auto'  # 'auto' | 'gs_v' | 'esc_i' | 'esc_m'
-      COMANDERA_ENCODING   = 'cp437' # ya lo usás en _send_ticket_tcp_escpos
+      - Texto CRLF
+      - Feed n líneas
+      - 1 solo corte (configurable)
+    Ajustes:
+      COMANDERA_FEED_LINES (default: 6)
+      COMANDERA_CUT_MODE: 'auto' | 'gs_v' | 'esc_i' | 'esc_m'
     """
     ESC = b'\x1b'
     GS  = b'\x1d'
 
-    # Lectura de settings con defaults seguros
     try:
-        feed_lines = int(getattr(settings, 'COMANDERA_FEED_LINES', 8) or 8)
+        feed_lines = int(getattr(settings, 'COMANDERA_FEED_LINES', 6) or 6)
     except Exception:
-        feed_lines = 8
+        feed_lines = 6
     cut_mode = str(getattr(settings, 'COMANDERA_CUT_MODE', 'auto') or 'auto').lower()
 
-    # Normalizamos saltos de línea a CRLF (muchas térmicas lo prefieren)
     text_crlf = (text or "").replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
 
     data = bytearray()
     data += ESC + b'@'  # init
     data += _normalize_for_encoding(text_crlf, encoding)
 
-    # Alimentar papel: ESC d n
+    # Alimentación: ESC d n
     n = max(0, min(255, feed_lines))
     data += ESC + b'd' + bytes([n])
 
-    # Corte configurable
-    # 'gs_v': GS V <m> <n> (full/partial) – estándar ESC/POS
-    # 'esc_i' / 'esc_m': atajos Epson para full/partial cut
-    # 'auto': probamos varias variantes para máxima compatibilidad
+    # Corte: SOLO UNA VEZ
     if cut_mode in ('auto', 'gs_v'):
-        # GS V 66 n  (feed and cut); n=0 ya alimentamos arriba
-        data += GS + b'V' + b'\x42' + b'\x00'
-        # GS V 0 (full cut)
+        # GS V 0 (full cut) – la más estándar
         data += GS + b'V' + b'\x00'
-
-    if cut_mode in ('auto', 'esc_i'):
-        # ESC i (full cut en muchas Epson/compatibles)
-        data += b'\x1b' + b'i'
-
-    if cut_mode in ('auto', 'esc_m'):
-        # ESC m (partial cut en muchas Epson/compatibles)
-        data += b'\x1b' + b'm'
+    elif cut_mode == 'esc_i':
+        data += b'\x1b' + b'i'  # full cut en Epson
+    elif cut_mode == 'esc_m':
+        data += b'\x1b' + b'm'  # partial cut
 
     return bytes(data)
 
@@ -1707,7 +1621,7 @@ def _send_ticket_tcp_escpos(text: str, title: str = "Pedido a cocina", copies: i
     if not host:
         return False
 
-    encoding = getattr(settings, 'COMANDERA_ENCODING', 'cp437')  # cp437/cp850/cp858 según tu modelo
+    encoding = getattr(settings, 'COMANDERA_ENCODING', 'cp437')
 
     try:
         payload = _escpos_wrap_text(text, encoding)
@@ -1721,10 +1635,6 @@ def _send_ticket_tcp_escpos(text: str, title: str = "Pedido a cocina", copies: i
 
 
 def _print_ticket_for_pedido(pedido):
-    """
-    Construye y manda el ticket. No levanta excepciones (no rompe el flujo).
-    Prioridad: TCP directo → Webhook propio → PrintNode.
-    """
     try:
         copies = int(getattr(settings, 'COMANDERA_COPIES', 1) or 1)
     except Exception:
@@ -1743,9 +1653,8 @@ def _print_ticket_for_pedido(pedido):
     print("COMANDERA: no hay impresora configurada o envío falló.")
 
 
-# === NUEVO: payload + ticket HTML (80mm) ===
+# === Ticket HTML 80mm / QZ ===
 def _build_ticket_payload(pedido):
-    """Payload legible para HTML/QZ."""
     items = []
     for d in pedido.detalles.all():
         precio_unit = d.producto.precio
@@ -1776,10 +1685,6 @@ def _build_ticket_payload(pedido):
 
 @staff_member_required
 def ticket_pedido(request, pedido_id):
-    """
-    Ticket HTML 80mm. Abrís /ticket/<id>/?auto=1 para que se imprima con window.print().
-    Si usás QZ Tray desde el browser, podés abrir /ticket/<id>/?qz=1&auto=1 y el template intentará imprimir con ESC/POS.
-    """
     pedido = get_object_or_404(Pedido, id=pedido_id)
     payload = _build_ticket_payload(pedido)
 
@@ -1805,14 +1710,12 @@ def ticket_pedido(request, pedido_id):
 
 
 # =========================
-# === TIENDA (toggle abierta/cerrada)
+# === TIENDA (toggle)
 # =========================
 @require_GET
 def tienda_estado_json(request):
-    """Devuelve el estado actual de la tienda (público)."""
     return JsonResponse({'abierta': _get_tienda_abierta()})
 
-# Alias de compatibilidad para URLs antiguas que esperan 'tienda_estado'
 @require_GET
 def tienda_estado(request):
     return tienda_estado_json(request)
@@ -1821,10 +1724,6 @@ def tienda_estado(request):
 @staff_member_required
 @require_POST
 def tienda_set_estado(request):
-    """
-    Setea el estado de la tienda (solo staff).
-    POST param: abierta=1|0|true|false
-    """
     raw = (request.POST.get('abierta') or '').strip().lower()
     val = True if raw in ('1', 'true', 't', 'yes', 'y', 'si', 'sí') else False
     abierta = _set_tienda_abierta(val)
@@ -1835,7 +1734,6 @@ def tienda_set_estado(request):
 @staff_member_required
 @require_POST
 def tienda_toggle(request):
-    """Invierte el estado (solo staff). Útil para un botón ON/OFF."""
     nueva = not _get_tienda_abierta()
     abierta = _set_tienda_abierta(nueva)
     _broadcast_tienda_estado(abierta)
@@ -1845,18 +1743,15 @@ def tienda_toggle(request):
 # =========================
 # === TIENDA / CADETES
 # =========================
-
 @login_required
 @require_POST
 def aceptar_pedido(request, pedido_id):
-    # Solo cadetes pueden aceptar
     if not hasattr(request.user, 'cadeteprofile'):
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
         messages.error(request, "Acción no permitida. No tienes un perfil de cadete.")
         return redirect('index')
 
-    # Un cadete no puede tener dos pedidos activos
     if Pedido.objects.filter(
         cadete_asignado=request.user.cadeteprofile,
         estado__in=['ASIGNADO', 'EN_CAMINO']
@@ -1866,7 +1761,6 @@ def aceptar_pedido(request, pedido_id):
         messages.warning(request, "Ya tenés un pedido en curso. Entregalo antes de aceptar otro.")
         return redirect('panel_cadete')
 
-    # Bloqueo transaccional para evitar doble aceptación simultánea
     with transaction.atomic():
         try:
             pedido = Pedido.objects.select_for_update().get(id=pedido_id)
@@ -1876,14 +1770,12 @@ def aceptar_pedido(request, pedido_id):
             messages.warning(request, f"El Pedido #{pedido_id} no existe o ya no está disponible.")
             return redirect('panel_cadete')
 
-        # Revalidar disponibilidad con el lock tomado
         if pedido.estado != 'EN_PREPARACION' or pedido.cadete_asignado_id:
             if request.headers.get('x-requested-with') == 'XMLHttpRequest':
                 return JsonResponse({'ok': False, 'error': 'no_disponible'}, status=400)
             messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
             return redirect('panel_cadete')
 
-        # Asignar y cambiar estado bajo el mismo lock
         pedido.cadete_asignado = request.user.cadeteprofile
         try:
             pedido.save(update_fields=['cadete_asignado'])
@@ -1892,7 +1784,6 @@ def aceptar_pedido(request, pedido_id):
 
         _marcar_estado(pedido, 'ASIGNADO', actor=request.user, fuente='aceptar_pedido')
 
-    # Marcar cadete como no disponible (fuera de la transacción)
     cp = request.user.cadeteprofile
     if hasattr(cp, 'disponible'):
         try:
@@ -1958,7 +1849,6 @@ def panel_cadete(request):
         setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
         setattr(p, 'map_url', _map_url_from_text(p.cliente_direccion))
         setattr(p, 'metricas', _serialize_metricas(p))
-        # seguro ante ausencia de logs_estado
         try:
             logs_qs = p.logs_estado.select_related('actor').order_by('-created_at')[:8]
         except Exception:
@@ -1971,11 +1861,6 @@ def panel_cadete(request):
 
 @login_required
 def cadete_historial(request):
-    """
-    Historial del cadete logueado.
-    - Intenta renderizar 'pedidos/cadete_historial.html'.
-    - Si el template no existe, devuelve una tabla simple (fallback).
-    """
     if not hasattr(request.user, 'cadeteprofile'):
         messages.error(request, "Acceso denegado: este usuario no es cadete.")
         return redirect('index')
@@ -2024,9 +1909,6 @@ def logout_cadete(request):
 @login_required
 @require_POST
 def cadete_toggle_disponible(request):
-    """
-    Marca disponible/no-disponible al cadete.
-    """
     if not hasattr(request.user, 'cadeteprofile'):
         return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
 
@@ -2057,10 +1939,6 @@ def cadete_toggle_disponible(request):
 @login_required
 @require_POST
 def cadete_set_estado(request, pedido_id):
-    """
-    Permite al cadete avanzar estado de su pedido:
-    EN_CAMINO -> ENTREGADO.
-    """
     if not hasattr(request.user, 'cadeteprofile'):
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
@@ -2145,11 +2023,6 @@ def save_subscription(request):
 
 @login_required
 def cadete_feed(request):
-    """
-    Si el cadete tiene un pedido activo -> no mostramos ofertas.
-    Si el cadete NO está disponible -> no mostramos ofertas.
-    Si está disponible y libre -> mostramos pedidos EN_PREPARACION sin cadete.
-    """
     if not hasattr(request.user, 'cadeteprofile'):
         return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
 
@@ -2334,13 +2207,11 @@ def mp_webhook_view(request):
             elif status == 'rejected':
                 _marcar_estado(pedido, 'CANCELADO', actor=None, fuente='webhook_mp', meta={'payment_id': payment_id})
             else:
-                # pending / in_process -> lo dejamos en PENDIENTE_PAGO
                 _marcar_estado(pedido, 'PENDIENTE_PAGO', actor=None, fuente='webhook_mp', meta={'payment_id': payment_id})
     except Exception as e:
         print(f"WEBHOOK MP: error guardando pedido/estado: {e}")
 
     try:
-        # si aprobó: 'nuevo_pedido' (aparece en panel), si no: solo actualización
         _notify_panel_update(pedido, message='nuevo_pedido' if status == 'approved' else 'actualizacion_pedido')
     except Exception as e:
         print(f"WEBHOOK MP: error enviando WS: {e}")
@@ -2359,18 +2230,12 @@ def mp_webhook_view(request):
 
 
 def mp_success(request):
-    """
-    Página de retorno de MP. No forzamos la creación en panel a menos que verifiquemos
-    que ya hay un pago aprobado (fallback en caso de webhook perdido).
-    """
     last_id = request.session.pop('mp_last_order_id', None)
     if last_id:
         try:
             pedido = Pedido.objects.get(id=last_id)
-            # Verificación opcional: si ya fue aprobado (o el webhook se perdió), levantamos el pedido.
             payment = _mp_find_latest_approved_payment(str(last_id))
             if payment:
-                # si aún estuviese pendiente, lo pasamos a RECIBIDO y notificamos
                 if pedido.estado != 'RECIBIDO':
                     _marcar_estado(pedido, 'RECIBIDO', actor=None, fuente='mp_success_fallback', meta={'payment_id': payment.get('id')})
                 _notify_panel_update(pedido, message='nuevo_pedido')
@@ -2380,7 +2245,6 @@ def mp_success(request):
     return redirect('pedido_exitoso')
 
 
-# Alias de compatibilidad
 mp_webhook = mp_webhook_view
 
 
@@ -2393,7 +2257,6 @@ def canjear_puntos(request):
     productos_canje = ProductoCanje.objects.filter(disponible=True).order_by('puntos_requeridos')
 
     if request.method == 'POST':
-        # 🚦 Bloqueo si la tienda está cerrada
         resp = _abort_if_store_closed(request)
         if resp:
             return resp
@@ -2423,7 +2286,6 @@ def canjear_puntos(request):
                         user=request.user,
                         cliente_nombre=request.user.get_full_name() or request.user.username,
                         cliente_direccion=f"Canje de Puntos: {producto_canje.nombre}",
-                        # FIX: línea corregida
                         cliente_telefono=cliente_profile.telefono or "",
                         estado='RECIBIDO',
                     )
@@ -2455,17 +2317,13 @@ def canjear_puntos(request):
 
 
 # =========================
-# === Service Worker (scope raíz)
+# === Service Worker
 # =========================
 @require_GET
 def service_worker(request):
-    """
-    Sirve el service worker con scope raíz (/) para permitir notificaciones
-    desde cualquier URL del sitio.
-    """
     resp = render(request, 'pedidos/sw.js', {})
     resp["Content-Type"] = "application/javascript"
-    return resp  # ← ahora sí devolvemos la respuesta
+    return resp
 
 
 # === Confirmar pedido (llevar a EN_PREPARACION + notificar/impresión) ===
@@ -2475,28 +2333,24 @@ from django.views.decorators.http import require_http_methods
 @require_http_methods(["GET", "POST"])
 def confirmar_pedido(request, pedido_id):
     """
-    Marca el pedido como EN_PREPARACION (si corresponde), dispara notificación al panel
-    y envía el ticket a la comandera (si está configurada).
-    - Responde JSON si el request es AJAX.
-    - Si ya estaba EN_PREPARACION, reimprime el ticket y solo notifica.
+    Marca el pedido como EN_PREPARACION (si corresponde),
+    notifica al panel y envía el ticket a la comandera.
+    Si ya estaba EN_PREPARACION, reimprime el ticket.
     """
     pedido = get_object_or_404(Pedido, id=pedido_id)
     estado_anterior = pedido.estado
 
-    # Estados finales no se pueden confirmar
     if estado_anterior in ('ENTREGADO', 'CANCELADO'):
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             return JsonResponse({'ok': False, 'error': 'estado_final'}, status=400)
         messages.warning(request, f"El pedido #{pedido.id} está '{estado_anterior}' y no puede confirmarse.")
         return redirect('panel_alertas')
 
-    # Si aún no estaba en preparación, pasarlo a EN_PREPARACION
     cambiado = False
     if estado_anterior != 'EN_PREPARACION':
         _marcar_estado(pedido, 'EN_PREPARACION', actor=request.user, fuente='confirmar_pedido')
         cambiado = True
 
-    # Notificar al panel y mandar ticket a la impresora (fallos silenciosos)
     try:
         _notify_panel_update(pedido, message='actualizacion_pedido')
     except Exception:
