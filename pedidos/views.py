@@ -1600,17 +1600,21 @@ def _send_ticket_printnode(text: str, title: str = "Pedido a cocina", copies: in
     """
     Envía el ticket a PrintNode (https://printnode.com/).
     Requiere PRINTNODE_API_KEY y PRINTNODE_PRINTER_ID en settings.
+    AHORA: envía bytes ESC/POS (RAW) para asegurar feed+corte correcto.
     """
     api_key = getattr(settings, 'PRINTNODE_API_KEY', '') or ''
     printer_id = getattr(settings, 'PRINTNODE_PRINTER_ID', None)
     if not api_key or not printer_id:
         return False
+
+    # Construimos los bytes ESC/POS (incluye feed + corte) con la misma función que TCP
+    payload = _escpos_wrap_text(text, getattr(settings, 'COMANDERA_ENCODING', 'cp437'))
+
     body = {
         "printerId": int(printer_id),
         "title": title,
         "contentType": "raw_base64",
-        # contenido como texto plano; muchas térmicas aceptan directamente UTF-8
-        "content": base64.b64encode(text.encode("utf-8")).decode("ascii"),
+        "content": base64.b64encode(payload).decode("ascii"),  # ← ESC/POS real
         "source": "yo-heladerias-web",
         "options": {"copies": int(copies or 1)},
     }
@@ -1688,11 +1692,11 @@ def _escpos_wrap_text(text: str, encoding: str) -> bytes:
 
     if cut_mode in ('auto', 'esc_i'):
         # ESC i (full cut en muchas Epson/compatibles)
-        data += ESC + b'i'
+        data += b'\x1b' + b'i'
 
     if cut_mode in ('auto', 'esc_m'):
         # ESC m (partial cut en muchas Epson/compatibles)
-        data += ESC + b'm'
+        data += b'\x1b' + b'm'
 
     return bytes(data)
 
@@ -1845,8 +1849,6 @@ def tienda_toggle(request):
 @login_required
 @require_POST
 def aceptar_pedido(request, pedido_id):
-    pedido = get_object_or_404(Pedido, id=pedido_id)
-
     # Solo cadetes pueden aceptar
     if not hasattr(request.user, 'cadeteprofile'):
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
@@ -1864,23 +1866,33 @@ def aceptar_pedido(request, pedido_id):
         messages.warning(request, "Ya tenés un pedido en curso. Entregalo antes de aceptar otro.")
         return redirect('panel_cadete')
 
-    # El pedido debe estar disponible
-    if pedido.estado != 'EN_PREPARACION' or pedido.cadete_asignado_id:
-        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-            return JsonResponse({'ok': False, 'error': 'no_disponible'}, status=400)
-        messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
-        return redirect('panel_cadete')
+    # Bloqueo transaccional para evitar doble aceptación simultánea
+    with transaction.atomic():
+        try:
+            pedido = Pedido.objects.select_for_update().get(id=pedido_id)
+        except Pedido.DoesNotExist:
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'ok': False, 'error': 'no_disponible'}, status=404)
+            messages.warning(request, f"El Pedido #{pedido_id} no existe o ya no está disponible.")
+            return redirect('panel_cadete')
 
-    # Asignar y cambiar estado
-    pedido.cadete_asignado = request.user.cadeteprofile
-    try:
-        pedido.save(update_fields=['cadete_asignado'])
-    except Exception:
-        pedido.save()
+        # Revalidar disponibilidad con el lock tomado
+        if pedido.estado != 'EN_PREPARACION' or pedido.cadete_asignado_id:
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'ok': False, 'error': 'no_disponible'}, status=400)
+            messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
+            return redirect('panel_cadete')
 
-    _marcar_estado(pedido, 'ASIGNADO', actor=request.user, fuente='aceptar_pedido')
+        # Asignar y cambiar estado bajo el mismo lock
+        pedido.cadete_asignado = request.user.cadeteprofile
+        try:
+            pedido.save(update_fields=['cadete_asignado'])
+        except Exception:
+            pedido.save()
 
-    # Marcar cadete como no disponible
+        _marcar_estado(pedido, 'ASIGNADO', actor=request.user, fuente='aceptar_pedido')
+
+    # Marcar cadete como no disponible (fuera de la transacción)
     cp = request.user.cadeteprofile
     if hasattr(cp, 'disponible'):
         try:
@@ -2453,6 +2465,8 @@ def service_worker(request):
     """
     resp = render(request, 'pedidos/sw.js', {})
     resp["Content-Type"] = "application/javascript"
+    return resp  # ← ahora sí devolvemos la respuesta
+
 
 # === Confirmar pedido (llevar a EN_PREPARACION + notificar/impresión) ===
 from django.views.decorators.http import require_http_methods
@@ -2505,8 +2519,3 @@ def confirmar_pedido(request, pedido_id):
     else:
         messages.info(request, f"Pedido #{pedido.id} ya estaba en preparación. Ticket enviado nuevamente.")
     return redirect('panel_alertas')
-
-
-    return resp
-
-

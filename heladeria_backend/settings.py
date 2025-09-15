@@ -6,17 +6,25 @@ import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# -------- Helpers
+def _split_env_list(name, default=""):
+    raw = os.environ.get(name, default)
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+def _env_bool(name, default="False"):
+    return str(os.environ.get(name, default)).strip().lower() in ("1", "true", "t", "yes", "y", "si", "sí")
+
 # --- Claves y modo ---
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-tu-clave-secreta-local')
-DEBUG = os.environ.get('DEBUG', 'True') == 'True'
+DEBUG = _env_bool('DEBUG', 'True')
 
 # 🔐 HOSTS permitidos (incluye Render + tu dominio raíz y www)
-ALLOWED_HOSTS = os.environ.get(
+ALLOWED_HOSTS = _split_env_list(
     'ALLOWED_HOSTS',
     '127.0.0.1,localhost,yoheladeria.onrender.com,pedidosyoheladerias.com,www.pedidosyoheladerias.com'
-).split(',')
+)
 
-# CSRF (producción + dev local) — se puede extender por ENV con CSRF_TRUSTED_ORIGINS
+# CSRF (producción + dev local) — extendible por ENV con CSRF_TRUSTED_ORIGINS
 CSRF_TRUSTED_ORIGINS = [
     'https://yoheladeria.onrender.com',
     'https://pedidosyoheladerias.com',
@@ -24,9 +32,7 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 if DEBUG:
     CSRF_TRUSTED_ORIGINS += ['http://127.0.0.1:8000', 'http://localhost:8000']
-_csrf_env = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
-if _csrf_env:
-    CSRF_TRUSTED_ORIGINS += [o.strip() for o in _csrf_env.split(',') if o.strip()]
+CSRF_TRUSTED_ORIGINS += _split_env_list('CSRF_TRUSTED_ORIGINS', '')
 
 # Para proxies (Render) y HTTPS correcto en request.is_secure()
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
@@ -39,7 +45,13 @@ SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
 SECURE_SSL_REDIRECT = not DEBUG
 
-# Opcional: cabeceras de seguridad suaves (no rompen dev)
+# HSTS (solo en prod; valores “suaves” para no romper nada)
+if not DEBUG:
+    SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '3600'))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool('SECURE_HSTS_INCLUDE_SUBDOMAINS', 'False')
+    SECURE_HSTS_PRELOAD = _env_bool('SECURE_HSTS_PRELOAD', 'False')
+
+# Opcional: cabeceras de seguridad suaves
 SECURE_REFERRER_POLICY = os.environ.get('SECURE_REFERRER_POLICY', 'same-origin')
 X_FRAME_OPTIONS = os.environ.get('X_FRAME_OPTIONS', 'SAMEORIGIN')
 
@@ -111,7 +123,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # --- i18n / zona horaria ---
 LANGUAGE_CODE = 'es-ar'
-TIME_ZONE = 'America/Argentina/Buenos_Aires'
+TIME_ZONE = 'America/Argentina/Catamarca'  # ← ajustado a Catamarca
 USE_I18N = True
 USE_TZ = True
 
@@ -144,14 +156,23 @@ LOGIN_URL = '/accounts/login/'
 
 # --- Channels ---
 ASGI_APPLICATION = 'heladeria_backend.asgi.application'
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',  # 1 dyno / MVP
-        # Para múltiples réplicas: usar Redis
-        # 'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        # 'CONFIG': {'hosts': [os.environ.get('REDIS_URL', 'redis://localhost:6379/0')]},
-    },
-}
+
+# Permite cambiar a Redis con solo setear REDIS_URL o CHANNEL_BACKEND=redis
+if os.environ.get('CHANNEL_BACKEND') == 'redis' or os.environ.get('REDIS_URL'):
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [os.environ.get('REDIS_URL', 'redis://localhost:6379/0')],
+            },
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',  # 1 dyno / MVP
+        },
+    }
 
 # --- MERCADO PAGO ---
 MERCADO_PAGO_ACCESS_TOKEN = os.environ.get('MERCADO_PAGO_ACCESS_TOKEN', '')
@@ -167,6 +188,7 @@ WEBPUSH_SETTINGS = {
     "VAPID_PRIVATE_KEY": _VAPID_PRIVATE_ENV or "rc3tobb6ie6JWXwLf9YUFvkcb2yn1FV0VKxMq38ri5E",
     "VAPID_ADMIN_EMAIL": (_VAPID_ADMIN_ENV or "lucasxlo89@gmail.com"),
 }
+# Nota: cuando puedas, pasá estas claves a ENV y evitá los defaults hardcodeados.
 
 # --- GOOGLE MAPS (Distance Matrix / Geocoding) ---
 GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
@@ -191,7 +213,7 @@ ORIGEN_LNG = os.environ.get('ORIGEN_LNG', '')             # ej: -65.779900
 
 # --- Sitio / flags varios ---
 SITE_NAME = os.environ.get('SITE_NAME', 'YO HELADERÍAS')
-TIENDA_ABIERTA_DEFAULT = os.environ.get('TIENDA_ABIERTA_DEFAULT', 'True') == 'True'
+TIENDA_ABIERTA_DEFAULT = _env_bool('TIENDA_ABIERTA_DEFAULT', 'True')
 
 # --- COMANDERA / TICKETS ---
 # 1) Envío directo TCP/RAW a impresora ESC/POS (lo usa _send_ticket_tcp_escpos)
@@ -220,14 +242,8 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "simple": {
-            "format": "[{levelname}] {name}: {message}",
-            "style": "{",
-        },
-        "verbose": {
-            "format": "[{levelname}] {asctime} {name} | {message}",
-            "style": "{",
-        },
+        "simple": {"format": "[{levelname}] {name}: {message}", "style": "{"},
+        "verbose": {"format": "[{levelname}] {asctime} {name} | {message}", "style": "{"},
     },
     "handlers": {
         "console": {
