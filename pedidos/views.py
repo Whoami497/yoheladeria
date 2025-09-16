@@ -2122,7 +2122,7 @@ def cadete_feed(request):
             .filter(estado='EN_PREPARACION', cadete_asignado__isnull=True)
             .order_by('-fecha_pedido')[:50])
 
-    def ser(p):def cadete_feed(request):
+    def cadete_feed(request): 
     # perfil del cadete actual
     cadete = get_object_or_404(CadeteProfile, user=request.user)
 
