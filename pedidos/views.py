@@ -26,7 +26,7 @@ import base64  # ← para PrintNode (raw_base64)
 from urllib.parse import quote_plus
 from django.template import TemplateDoesNotExist
 from django.contrib import messages
-from .models import Pedido  # ← ¡OJO! solo Pedido, sin Cadete
+from .models import Pedido, CadeteProfile
 import logging
 import socket  # ← impresión TCP/RAW
 import textwrap  # ← wrap de líneas para ticket
@@ -1307,29 +1307,37 @@ def panel_alertas(request):
 
 @staff_member_required
 def panel_alertas_data(request):
-    scope = request.GET.get('scope') or ''
+    scope = request.GET.get('scope', 'hoy')
 
-    # >>>> NUEVO: devolver cadetes <<<<
-    if scope.lower() == 'cadetes':
-        CadeteModel = apps.get_model('pedidos', 'Cadete')
+    if scope == 'cadetes':
+        # Lista de cadetes con estado de disponibilidad/ocupación
+        qs = (CadeteProfile.objects
+              .select_related('user')
+              .annotate(
+                  ocupado=Exists(
+                      Pedido.objects.filter(
+                          cadete_asignado_id=OuterRef('pk'),
+                          estado__in=['ASIGNADO', 'EN_CAMINO']
+                      )
+                  )
+              ))
+
         cadetes = []
-        for c in CadeteModel.objects.select_related('user').all():
-            disponible = bool(getattr(c, 'disponible', False))
-            activo = Pedido.objects.filter(
-                cadete_asignado=c,
-                estado__in=['ASIGNADO', 'EN_CAMINO']
-            ).order_by('-id').values_list('id', flat=True).first()
-            subscription_ok = bool(
-                getattr(c, 'subscription_json', None) or getattr(c, 'subscription', None)
-            )
-            nombre = (c.user.get_full_name() or c.user.username or f'Cadete {c.pk}').strip()
+        for c in qs:
+            pedido_act = None
+            if c.ocupado:
+                pedido_act = (Pedido.objects
+                              .filter(cadete_asignado_id=c.id,
+                                      estado__in=['ASIGNADO', 'EN_CAMINO'])
+                              .values_list('id', flat=True)
+                              .first())
             cadetes.append({
                 'id': c.id,
-                'nombre': nombre,
-                'disponible': disponible,
-                'ocupado': bool(activo),
-                'pedido_id': activo or None,
-                'subscription_ok': subscription_ok,
+                'nombre': (c.user.get_full_name() or c.user.username),
+                'disponible': bool(c.disponible),
+                'ocupado': bool(c.ocupado),
+                'pedido_id': pedido_act,
+                'subscription_ok': bool(c.subscription_info),
             })
         return JsonResponse({'ok': True, 'cadetes': cadetes})
 
@@ -2505,45 +2513,36 @@ def panel_cadetes_data(request):
 @staff_member_required
 @require_POST
 def panel_asignar_cadete(request, pedido_id):
-    """
-    POST /panel-alertas/asignar/<pedido_id>/
-    - cadete_id=0 -> desasignar (modo “a todos”)
-    - cadete_id>0 -> asignar y pasar a ASIGNADO si corresponde
-    """
-    cadete_id = (request.POST.get("cadete_id") or "").strip()
+    pedido = get_object_or_404(Pedido, id=pedido_id)
+    cadete_id = (request.POST.get('cadete_id') or '0').strip()
 
-    from .models import Pedido  # importar dentro de la vista
-
-    try:
-        pedido = Pedido.objects.select_related("cadete_asignado").get(id=pedido_id)
-    except Pedido.DoesNotExist:
-        return JsonResponse({"ok": False, "error": "pedido_no_encontrado"}, status=404)
-
-    # Desasignar => modo broadcast
-    if cadete_id in ("", "0", "None", None):
+    # Desasignar → modo "a todos"
+    if cadete_id in ('0', ''):
         pedido.cadete_asignado = None
-        if pedido.estado == "ASIGNADO":
-            pedido.estado = "EN_PREPARACION"
-        pedido.save(update_fields=["cadete_asignado", "estado"])
-        return JsonResponse({"ok": True, "estado": pedido.estado, "cadete": "—"})
+        # si estaba asignado, volvemos a EN_PREPARACION
+        if pedido.estado in ('ASIGNADO',):
+            pedido.estado = 'EN_PREPARACION'
+        pedido.save(update_fields=['cadete_asignado', 'estado'])
+        return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': None})
 
-    # Asignar a un cadete específico (modelo cargado perezosamente)
-    CadeteModel = apps.get_model('pedidos', 'Cadete')
-    if CadeteModel is None:
-        return JsonResponse({"ok": False, "error": "modelo_cadete_inexistente"}, status=500)
+    # Asignar a un cadete específico
+    cadete = get_object_or_404(CadeteProfile, id=cadete_id)
 
-    try:
-        cad = CadeteModel.objects.select_related("user").get(id=int(cadete_id))
-    except (CadeteModel.DoesNotExist, ValueError):
-        return JsonResponse({"ok": False, "error": "cadete_no_encontrado"}, status=400)
+    # No permitir si ya tiene un pedido activo
+    ocupado = Pedido.objects.filter(
+        cadete_asignado=cadete,
+        estado__in=['ASIGNADO', 'EN_CAMINO']
+    ).exists()
+    if ocupado:
+        return JsonResponse({'ok': False, 'error': 'ocupado'}, status=400)
 
-    pedido.cadete_asignado = cad
-    if pedido.estado in ("RECIBIDO", "EN_PREPARACION", "ASIGNADO"):
-        pedido.estado = "ASIGNADO"
-        if not getattr(pedido, "fecha_asignado", None):
+    pedido.cadete_asignado = cadete
+    if pedido.estado in ('RECIBIDO', 'EN_PREPARACION'):
+        pedido.estado = 'ASIGNADO'
+        if not pedido.fecha_asignado:
             pedido.fecha_asignado = timezone.now()
 
-    pedido.save(update_fields=["cadete_asignado", "estado", "fecha_asignado"])
+    pedido.save(update_fields=['cadete_asignado', 'estado', 'fecha_asignado'])
 
-    cadete_nombre = (getattr(cad.user, "get_full_name", lambda: "")() or getattr(cad.user, "username", "") or f"Cadete {cad.id}").strip()
-    return JsonResponse({"ok": True, "estado": pedido.estado, "cadete": cadete_nombre})
+    cadete_name = cadete.user.get_full_name() or cadete.user.username
+    return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': cadete_name})
