@@ -1,7 +1,7 @@
 # pedidos/views.py
 from django.db.models import Exists, OuterRef, Q
 from django.conf import settings
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, HttpResponseBadRequest, HttpResponseNotAllowed
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.decorators import login_required
@@ -17,6 +17,7 @@ from django.views.decorators.csrf import csrf_exempt
 from decimal import Decimal, ROUND_HALF_UP
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from django.apps import apps  # ← para cargar modelos en runtime (Cadete)
 import json
 import mercadopago
 import requests
@@ -25,10 +26,10 @@ import base64  # ← para PrintNode (raw_base64)
 from urllib.parse import quote_plus
 from django.template import TemplateDoesNotExist
 from django.contrib import messages
-from .models import Pedido, Cadete
+from .models import Pedido  # ← ¡OJO! solo Pedido, sin Cadete
 import logging
 import socket  # ← impresión TCP/RAW
-import textwrap  # ← NUEVO: wrap de líneas para ticket
+import textwrap  # ← wrap de líneas para ticket
 
 # ====== Forms ======
 try:
@@ -2390,14 +2391,22 @@ from django.views.decorators.http import require_http_methods
 def panel_cadetes_data(request):
     """
     GET /panel-alertas/cadetes.json
-    Devuelve el listado de cadetes con estado (disponible/ocupado y pedido actual).
+    Devuelve el listado de cadetes con estado.
     """
+    # Cargar el modelo en runtime (evita ImportError en el deploy)
+    CadeteModel = apps.get_model('pedidos', 'Cadete')
+    if CadeteModel is None:
+        return JsonResponse({"ok": True, "cadetes": []})
+
     cadetes_out = []
     try:
-        qs = Cadete.objects.select_related("user").all()
+        qs = CadeteModel.objects.select_related("user").all()
+
+        # Tomamos Pedido desde el modelo ya importado en tu archivo
+        from .models import Pedido  # seguro acá porque ya está app cargada
 
         for c in qs:
-            nombre = (c.user.get_full_name() or c.user.username or f"Cadete {c.id}").strip()
+            nombre = (getattr(c.user, "get_full_name", lambda: "")() or getattr(c.user, "username", "") or f"Cadete {c.id}").strip()
 
             en_curso_qs = Pedido.objects.filter(
                 cadete_asignado=c,
@@ -2440,6 +2449,8 @@ def panel_asignar_cadete(request, pedido_id):
     """
     cadete_id = (request.POST.get("cadete_id") or "").strip()
 
+    from .models import Pedido  # importar dentro de la vista
+
     try:
         pedido = Pedido.objects.select_related("cadete_asignado").get(id=pedido_id)
     except Pedido.DoesNotExist:
@@ -2453,10 +2464,14 @@ def panel_asignar_cadete(request, pedido_id):
         pedido.save(update_fields=["cadete_asignado", "estado"])
         return JsonResponse({"ok": True, "estado": pedido.estado, "cadete": "—"})
 
-    # Asignar a un cadete específico
+    # Asignar a un cadete específico (modelo cargado perezosamente)
+    CadeteModel = apps.get_model('pedidos', 'Cadete')
+    if CadeteModel is None:
+        return JsonResponse({"ok": False, "error": "modelo_cadete_inexistente"}, status=500)
+
     try:
-        cad = Cadete.objects.select_related("user").get(id=int(cadete_id))
-    except (Cadete.DoesNotExist, ValueError):
+        cad = CadeteModel.objects.select_related("user").get(id=int(cadete_id))
+    except (CadeteModel.DoesNotExist, ValueError):
         return JsonResponse({"ok": False, "error": "cadete_no_encontrado"}, status=400)
 
     pedido.cadete_asignado = cad
@@ -2464,7 +2479,8 @@ def panel_asignar_cadete(request, pedido_id):
         pedido.estado = "ASIGNADO"
         if not getattr(pedido, "fecha_asignado", None):
             pedido.fecha_asignado = timezone.now()
+
     pedido.save(update_fields=["cadete_asignado", "estado", "fecha_asignado"])
 
-    cadete_nombre = (cad.user.get_full_name() or cad.user.username or f"Cadete {cad.id}").strip()
+    cadete_nombre = (getattr(cad.user, "get_full_name", lambda: "")() or getattr(cad.user, "username", "") or f"Cadete {cad.id}").strip()
     return JsonResponse({"ok": True, "estado": pedido.estado, "cadete": cadete_nombre})
