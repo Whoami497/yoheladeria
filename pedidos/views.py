@@ -1,5 +1,5 @@
 # pedidos/views.py
-from django.db.models import Q, Exists, OuterRef  # por las anotaciones que ya usás
+from django.db.models import Q, Exists, OuterRef
 from django.conf import settings
 from django.http import JsonResponse, HttpResponse, HttpResponseBadRequest, HttpResponseNotAllowed
 from django.shortcuts import render, redirect, get_object_or_404
@@ -8,33 +8,36 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_GET, require_http_methods
 from django.contrib.admin.views.decorators import staff_member_required
 from django.urls import reverse
 from django.utils import timezone
-from django.shortcuts import get_object_or_404
 from datetime import timedelta
 from django.views.decorators.csrf import csrf_exempt
 from decimal import Decimal, ROUND_HALF_UP
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
-from django.apps import apps  # ← para cargar modelos en runtime (Cadete)
+from django.apps import apps
 import json
 import mercadopago
 import requests
 import re
-import base64  # ← para PrintNode (raw_base64)
+import base64
 from urllib.parse import quote_plus
 from django.template import TemplateDoesNotExist
 from django.contrib import messages
-from .models import Pedido, CadeteProfile
 import logging
-import socket  # ← impresión TCP/RAW
-import textwrap  # ← wrap de líneas para ticket
+import socket
+import textwrap
+
+from .models import (
+    Producto, Sabor, Pedido, DetallePedido, Categoria,
+    OpcionProducto, ClienteProfile, ProductoCanje, CadeteProfile
+)
 
 # ====== Forms ======
 try:
-    from .forms import ClienteSignupForm, ClienteProfileForm  # recomendado
+    from .forms import ClienteSignupForm, ClienteProfileForm
 except Exception:
     from django import forms
     from django.contrib.auth.models import User
@@ -88,11 +91,6 @@ except Exception:
             first_name = forms.CharField(required=False, label="Nombre")
             last_name  = forms.CharField(required=False, label="Apellido")
             email      = forms.EmailField(required=False, label="Email")
-
-from .models import (
-    Producto, Sabor, Pedido, DetallePedido, Categoria,
-    OpcionProducto, ClienteProfile, ProductoCanje, CadeteProfile
-)
 
 # ==> Geocoding util
 try:
@@ -177,7 +175,6 @@ def _set_tienda_abierta(value: bool) -> bool:
     return val
 
 
-
 def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta: dict | None = None):
     anterior = getattr(pedido, 'estado', None)
     pedido.estado = nuevo_estado
@@ -241,6 +238,47 @@ def _abort_if_store_closed(request):
     return redirect('ver_carrito')
 
 
+def _serialize_logs(pedido, limit=8):
+    out = []
+    try:
+        qs = pedido.logs_estado.select_related('actor').order_by('-created_at')[:limit]
+        for l in qs:
+            out.append({
+                'de': l.de or None,
+                'a': l.a,
+                'actor': (l.actor.get_full_name() or l.actor.username) if l.actor else None,
+                'actor_tipo': l.actor_tipo,
+                'fuente': l.fuente or '',
+                'created_at': timezone.localtime(l.created_at).strftime('%Y-%m-%d %H:%M'),
+            })
+    except Exception:
+        pass
+    return out
+
+
+def _serialize_metricas(pedido):
+    try:
+        return pedido.tiempos_en_minutos()
+    except Exception:
+        return {}
+
+
+def _direccion_legible_from_text(text: str) -> str:
+    if not text:
+        return ""
+    parts = text.split(' — GPS:')
+    return parts[0].strip()
+
+
+def _map_url_from_text(text: str) -> str:
+    coords = _extract_coords(text)
+    if coords:
+        lat, lng = coords
+        return f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
+    q = quote_plus(_direccion_legible_from_text(text) or text)
+    return f"https://www.google.com/maps/search/?api=1&query={q}"
+
+
 def _serialize_pedido_for_panel(pedido, include_details=True):
     data = {
         'id': pedido.id,
@@ -269,31 +307,6 @@ def _serialize_pedido_for_panel(pedido, include_details=True):
         'logs': _serialize_logs(pedido, limit=8),
     })
     return data
-
-
-def _serialize_logs(pedido, limit=8):
-    out = []
-    try:
-        qs = pedido.logs_estado.select_related('actor').order_by('-created_at')[:limit]
-        for l in qs:
-            out.append({
-                'de': l.de or None,
-                'a': l.a,
-                'actor': (l.actor.get_full_name() or l.actor.username) if l.actor else None,
-                'actor_tipo': l.actor_tipo,
-                'fuente': l.fuente or '',
-                'created_at': timezone.localtime(l.created_at).strftime('%Y-%m-%d %H:%M'),
-            })
-    except Exception:
-        pass
-    return out
-
-
-def _serialize_metricas(pedido):
-    try:
-        return pedido.tiempos_en_minutos()
-    except Exception:
-        return {}
 
 
 def _notify_panel_update(pedido, message='actualizacion_pedido'):
@@ -435,12 +448,6 @@ def _extract_coords(text: str):
     return None
 
 
-def _direccion_legible_from_text(text: str) -> str:
-    if not text:
-        return ""
-    parts = text.split(' — GPS:')
-    return parts[0].strip()
-
 def _extract_nota_from_direccion(text: str) -> str:
     if not text:
         return ""
@@ -448,13 +455,52 @@ def _extract_nota_from_direccion(text: str) -> str:
     return (m.group(1).strip() if m else "")
 
 
-def _map_url_from_text(text: str) -> str:
-    coords = _extract_coords(text)
+@require_GET
+def api_costo_envio(request):
+    direccion = (request.GET.get('direccion') or '').strip()
+    if not direccion:
+        return JsonResponse({'ok': True, 'costo_envio': 0.0, 'distancia_km': 0.0, 'mode': 'pickup'})
+
+    costo, km = _calcular_costo_envio(direccion)
+
+    addr = {}
+    coords = _extract_coords(direccion)
     if coords:
-        lat, lng = coords
-        return f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
-    q = quote_plus(_direccion_legible_from_text(text) or text)
-    return f"https://www.google.com/maps/search/?api=1&query={q}"
+        try:
+            lat, lng = float(coords[0]), float(coords[1])
+            addr = _reverse_geocode_any(lat, lng) or {}
+        except Exception as e:
+            print(f"GEOCODING reverse error: {e}")
+            addr = {}
+
+    addr_full = addr.get('formatted_address') or _direccion_legible_from_text(direccion)
+
+    payload = {
+        'ok': True,
+        'costo_envio': float(costo),
+        'distancia_km': float(km),
+        'mode': 'maps',
+        'direccion_legible': addr_full,
+        'direccion_corta': _short_address(addr_full),
+        'map_url': addr.get('map_url') or _map_url_from_text(direccion),
+        'plus_code': addr.get('plus_code'),
+        'locality': addr.get('locality'),
+        'postal_code': addr.get('postal_code'),
+    }
+    if settings.DEBUG:
+        payload['debug'] = {
+            'ENVIO_BASE': getattr(settings, 'ENVIO_BASE', '300'),
+            'ENVIO_POR_KM': getattr(settings, 'ENVIO_POR_KM', '50'),
+            'ENVIO_MIN': getattr(settings, 'ENVIO_MIN', '0'),
+            'ENVIO_MAX': getattr(settings, 'ENVIO_MAX', ''),
+            'ENVIO_KM_MIN': getattr(settings, 'ENVIO_KM_MIN', '0'),
+            'ENVIO_KM_OFFSET': getattr(settings, 'ENVIO_KM_OFFSET', '0'),
+            'ENVIO_REDONDEO': getattr(settings, 'ENVIO_REDONDEO', '0'),
+            'ORIGEN_LAT': getattr(settings, 'ORIGEN_LAT', ''),
+            'ORIGEN_LNG': getattr(settings, 'ORIGEN_LNG', ''),
+            'SUCURSAL_DIRECCION': getattr(settings, 'SUCURSAL_DIRECCION', ''),
+        }
+    return JsonResponse(payload)
 
 
 def _short_address(formatted: str, max_len: int = 60) -> str:
@@ -603,54 +649,6 @@ def _calcular_costo_envio(direccion_cliente: str):
     except Exception as e:
         print(f"MAPS ERROR: {e}")
         return (base.quantize(Decimal('0.01')), 0.0)
-
-
-@require_GET
-def api_costo_envio(request):
-    direccion = (request.GET.get('direccion') or '').strip()
-    if not direccion:
-        return JsonResponse({'ok': True, 'costo_envio': 0.0, 'distancia_km': 0.0, 'mode': 'pickup'})
-
-    costo, km = _calcular_costo_envio(direccion)
-
-    addr = {}
-    coords = _extract_coords(direccion)
-    if coords:
-        try:
-            lat, lng = float(coords[0]), float(coords[1])
-            addr = _reverse_geocode_any(lat, lng) or {}
-        except Exception as e:
-            print(f"GEOCODING reverse error: {e}")
-            addr = {}
-
-    addr_full = addr.get('formatted_address') or _direccion_legible_from_text(direccion)
-
-    payload = {
-        'ok': True,
-        'costo_envio': float(costo),
-        'distancia_km': float(km),
-        'mode': 'maps',
-        'direccion_legible': addr_full,
-        'direccion_corta': _short_address(addr_full),
-        'map_url': addr.get('map_url') or _map_url_from_text(direccion),
-        'plus_code': addr.get('plus_code'),
-        'locality': addr.get('locality'),
-        'postal_code': addr.get('postal_code'),
-    }
-    if settings.DEBUG:
-        payload['debug'] = {
-            'ENVIO_BASE': getattr(settings, 'ENVIO_BASE', '300'),
-            'ENVIO_POR_KM': getattr(settings, 'ENVIO_POR_KM', '50'),
-            'ENVIO_MIN': getattr(settings, 'ENVIO_MIN', '0'),
-            'ENVIO_MAX': getattr(settings, 'ENVIO_MAX', ''),
-            'ENVIO_KM_MIN': getattr(settings, 'ENVIO_KM_MIN', '0'),
-            'ENVIO_KM_OFFSET': getattr(settings, 'ENVIO_KM_OFFSET', '0'),
-            'ENVIO_REDONDEO': getattr(settings, 'ENVIO_REDONDEO', '0'),
-            'ORIGEN_LAT': getattr(settings, 'ORIGEN_LAT', ''),
-            'ORIGEN_LNG': getattr(settings, 'ORIGEN_LNG', ''),
-            'SUCURSAL_DIRECCION': getattr(settings, 'SUCURSAL_DIRECCION', ''),
-        }
-    return JsonResponse(payload)
 
 
 # =========================
@@ -1232,21 +1230,19 @@ def logout_cliente(request):
 @login_required
 def pedido_en_curso(request):
     """
-    Muestra el/los pedidos activos del usuario:
     - Cliente: sus pedidos que NO estén ENTREGADO/CANCELADO.
     - Cadete: pedidos ASIGNADO/EN_CAMINO donde él es el cadete.
     """
-    pedidos = []
     if hasattr(request.user, 'cadeteprofile'):
         pedidos = (Pedido.objects
-                .filter(cadete_asignado=request.user.cadeteprofile,
-                        estado__in=['ASIGNADO', 'EN_CAMINO'])
-                .order_by('-fecha_pedido'))
+                   .filter(cadete_asignado=request.user.cadeteprofile,
+                           estado__in=['ASIGNADO', 'EN_CAMINO'])
+                   .order_by('-fecha_pedido'))
     else:
         pedidos = (Pedido.objects
-                .filter(user=request.user)
-                .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
-                .order_by('-fecha_pedido'))
+                   .filter(user=request.user)
+                   .exclude(estado__in=['ENTREGADO', 'CANCELADO'])
+                   .order_by('-fecha_pedido'))
 
     for p in pedidos:
         setattr(p, 'direccion_legible', _direccion_legible_from_text(p.cliente_direccion))
@@ -1311,7 +1307,6 @@ def panel_alertas_data(request):
     scope = request.GET.get('scope', 'hoy')
 
     if scope == 'cadetes':
-        # Lista de cadetes con estado de disponibilidad/ocupación
         qs = (CadeteProfile.objects
               .select_related('user')
               .annotate(
@@ -1335,12 +1330,21 @@ def panel_alertas_data(request):
             cadetes.append({
                 'id': c.id,
                 'nombre': (c.user.get_full_name() or c.user.username),
-                'disponible': bool(c.disponible),
+                'disponible': bool(getattr(c, 'disponible', False)),
                 'ocupado': bool(c.ocupado),
                 'pedido_id': pedido_act,
                 'subscription_ok': bool(c.subscription_info),
             })
         return JsonResponse({'ok': True, 'cadetes': cadetes})
+
+    # default: datos de pedidos de hoy
+    hoy = timezone.localdate()
+    pedidos = (Pedido.objects
+               .filter(fecha_pedido__date=hoy)
+               .exclude(estado__in=['ENTREGADO', 'CANCELADO', 'PENDIENTE_PAGO'])
+               .order_by('-fecha_pedido'))
+    data = [_serialize_pedido_for_panel(p, include_details=True) for p in pedidos]
+    return JsonResponse({'ok': True, 'pedidos': data})
 
 
 @staff_member_required
@@ -1348,8 +1352,8 @@ def panel_alertas_anteriores(request):
     hoy = timezone.localdate()
     limite = hoy - timedelta(days=1)
     pedidos = (Pedido.objects
-            .filter(fecha_pedido__date__lt=limite)
-            .order_by('-fecha_pedido')[:300])
+               .filter(fecha_pedido__date__lt=limite)
+               .order_by('-fecha_pedido')[:300])
 
     filas = []
     for p in pedidos:
@@ -1376,27 +1380,22 @@ def panel_alertas_anteriores(request):
     return HttpResponse(html)
 
 
-
 @staff_member_required
 @require_POST
 def panel_alertas_set_estado(request, pedido_id):
     """
     Cambia el estado del pedido (POST 'estado')
     o asigna/desasigna cadete (POST 'cadete_id').
-    Si 'cadete_id' llega:
-        - '0' o vacío -> desasignar (modo a todos, estado EN_PREPARACION)
-        - entero > 0  -> asignar (estado ASIGNADO)
-    Respuesta JSON: {ok, estado, cadete?}
+    'cadete_id' = '0' o vacío -> desasignar (vuelve a A TODOS / EN_PREPARACION)
+                 > 0          -> asignar y poner ASIGNADO
     """
     pedido = get_object_or_404(Pedido, pk=pedido_id)
 
     cadete_id = request.POST.get('cadete_id', None)
     if cadete_id is not None:
         # --- ASIGNACIÓN / DESASIGNACIÓN ---
-        CadeteModel = apps.get_model('pedidos', 'Cadete')
-
         if not cadete_id or cadete_id == '0':
-            # Desasignar → vuelve a "a todos"
+            # Desasignar → a todos
             pedido.cadete_asignado = None
             if pedido.estado == 'ASIGNADO':
                 pedido.estado = 'EN_PREPARACION'
@@ -1406,6 +1405,7 @@ def panel_alertas_set_estado(request, pedido_id):
             if hasattr(pedido, 'fecha_asignado'):
                 fields.append('fecha_asignado')
             pedido.save(update_fields=fields)
+            _notify_panel_update(pedido)
             return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': '—'})
 
         # Asignar a un cadete específico
@@ -1414,7 +1414,7 @@ def panel_alertas_set_estado(request, pedido_id):
         except ValueError:
             return JsonResponse({'ok': False, 'error': 'cadete_id inválido'}, status=400)
 
-        cadete = get_object_or_404(CadeteModel, pk=cad_id)
+        cadete = get_object_or_404(CadeteProfile, pk=cad_id)
 
         # Evitar asignar si está ocupado en otro pedido activo
         ocupado = Pedido.objects.filter(
@@ -1434,15 +1434,16 @@ def panel_alertas_set_estado(request, pedido_id):
         pedido.save(update_fields=fields)
 
         cadete_name = (cadete.user.get_full_name() or cadete.user.username or f'Cadete {cadete.pk}').strip()
+        _notify_panel_update(pedido)
         return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': cadete_name})
 
-    # --- CAMBIO DE ESTADO NORMAL (lo que ya hacía tu vista) ---
+    # --- CAMBIO DE ESTADO ---
     estado = (request.POST.get('estado') or '').upper().strip()
     estados_validos = {'EN_PREPARACION', 'EN_CAMINO', 'ENTREGADO', 'CANCELADO', 'RECIBIDO', 'ASIGNADO'}
     if estado not in estados_validos:
         return JsonResponse({'ok': False, 'error': 'estado inválido'}, status=400)
 
-    # Timestamps si tu modelo los tiene (no rompe si no existen)
+    # Timestamps defensivos
     now = timezone.now()
     try:
         if estado == 'EN_PREPARACION' and getattr(pedido, 'fecha_en_preparacion', None) is None:
@@ -1466,36 +1467,8 @@ def panel_alertas_set_estado(request, pedido_id):
         u = pedido.cadete_asignado.user
         cadete_name = (u.get_full_name() or u.username).strip()
 
-    return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': cadete_name})
-    pedido = get_object_or_404(Pedido, id=pedido_id)
-    estado = (request.POST.get('estado') or '').upper()
-    validos = {'RECIBIDO', 'EN_PREPARACION', 'ASIGNADO', 'EN_CAMINO', 'ENTREGADO', 'CANCELADO'}
-    if estado not in validos:
-        return JsonResponse({'ok': False, 'error': 'estado_invalido'}, status=400)
-
-    es_staff = bool(request.user.is_staff)
-    es_cadete = hasattr(request.user, 'cadeteprofile')
-
-    permitido = False
-    if es_staff:
-        permitido = True
-    elif es_cadete:
-        if pedido.cadete_asignado_id == request.user.cadeteprofile.id and estado in {'EN_CAMINO', 'ENTREGADO'}:
-            permitido = True
-
-    if not permitido:
-        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-            return JsonResponse({'ok': False, 'error': 'no_permiso'}, status=403)
-        return redirect('login')
-
-    _marcar_estado(pedido, estado, actor=request.user, fuente='panel_alertas_set_estado')
     _notify_panel_update(pedido)
-
-    cadete_nombre = None
-    if getattr(pedido, 'cadete_asignado', None):
-        cadete_nombre = pedido.cadete_asignado.user.get_full_name() or pedido.cadete_asignado.user.username
-
-    return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': pedido.estado, 'cadete': cadete_nombre})
+    return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': cadete_name})
 # =========================
 # === Impresión / Comandera
 # =========================
@@ -1505,7 +1478,6 @@ def _format_money(v: Decimal) -> str:
     except Exception:
         return f"${v}"
 
-# ---- helpers de wrap para ticket
 def _ticket_width() -> int:
     try:
         return int(getattr(settings, 'COMANDERA_LINE_WIDTH', 32) or 32)
@@ -1528,13 +1500,17 @@ def _wrap_lines(target_list, text, initial_indent="", subsequent_indent=""):
     )
     target_list.extend(wrapped if wrapped else [""])
 
+def _extract_nota_from_direccion(text: str) -> str:
+    if not text:
+        return ""
+    m = re.search(r' — Nota:\s*(.+)$', text)
+    return (m.group(1).strip() if m else "")
+
 def _build_ticket_text(pedido) -> str:
-    """
-    Arma ticket en modo texto/ESC-POS con wrap correcto.
-    """
+    """Arma ticket en modo texto/ESC-POS con wrap correcto."""
     width = _ticket_width()
     tienda = getattr(settings, 'SITE_NAME', 'YO HELADERÍAS')
-    ahora = timezone.localtime(pedido.fecha_pedido if getattr(pedido, 'fecha_pedido', None) else timezone.now())
+    ahora = timezone.localtime(getattr(pedido, 'fecha_pedido', None) or timezone.now())
 
     header = [
         "=" * width,
@@ -1551,7 +1527,7 @@ def _build_ticket_text(pedido) -> str:
     nota = _extract_nota_from_direccion(pedido.cliente_direccion)
     envio = [f"Entrega : {direccion_legible or 'Retiro en local'}"]
     if nota:
-        _wrap_lines(envio, f"Nota    : {nota}", initial_indent="", subsequent_indent="          ")
+        _wrap_lines(envio, f"Nota    : {nota}", subsequent_indent="          ")
 
     pago = [f"Pago    : {pedido.metodo_pago or '-'}"]
 
@@ -1565,9 +1541,8 @@ def _build_ticket_text(pedido) -> str:
         sabores = [s.nombre for s in d.sabores.all()]
         if sabores:
             label = "  Sabores: "
-            _wrap_lines(detalle, label + ", ".join(sabores), initial_indent="", subsequent_indent=" " * len(label))
+            _wrap_lines(detalle, label + ", ".join(sabores), subsequent_indent=" " * len(label))
 
-        # Nota por ítem (si el carrito guardó 'nota')
         try:
             nota_item = getattr(d, 'nota', '') or ''
             if nota_item:
@@ -1582,7 +1557,7 @@ def _build_ticket_text(pedido) -> str:
     totales.append(f"TOTAL:      {_format_money(_compute_total(pedido))}")
     totales.append("-" * (width - 2))
     totales.append("¡Gracias!".center(width))
-    totales.append("\n\n")  # margen inferior
+    totales.append("\n\n")
 
     parts = header + [""] + cliente + envio + pago + detalle + totales
     return "\n".join(parts)
@@ -1635,7 +1610,6 @@ def _send_ticket_printnode(text: str, title: str = "Pedido a cocina", copies: in
         print(f"PRINTNODE exception: {e}")
     return False
 
-# === Envío directo TCP/RAW ESC/POS ===
 def _normalize_for_encoding(s: str, encoding: str) -> bytes:
     try:
         return s.encode(encoding, errors='replace')
@@ -1677,15 +1651,13 @@ def _escpos_wrap_text(text: str, encoding: str) -> bytes:
 
     # Corte: SOLO UNA VEZ
     if cut_mode in ('auto', 'gs_v'):
-        # GS V 0 (full cut) – la más estándar
-        data += GS + b'V' + b'\x00'
+        data += GS + b'V' + b'\x00'   # full cut
     elif cut_mode == 'esc_i':
-        data += b'\x1b' + b'i'  # full cut en Epson
+        data += b'\x1b' + b'i'
     elif cut_mode == 'esc_m':
-        data += b'\x1b' + b'm'  # partial cut
+        data += b'\x1b' + b'm'
 
     return bytes(data)
-
 
 def _send_ticket_tcp_escpos(text: str, title: str = "Pedido a cocina", copies: int = 1) -> bool:
     host = getattr(settings, 'COMANDERA_PRINTER_HOST', '') or ''
@@ -1705,7 +1677,6 @@ def _send_ticket_tcp_escpos(text: str, title: str = "Pedido a cocina", copies: i
         print(f"ESC/POS TCP error ({host}:{port}): {e}")
         return False
 
-
 def _print_ticket_for_pedido(pedido):
     try:
         copies = int(getattr(settings, 'COMANDERA_COPIES', 1) or 1)
@@ -1723,7 +1694,6 @@ def _print_ticket_for_pedido(pedido):
         print(f"COMANDERA: ticket #{pedido.id} enviado por PrintNode.")
         return
     print("COMANDERA: no hay impresora configurada o envío falló.")
-
 
 # === Ticket HTML 80mm / QZ ===
 def _build_ticket_payload(pedido):
@@ -1743,7 +1713,7 @@ def _build_ticket_payload(pedido):
     payload = {
         "site": getattr(settings, "SITE_NAME", "YO HELADERÍAS"),
         "pedido_id": pedido.id,
-        "fecha": timezone.localtime(pedido.fecha_pedido).strftime("%d/%m %H:%M") if getattr(pedido, 'fecha_pedido', None) else timezone.localtime().strftime("%d/%m %H:%M"),
+        "fecha": timezone.localtime(getattr(pedido, 'fecha_pedido', None) or timezone.now()).strftime("%d/%m %H:%M"),
         "cliente": pedido.cliente_nombre or "",
         "direccion": _direccion_legible_from_text(pedido.cliente_direccion) or "",
         "telefono": pedido.cliente_telefono or "",
@@ -1753,7 +1723,6 @@ def _build_ticket_payload(pedido):
         "copies": int(getattr(settings, "COMANDERA_COPIES", 1)),
     }
     return payload
-
 
 @staff_member_required
 def ticket_pedido(request, pedido_id):
@@ -1780,7 +1749,6 @@ def ticket_pedido(request, pedido_id):
     }
     return render(request, "pedidos/ticket_pedido.html", ctx)
 
-
 # =========================
 # === TIENDA (toggle)
 # =========================
@@ -1792,7 +1760,6 @@ def tienda_estado_json(request):
 def tienda_estado(request):
     return tienda_estado_json(request)
 
-
 @staff_member_required
 @require_POST
 def tienda_set_estado(request):
@@ -1802,7 +1769,6 @@ def tienda_set_estado(request):
     _broadcast_tienda_estado(abierta)
     return JsonResponse({'ok': True, 'abierta': abierta})
 
-
 @staff_member_required
 @require_POST
 def tienda_toggle(request):
@@ -1810,7 +1776,6 @@ def tienda_toggle(request):
     abierta = _set_tienda_abierta(nueva)
     _broadcast_tienda_estado(abierta)
     return JsonResponse({'ok': True, 'abierta': abierta})
-
 
 # =========================
 # === TIENDA / CADETES
@@ -1874,7 +1839,6 @@ def aceptar_pedido(request, pedido_id):
     messages.success(request, f"¡Has aceptado el Pedido #{pedido.id}! Por favor, prepárate para retirarlo.")
     return redirect('panel_cadete')
 
-
 def login_cadete(request):
     if request.user.is_authenticated:
         if hasattr(request.user, 'cadeteprofile'):
@@ -1904,7 +1868,6 @@ def login_cadete(request):
 
     return render(request, 'pedidos/login_cadete.html', {'form': form})
 
-
 @login_required
 def panel_cadete(request):
     webpush_settings = getattr(settings, 'WEBPUSH_SETTINGS', {}) or {}
@@ -1929,7 +1892,6 @@ def panel_cadete(request):
 
     contexto = {'vapid_public_key': vapid_public_key, 'pedidos_en_curso': pedidos_en_curso}
     return render(request, 'pedidos/panel_cadete.html', contexto)
-
 
 @login_required
 def cadete_historial(request):
@@ -1970,13 +1932,11 @@ def cadete_historial(request):
         """
         return HttpResponse(html)
 
-
 @login_required
 def logout_cadete(request):
     logout(request)
     messages.info(request, "Has cerrado sesión como cadete.")
     return redirect('login_cadete')
-
 
 @login_required
 @require_POST
@@ -2006,7 +1966,6 @@ def cadete_toggle_disponible(request):
         request.session.modified = True
 
     return JsonResponse({'ok': True, 'disponible': val})
-
 
 @login_required
 @require_POST
@@ -2064,52 +2023,50 @@ def cadete_set_estado(request, pedido_id):
             messages.success(request, f"Pedido #{pedido.id} → {pedido.estado}.")
         return redirect('panel_cadete')
 
-
 @login_required
 @require_POST
 def save_subscription(request):
-    print("--- VISTA SAVE_SUBSCRIPTION INICIADA ---")
-
     if not hasattr(request.user, 'cadeteprofile'):
-        print(f"DEBUG: Usuario {request.user.username} intentó suscribirse pero NO es un cadete.")
         return JsonResponse({'status': 'error', 'message': 'User is not a cadete'}, status=403)
 
     try:
         data = json.loads(request.body)
-        print(f"DEBUG: Datos de suscripción recibidos para el cadete {request.user.username}.")
         updated_count = CadeteProfile.objects.filter(user=request.user).update(subscription_info=data)
-        print(f"DEBUG: El comando update() afectó a {updated_count} fila(s) para el usuario {request.user.username}.")
         if updated_count > 0:
-            print(f"ÉXITO: Suscripción guardada para {request.user.username}.")
             return JsonResponse({'status': 'ok', 'message': 'Subscription saved'})
         else:
-            print(f"ERROR: No se encontró el perfil del cadete {request.user.username} para actualizar.")
             return JsonResponse({'status': 'error', 'message': 'Cadete profile not found for update'}, status=404)
     except json.JSONDecodeError:
-        print("ERROR: No se pudo decodificar el JSON del request body.")
         return JsonResponse({'status': 'error', 'message': 'Invalid JSON'}, status=400)
     except Exception as e:
-        print(f"ERROR: Excepción inesperada en save_subscription: {e}")
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
-
 
 @login_required
 def cadete_feed(request):
+    """
+    Feed para la app de cadetes:
+      - Si el cadete está ocupado: no listamos nada.
+      - Si está disponible: listamos pedidos EN_PREPARACION
+        * no asignados (los ven todos)
+        * asignados a mí (sólo yo los veo)
+    """
     if not hasattr(request.user, 'cadeteprofile'):
         return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
 
-    cp = request.user.cadeteprofile
+    cadete = request.user.cadeteprofile
 
+    # Ocupado → no hay feed (ya tiene uno en curso)
     if Pedido.objects.filter(
-        cadete_asignado=cp,
+        cadete_asignado=cadete,
         estado__in=['ASIGNADO', 'EN_CAMINO']
     ).exists():
         return JsonResponse({'ok': True, 'disponible': False, 'pedidos': []})
 
+    # Chequeo de disponible (modelo o sesión)
     disponible = None
-    if hasattr(cp, 'disponible'):
+    if hasattr(cadete, 'disponible'):
         try:
-            disponible = bool(cp.disponible)
+            disponible = bool(cadete.disponible)
         except Exception:
             disponible = None
     if disponible is None:
@@ -2118,36 +2075,24 @@ def cadete_feed(request):
     if not disponible:
         return JsonResponse({'ok': True, 'disponible': False, 'pedidos': []})
 
-    pedidos = (Pedido.objects
-            .filter(estado='EN_PREPARACION', cadete_asignado__isnull=True)
-            .order_by('-fecha_pedido')[:50])
-
-    def cadete_feed(request): 
-    # perfil del cadete actual
-    cadete = get_object_or_404(CadeteProfile, user=request.user)
-
-    # Pedidos disponibles para este cadete:
-    #  - EN_PREPARACION y sin asignación  -> los ven todos
-    #  - EN_PREPARACION y asignados a mí  -> solo yo los veo
     qs = (Pedido.objects
           .filter(estado='EN_PREPARACION')
           .filter(Q(cadete_asignado__isnull=True) | Q(cadete_asignado=cadete))
           .order_by('-fecha_pedido')[:50])
 
-    # serialización = tu lógica existente
     data = []
     for p in qs:
         data.append({
             'id': p.id,
             'cliente_nombre': p.cliente_nombre or '',
             'cliente_telefono': p.cliente_telefono or '',
-            'direccion_legible': getattr(p, 'direccion_legible', '') or (p.cliente_direccion or ''),
-            'total': float(p.total_pedido or 0),
-            'map_url': getattr(p, 'map_url', ''),
+            'direccion_legible': _direccion_legible_from_text(p.cliente_direccion) or '',
+            'total': float(_compute_total(p)),
+            'map_url': _map_url_from_text(p.cliente_direccion),
             'detalles': [
                 {
                     'producto': d.producto.nombre,
-                    'opcion': getattr(d, 'opcion_seleccionada', None).nombre_opcion if getattr(d, 'opcion_seleccionada', None) else '',
+                    'opcion': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else '',
                     'cant': d.cantidad,
                     'sabores': [s.nombre for s in d.sabores.all()]
                 }
@@ -2155,12 +2100,7 @@ def cadete_feed(request):
             ]
         })
 
-    return JsonResponse({
-        'ok': True,
-        'disponible': bool(cadete.disponible),
-        'pedidos': data
-    })
-
+    return JsonResponse({'ok': True, 'disponible': True, 'pedidos': data})
 
 # =========================
 # === MERCADO PAGO (Refunds + webhook + success)
@@ -2184,7 +2124,6 @@ def _mp_find_latest_approved_payment(external_reference: str):
     except Exception as e:
         print(f"MP SEARCH error: {e}")
     return None
-
 
 @staff_member_required
 @require_POST
@@ -2231,11 +2170,10 @@ def mp_refund(request, pedido_id: int):
         'pedido_id': pedido.id,
         'payment_id': payment_id,
         'refund_id': resp.get('id'),
-        'amount': resp.get('amount') or refund_amount and float(refund_amount),
+        'amount': resp.get('amount') or (float(refund_amount) if refund_amount is not None else None),
         'status': resp.get('status') or 'created',
     }
     return JsonResponse(data_out, status=200)
-
 
 @csrf_exempt
 def mp_webhook_view(request):
@@ -2320,7 +2258,6 @@ def mp_webhook_view(request):
 
     return HttpResponse(status=200)
 
-
 def mp_success(request):
     last_id = request.session.pop('mp_last_order_id', None)
     if last_id:
@@ -2336,9 +2273,7 @@ def mp_success(request):
     messages.info(request, "Gracias. Estamos confirmando tu pago. Si ya fue aprobado, tu pedido entrará a cocina.")
     return redirect('pedido_exitoso')
 
-
 mp_webhook = mp_webhook_view
-
 
 # =========================
 # === CANJE DE PUNTOS
@@ -2407,7 +2342,6 @@ def canjear_puntos(request):
     contexto = {'cliente_profile': cliente_profile, 'productos_canje': productos_canje}
     return render(request, 'pedidos/canjear_puntos.html', contexto)
 
-
 # =========================
 # === Service Worker
 # =========================
@@ -2417,10 +2351,7 @@ def service_worker(request):
     resp["Content-Type"] = "application/javascript"
     return resp
 
-
 # === Confirmar pedido (llevar a EN_PREPARACION + notificar/impresión) ===
-from django.views.decorators.http import require_http_methods
-
 @staff_member_required
 @require_http_methods(["GET", "POST"])
 def confirmar_pedido(request, pedido_id):
@@ -2444,7 +2375,7 @@ def confirmar_pedido(request, pedido_id):
         _marcar_estado(pedido, 'EN_PREPARACION', actor=request.user, fuente='confirmar_pedido')
         cambiado = True
 
-        # NUEVO: disparar push a cadetes disponibles y sin pedido activo
+        # Disparar push a cadetes disponibles y sin pedido activo
         try:
             _notify_cadetes_new_order(request, pedido)
         except Exception as e:
@@ -2473,53 +2404,52 @@ def confirmar_pedido(request, pedido_id):
     else:
         messages.info(request, f"Pedido #{pedido.id} ya estaba en preparación. Ticket enviado nuevamente.")
     return redirect('panel_alertas')
-# =========================
-# === Panel: Cadetes (data + asignar manual)
-# =========================
-from django.views.decorators.http import require_http_methods
 
+# =========================
+# === Panel: Cadetes (asignar manual - opcional)
+# =========================
 @staff_member_required
-@require_GET
+@require_http_methods(["POST"])
 def panel_asignar_cadete(request, pedido_id):
     """
     Asigna un cadete o vuelve a 'a todos' (cadete_id=0).
     NO cambia el estado del pedido (se mantiene EN_PREPARACION).
     """
-    # Modelos sin importar directamente
-    CadeteProfile = apps.get_model('pedidos', 'CadeteProfile')
-    PedidoModel   = apps.get_model('pedidos', 'Pedido')
-    if pedido.cadete_asignado and pedido.cadete_asignado_id != cadete.id:
-    return JsonResponse({'ok': False, 'error': 'ya_asignado'}, status=400)
-
+    CadeteProfileModel = apps.get_model('pedidos', 'CadeteProfile')
+    PedidoModel = apps.get_model('pedidos', 'Pedido')
 
     pedido = get_object_or_404(PedidoModel, id=pedido_id)
-
     cadete_id = (request.POST.get('cadete_id') or '0').strip()
 
     # Desasignar → modo a todos
     if cadete_id in ('0', ''):
         pedido.cadete_asignado = None
-        pedido.save(update_fields=['cadete_asignado'])
+        if hasattr(pedido, 'fecha_asignado'):
+            pedido.fecha_asignado = None
+            pedido.save(update_fields=['cadete_asignado', 'fecha_asignado'])
+        else:
+            pedido.save(update_fields=['cadete_asignado'])
+        _notify_panel_update(pedido)
         return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': None})
 
     # Asignar a un cadete específico
-    cadete = get_object_or_404(CadeteProfile, id=cadete_id)
+    cadete = get_object_or_404(CadeteProfileModel, id=cadete_id)
 
     # Evitar asignar a un cadete que ya está con un pedido activo
     ocupado = PedidoModel.objects.filter(
         cadete_asignado=cadete,
         estado__in=['ASIGNADO', 'EN_CAMINO']
-    ).exists()
+    ).exclude(pk=pedido.pk).exists()
     if ocupado:
         return JsonResponse({'ok': False, 'error': 'ocupado'}, status=400)
 
-    # Setear asignación (sin cambiar estado)
     pedido.cadete_asignado = cadete
-    if not pedido.fecha_asignado:
+    if hasattr(pedido, 'fecha_asignado') and not pedido.fecha_asignado:
         pedido.fecha_asignado = timezone.now()
         pedido.save(update_fields=['cadete_asignado', 'fecha_asignado'])
     else:
         pedido.save(update_fields=['cadete_asignado'])
 
     cadete_name = cadete.user.get_full_name() or cadete.user.username
+    _notify_panel_update(pedido)
     return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': cadete_name})
