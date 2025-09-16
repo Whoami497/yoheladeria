@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
-from django.views.decorators.http import require_POST, require_GET
+from django.views.decorators.http import require_POST
 from django.contrib.admin.views.decorators import staff_member_required
 from django.urls import reverse
 from django.utils import timezone
@@ -2122,24 +2122,44 @@ def cadete_feed(request):
             .filter(estado='EN_PREPARACION', cadete_asignado__isnull=True)
             .order_by('-fecha_pedido')[:50])
 
-    def ser(p):
-        return {
+    def ser(p):def cadete_feed(request):
+    # perfil del cadete actual
+    cadete = get_object_or_404(CadeteProfile, user=request.user)
+
+    # Pedidos disponibles para este cadete:
+    #  - EN_PREPARACION y sin asignación  -> los ven todos
+    #  - EN_PREPARACION y asignados a mí  -> solo yo los veo
+    qs = (Pedido.objects
+          .filter(estado='EN_PREPARACION')
+          .filter(Q(cadete_asignado__isnull=True) | Q(cadete_asignado=cadete))
+          .order_by('-fecha_pedido')[:50])
+
+    # serialización = tu lógica existente
+    data = []
+    for p in qs:
+        data.append({
             'id': p.id,
             'cliente_nombre': p.cliente_nombre or '',
-            'cliente_direccion': p.cliente_direccion or '',
-            'direccion_legible': _direccion_legible_from_text(p.cliente_direccion),
-            'map_url': _map_url_from_text(p.cliente_direccion),
             'cliente_telefono': p.cliente_telefono or '',
-            'total': str(_compute_total(p)),
-            'detalles': [{
-                'producto': d.producto.nombre,
-                'opcion': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
-                'cant': d.cantidad,
-                'sabores': [s.nombre for s in d.sabores.all()],
-            } for d in p.detalles.all()],
-        }
+            'direccion_legible': getattr(p, 'direccion_legible', '') or (p.cliente_direccion or ''),
+            'total': float(p.total_pedido or 0),
+            'map_url': getattr(p, 'map_url', ''),
+            'detalles': [
+                {
+                    'producto': d.producto.nombre,
+                    'opcion': getattr(d, 'opcion_seleccionada', None).nombre_opcion if getattr(d, 'opcion_seleccionada', None) else '',
+                    'cant': d.cantidad,
+                    'sabores': [s.nombre for s in d.sabores.all()]
+                }
+                for d in p.detalles.all()
+            ]
+        })
 
-    return JsonResponse({'ok': True, 'disponible': True, 'pedidos': [ser(p) for p in pedidos]})
+    return JsonResponse({
+        'ok': True,
+        'disponible': bool(cadete.disponible),
+        'pedidos': data
+    })
 
 
 # =========================
@@ -2460,88 +2480,46 @@ from django.views.decorators.http import require_http_methods
 
 @staff_member_required
 @require_GET
-def panel_cadetes_data(request):
-    """
-    GET /panel-alertas/cadetes.json
-    Devuelve el listado de cadetes con estado.
-    """
-    # Cargar el modelo en runtime (evita ImportError en el deploy)
-    CadeteModel = apps.get_model('pedidos', 'Cadete')
-    if CadeteModel is None:
-        return JsonResponse({"ok": True, "cadetes": []})
-
-    cadetes_out = []
-    try:
-        qs = CadeteModel.objects.select_related("user").all()
-
-        # Tomamos Pedido desde el modelo ya importado en tu archivo
-        from .models import Pedido  # seguro acá porque ya está app cargada
-
-        for c in qs:
-            nombre = (getattr(c.user, "get_full_name", lambda: "")() or getattr(c.user, "username", "") or f"Cadete {c.id}").strip()
-
-            en_curso_qs = Pedido.objects.filter(
-                cadete_asignado=c,
-                estado__in=["ASIGNADO", "EN_CAMINO"],
-            ).order_by("-id")
-
-            ocupado = en_curso_qs.exists()
-            pedido_actual = en_curso_qs.first().id if ocupado else None
-
-            disponible = bool(getattr(c, "disponible", False))
-
-            subscription_ok = False
-            try:
-                from webpush.models import PushInformation
-                subscription_ok = PushInformation.objects.filter(user=c.user).exists()
-            except Exception:
-                subscription_ok = False
-
-            cadetes_out.append({
-                "id": c.id,
-                "nombre": nombre,
-                "disponible": disponible,
-                "ocupado": ocupado,
-                "pedido_id": pedido_actual,
-                "subscription_ok": subscription_ok,
-            })
-
-        return JsonResponse({"ok": True, "cadetes": cadetes_out})
-    except Exception as e:
-        return JsonResponse({"ok": False, "error": str(e)}, status=500)
-
-
-@staff_member_required
-@require_POST
 def panel_asignar_cadete(request, pedido_id):
-    """Asigna un cadete o vuelve a modo 'a todos' (cadete_id=0).
-    NO cambia el estado: queda EN_PREPARACION hasta que el cadete lo 'acepta'."""
-    pedido = get_object_or_404(Pedido, id=pedido_id)
+    """
+    Asigna un cadete o vuelve a 'a todos' (cadete_id=0).
+    NO cambia el estado del pedido (se mantiene EN_PREPARACION).
+    """
+    # Modelos sin importar directamente
+    CadeteProfile = apps.get_model('pedidos', 'CadeteProfile')
+    PedidoModel   = apps.get_model('pedidos', 'Pedido')
+    if pedido.cadete_asignado and pedido.cadete_asignado_id != cadete.id:
+    return JsonResponse({'ok': False, 'error': 'ya_asignado'}, status=400)
+
+
+    pedido = get_object_or_404(PedidoModel, id=pedido_id)
+
     cadete_id = (request.POST.get('cadete_id') or '0').strip()
 
     # Desasignar → modo a todos
     if cadete_id in ('0', ''):
         pedido.cadete_asignado = None
-        # mantiene EN_PREPARACION (no tocar estado)
         pedido.save(update_fields=['cadete_asignado'])
         return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': None})
 
     # Asignar a un cadete específico
     cadete = get_object_or_404(CadeteProfile, id=cadete_id)
 
-    # Si ya tiene un pedido activo (ASIGNADO/EN_CAMINO), no permitir
-    ocupado = Pedido.objects.filter(
+    # Evitar asignar a un cadete que ya está con un pedido activo
+    ocupado = PedidoModel.objects.filter(
         cadete_asignado=cadete,
         estado__in=['ASIGNADO', 'EN_CAMINO']
     ).exists()
     if ocupado:
         return JsonResponse({'ok': False, 'error': 'ocupado'}, status=400)
 
-    # Marcar asignación (sin cambiar estado)
+    # Setear asignación (sin cambiar estado)
     pedido.cadete_asignado = cadete
     if not pedido.fecha_asignado:
         pedido.fecha_asignado = timezone.now()
-    pedido.save(update_fields=['cadete_asignado', 'fecha_asignado'])
+        pedido.save(update_fields=['cadete_asignado', 'fecha_asignado'])
+    else:
+        pedido.save(update_fields=['cadete_asignado'])
 
     cadete_name = cadete.user.get_full_name() or cadete.user.username
     return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': cadete_name})

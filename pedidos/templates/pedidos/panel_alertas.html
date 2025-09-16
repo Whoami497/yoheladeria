@@ -695,39 +695,45 @@ const urlAsignarBase = "{% url 'panel_alertas_set_estado' 0 %}"; // reemplazar /
   }
 
   async function asignarCadete(pedidoId, cadeteId){
-    const url = urlAsignarBase.replace('/0/', `/${pedidoId}/`);
-    const fd = new FormData();
-    fd.append('csrfmiddlewaretoken', csrftoken);
-    fd.append('cadete_id', cadeteId);
+  const url = urlAsignarBase.replace('/0/', `/${pedidoId}/`);
+  const fd = new FormData();
+  fd.append('csrfmiddlewaretoken', csrftoken);
+  fd.append('cadete_id', cadeteId);
 
-    // UX: deshabilitar mientras asigna
-    const box = document.querySelector(`#order-${pedidoId} .assignment-box`);
-    const btn = box?.querySelector('.btn-asignar-cadete');
-    if(btn){ btn.disabled = true; btn.textContent = 'Asignando…'; }
+  try{
+    const res = await fetch(url, {
+      method:'POST',
+      body: fd,
+      credentials:'same-origin',
+      headers: {'X-Requested-With':'XMLHttpRequest', 'X-CSRFToken': csrftoken}
+    });
 
-    try{
-      const res = await fetch(url, {method:'POST', body:fd, credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}});
-      const data = await res.json();
-      if(!data.ok){
-        alert('No se pudo asignar: ' + (data.error || 'error'));
-        return;
-      }
-      // actualizar UI (badge + nombre cadete)
-      const card = document.getElementById(`order-${pedidoId}`);
-      if(card){
-        const badge = card.querySelector('.badge');
-        if(data.estado && badge){ badge.className = 'badge ' + badgeClass(data.estado); badge.textContent = data.estado; }
-        const cadNode = card.querySelector('.cadete-name');
-        if(cadNode){ cadNode.textContent = data.cadete || '—'; }
-      }
-      // refrescar lista y selects
-      cargarCadetes();
-    }catch(e){
-      alert('Error al asignar.');
-    }finally{
-      if(btn){ btn.disabled = false; btn.textContent = 'Asignar'; }
+    // Si no es JSON, redirijo (por ejemplo, staff_required mandó a login)
+    const ct = (res.headers.get('content-type')||'').toLowerCase();
+    if(!ct.includes('application/json')){ window.location.href = url; return; }
+
+    const data = await res.json();
+
+    if(!data.ok){
+      alert('No se pudo asignar: ' + (data.error || 'error'));
+      return;
     }
+
+    // actualizar UI
+    const card = document.getElementById(`order-${pedidoId}`);
+    if(card){
+      const badge = card.querySelector('.badge');
+      if(badge){ badge.className = 'badge ' + badgeClass(data.estado); badge.textContent = data.estado; }
+      const cadNode = card.querySelector('.cadete-name');
+      if(cadNode){ cadNode.textContent = data.cadete || '—'; }
+    }
+    // refrescar lista y selects
+    cargarCadetes();
+
+  }catch(e){
+    alert('Error al asignar.');
   }
+}
 
   document.addEventListener('click', (ev)=>{
     const btnA = ev.target.closest('.btn-asignar-cadete');
