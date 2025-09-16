@@ -514,19 +514,19 @@
   fetchFeed();
   setInterval(()=>{ fetchFeed(); }, 7000);
 
-  // ===== WebSocket para ofertas en vivo (grupo cadetes_disponibles) — opcional
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-  const cadeteWsUrl = wsProtocol + window.location.host + '/ws/cadetes/notifications/';
-  try{
-    const cadeteSocket = new WebSocket(cadeteWsUrl);
-    cadeteSocket.onmessage = (e)=>{
-      const payload = JSON.parse(e.data||'{}');
-      if(payload && payload.order_data){
-        if(disponible){ playSound(); }
-        fetchFeed(); // refrescamos la lista de ofertas
-      }
-    };
-  }catch(e){}
+ // ===== WebSocket para ofertas en vivo (grupo cadetes_disponibles)
+const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+const cadeteWsUrl = wsProtocol + window.location.host + '/ws/cadetes/notifications/';
+try{
+  const cadeteSocket = new WebSocket(cadeteWsUrl);
+  cadeteSocket.onmessage = (e)=>{
+    const payload = JSON.parse(e.data||'{}');
+    if(payload && payload.order_data){
+      // NO sonar acá: el sonido lo dispara fetchFeed si detecta nuevas ofertas
+      fetchFeed();
+    }
+  };
+}catch(e){}
 </script>
 
 <style>

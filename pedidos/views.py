@@ -1,5 +1,5 @@
 # pedidos/views.py
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Q, Exists, OuterRef  # por las anotaciones que ya usás
 from django.conf import settings
 from django.http import JsonResponse, HttpResponse, HttpResponseBadRequest, HttpResponseNotAllowed
 from django.shortcuts import render, redirect, get_object_or_404
@@ -12,6 +12,7 @@ from django.views.decorators.http import require_POST, require_GET
 from django.contrib.admin.views.decorators import staff_member_required
 from django.urls import reverse
 from django.utils import timezone
+from django.shortcuts import get_object_or_404
 from datetime import timedelta
 from django.views.decorators.csrf import csrf_exempt
 from decimal import Decimal, ROUND_HALF_UP
@@ -2513,22 +2514,22 @@ def panel_cadetes_data(request):
 @staff_member_required
 @require_POST
 def panel_asignar_cadete(request, pedido_id):
+    """Asigna un cadete o vuelve a modo 'a todos' (cadete_id=0).
+    NO cambia el estado: queda EN_PREPARACION hasta que el cadete lo 'acepta'."""
     pedido = get_object_or_404(Pedido, id=pedido_id)
     cadete_id = (request.POST.get('cadete_id') or '0').strip()
 
-    # Desasignar → modo "a todos"
+    # Desasignar → modo a todos
     if cadete_id in ('0', ''):
         pedido.cadete_asignado = None
-        # si estaba asignado, volvemos a EN_PREPARACION
-        if pedido.estado in ('ASIGNADO',):
-            pedido.estado = 'EN_PREPARACION'
-        pedido.save(update_fields=['cadete_asignado', 'estado'])
+        # mantiene EN_PREPARACION (no tocar estado)
+        pedido.save(update_fields=['cadete_asignado'])
         return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': None})
 
     # Asignar a un cadete específico
     cadete = get_object_or_404(CadeteProfile, id=cadete_id)
 
-    # No permitir si ya tiene un pedido activo
+    # Si ya tiene un pedido activo (ASIGNADO/EN_CAMINO), no permitir
     ocupado = Pedido.objects.filter(
         cadete_asignado=cadete,
         estado__in=['ASIGNADO', 'EN_CAMINO']
@@ -2536,13 +2537,11 @@ def panel_asignar_cadete(request, pedido_id):
     if ocupado:
         return JsonResponse({'ok': False, 'error': 'ocupado'}, status=400)
 
+    # Marcar asignación (sin cambiar estado)
     pedido.cadete_asignado = cadete
-    if pedido.estado in ('RECIBIDO', 'EN_PREPARACION'):
-        pedido.estado = 'ASIGNADO'
-        if not pedido.fecha_asignado:
-            pedido.fecha_asignado = timezone.now()
-
-    pedido.save(update_fields=['cadete_asignado', 'estado', 'fecha_asignado'])
+    if not pedido.fecha_asignado:
+        pedido.fecha_asignado = timezone.now()
+    pedido.save(update_fields=['cadete_asignado', 'fecha_asignado'])
 
     cadete_name = cadete.user.get_full_name() or cadete.user.username
     return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': cadete_name})
