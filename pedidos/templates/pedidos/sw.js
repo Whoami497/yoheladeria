@@ -1,19 +1,24 @@
 // sw.js — Service Worker de notificaciones para cadetes
-// Versión para forzar actualización de SW (cambiar cuando hagas cambios)
-const SW_VERSION = 'v2-2025-09-09';
+// Cambiá la versión para forzar actualización del SW
+const SW_VERSION = 'v3-2025-09-15';
 
-// Instalar y tomar control inmediatamente
+// ————————————————————————————————————————————————
+// Ciclo de vida
+// ————————————————————————————————————————————————
 self.addEventListener('install', (event) => {
-  // útil para debugging/ver que cargó la versión nueva
   // console.log('[SW] install', SW_VERSION);
   self.skipWaiting();
 });
+
 self.addEventListener('activate', (event) => {
   // console.log('[SW] activate', SW_VERSION);
   event.waitUntil(self.clients.claim());
 });
 
-// === PUSH: mostrar notificación incluso con pestaña cerrada ===
+// ————————————————————————————————————————————————
+// PUSH: mostrar notificación incluso con la app cerrada
+// Espera recibir desde el backend: { title, body, url, ...opcionales }
+// ————————————————————————————————————————————————
 self.addEventListener('push', (event) => {
   let data = {};
   try {
@@ -22,54 +27,79 @@ self.addEventListener('push', (event) => {
     try { data = JSON.parse(event.data.text()); } catch (_) { data = {}; }
   }
 
-  // El backend envía "title", "body" y "url"
   const title = data.title || data.head || 'Yo Heladerías';
   const body  = data.body  || 'Nuevo pedido disponible';
   const url   = data.url   || '/cadete/panel/';
 
-  // Opciones de la notificación (iconos opcionales si existen en static/)
   const options = {
     body,
     data: { url, v: SW_VERSION },
     icon:  data.icon  || '/static/pedidos/icons/notification-192.png',
     badge: data.badge || '/static/pedidos/icons/badge-72.png',
-    tag:   data.tag   || 'yoheladeria-new-order', // agrupa
+    tag:   data.tag   || 'yoheladeria-new-order', // agrupa notificaciones
     renotify: true,
     vibrate: data.vibrate || [200, 100, 200],
-    requireInteraction: !!data.requireInteraction, // en mobile puede ignorarse
-    silent: false, // intenta que el SO no silencie (algunos lo ignoran)
+    requireInteraction: !!data.requireInteraction,
+    silent: false,
     actions: [
       { action: 'open', title: 'Abrir panel' },
     ],
   };
 
-  event.waitUntil(
-    self.registration.showNotification(title, options)
-  );
+  event.waitUntil((async () => {
+    // Opcional: cerrar previas del mismo tag para que no queden duplicadas visibles
+    const existing = await self.registration.getNotifications({ tag: options.tag });
+    existing.forEach(n => n.close());
+
+    await self.registration.showNotification(title, options);
+  })());
 });
 
-// === CLICK en la notificación: enfocar/abrir el panel del cadete ===
+// ————————————————————————————————————————————————
+// CLICK en la notificación: enfocar o abrir el panel del cadete
+// Si hay una pestaña de la app, la enfoca y navega al panel si hace falta.
+// Si no hay, abre una nueva ventana a /cadete/panel/.
+// ————————————————————————————————————————————————
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl =
-    (event.notification.data && event.notification.data.url) || '/cadete/panel/';
 
-  const go = async () => {
+  // Respetar la acción (por si en el futuro agregás más)
+  const action = event.action || 'open';
+
+  // Normalizar URL al mismo origen del SW (evita abrir dominios externos desde el SW)
+  const rawUrl = (event.notification.data && event.notification.data.url) || '/cadete/panel/';
+  const targetUrl = new URL(rawUrl, self.location.origin).href;
+
+  event.waitUntil((async () => {
     const clientsArr = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    // Si ya hay una pestaña de la app, enfocarla (y navegar si no es el panel)
+
+    // Si ya existe una pestaña de la app:
     for (const c of clientsArr) {
       try {
-        if (c.url.includes('/cadete/panel')) return c.focus();
-      } catch(_) {}
+        // Si ya está en el panel, solo enfocar
+        if (c.url.includes('/cadete/panel')) {
+          if ('focus' in c) await c.focus();
+          return;
+        }
+        // Está en la app pero en otra ruta -> enfocar + navegar (mismo origen)
+        if ('focus' in c) await c.focus();
+        if ('navigate' in c) {
+          await c.navigate(targetUrl);
+          return;
+        }
+      } catch (_) {}
     }
-    return self.clients.openWindow(targetUrl);
-  };
 
-  event.waitUntil(go());
+    // Si no hay pestañas de la app, abrir una nueva
+    if (action === 'open') {
+      return self.clients.openWindow(targetUrl);
+    }
+  })());
 });
 
-// === (Opcional) pushsubscriptionchange: algunos navegadores vencen la suscripción ===
-// No podemos re-suscribir desde el SW (CSRF/login), así que avisamos al usuario para reactivarla.
+// ————————————————————————————————————————————————
+// Algunos navegadores vencen la suscripción: avisar al usuario
+// ————————————————————————————————————————————————
 self.addEventListener('pushsubscriptionchange', (event) => {
   event.waitUntil(
     self.registration.showNotification('Actualizá tus notificaciones', {
@@ -84,9 +114,19 @@ self.addEventListener('pushsubscriptionchange', (event) => {
   );
 });
 
-// (Opcional) canal de mensajes para diagnósticos simples desde la página
+// ————————————————————————————————————————————————
+// Canal simple de mensajes para diagnósticos (p.ej. versión de SW)
+// ————————————————————————————————————————————————
 self.addEventListener('message', (event) => {
   if (event.data === 'SW_VERSION?') {
     event.ports && event.ports[0] && event.ports[0].postMessage({ version: SW_VERSION });
   }
 });
+
+/*
+NOTA:
+- Asegurate de registrar este SW con un scope que incluya "/cadete/panel/".
+- Si lo servís desde una ruta no raíz, en la vista de Django podés agregar:
+    resp["Service-Worker-Allowed"] = "/"
+  para permitir scope en "/".
+*/
