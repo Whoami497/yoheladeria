@@ -2388,111 +2388,86 @@ from django.views.decorators.http import require_http_methods
 @require_GET
 def panel_cadetes_data(request):
     """
-    Devuelve listado de cadetes para el panel: nombre, disponible, si está ocupado,
-    y si tiene suscripción push (approx de 'conectado').
+    Devuelve un JSON con todos los cadetes y su estado actual.
+    No requiere parámetros. Solo GET.
     """
-    cadetes = CadeteProfile.objects.select_related('user').all()
+    cadetes_out = []
+    try:
+        # Traemos cadetes con su usuario
+        qs = Cadete.objects.select_related("user").all()
 
-    out = []
-    for c in cadetes:
-        # ¿Tiene pedido activo?
-        activo = (Pedido.objects
-                  .filter(cadete_asignado=c, estado__in=['ASIGNADO', 'EN_CAMINO'])
-                  .order_by('-fecha_pedido')
-                  .first())
+        for c in qs:
+            nombre = (c.user.get_full_name() or c.user.username or f"Cadete {c.id}").strip()
 
-        # disponible: si el modelo tiene el campo 'disponible' lo usamos; si no, False.
-        try:
-            disponible = bool(getattr(c, 'disponible'))
-        except Exception:
-            disponible = False
+            # ¿Tiene un pedido en curso?
+            en_curso_qs = Pedido.objects.filter(
+                cadete_asignado=c,
+                estado__in=["ASIGNADO", "EN_CAMINO"]
+            ).order_by("-id")
 
-        out.append({
-            'id': c.id,
-            'nombre': (c.user.get_full_name() or c.user.username),
-            'disponible': disponible,
-            'ocupado': bool(activo),
-            'pedido_id': activo.id if activo else None,
-            'subscription_ok': bool(c.subscription_info),
-        })
+            ocupado = en_curso_qs.exists()
+            pedido_actual = en_curso_qs.first().id if ocupado else None
 
-    return JsonResponse({'cadetes': out})
+            # Disponible: si el modelo no tiene el campo, cae en False
+            disponible = bool(getattr(c, "disponible", False))
+
+            # ¿Tiene subscripción push guardada? (si usás webpush)
+            subscription_ok = False
+            try:
+                from webpush.models import PushInformation
+                subscription_ok = PushInformation.objects.filter(user=c.user).exists()
+            except Exception:
+                subscription_ok = False
+
+            cadetes_out.append({
+                "id": c.id,
+                "nombre": nombre,
+                "disponible": disponible,
+                "ocupado": ocupado,
+                "pedido_id": pedido_actual,
+                "subscription_ok": subscription_ok,
+            })
+
+        return JsonResponse({"ok": True, "cadetes": cadetes_out})
+    except Exception as e:
+        # Si algo explota, devolvemos error legible (el front ya lo muestra)
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
 
 
 @staff_member_required
 @require_POST
-def panel_asignar_cadete(request, pedido_id: int):
-    """
-    Asigna manualmente un cadete a un pedido, o lo desasigna (modo 'a todos').
-    - POST cadete_id=<id>  → asigna a ese cadete (si no está ocupado)
-    - POST cadete_id=0     → desasigna (vuelve a EN_PREPARACION y notifica a cadetes)
-    """
-    pedido = get_object_or_404(Pedido, id=pedido_id)
+def panel_asignar_cadete(request, pedido_id):
+    cadete_id = request.POST.get("cadete_id", "").strip()
+    try:
+        pedido = Pedido.objects.select_related("cadete_asignado").get(id=pedido_id)
+    except Pedido.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "pedido_no_encontrado"}, status=404)
 
-    if pedido.estado in ('ENTREGADO', 'CANCELADO'):
-        return JsonResponse({'ok': False, 'error': 'pedido_finalizado'}, status=400)
+    # DESASIGNAR → modo broadcast
+    if cadete_id in ("", "0", "None", None):
+        pedido.cadete_asignado = None
+        # si estaba ASIGNADO lo devolvemos a EN_PREPARACION
+        if pedido.estado == "ASIGNADO":
+            pedido.estado = "EN_PREPARACION"
+        pedido.save(update_fields=["cadete_asignado", "estado"])
+        return JsonResponse({"ok": True, "estado": pedido.estado, "cadete": "—"})
 
-    cadete_id = (request.POST.get('cadete_id') or '').strip()
+    # ASIGNAR a un cadete específico
+    try:
+        cad = Cadete.objects.select_related("user").get(id=int(cadete_id))
+    except (Cadete.DoesNotExist, ValueError):
+        return JsonResponse({"ok": False, "error": "cadete_no_encontrado"}, status=400)
 
-    # Desasignar → volver a "a todos"
-    if not cadete_id or cadete_id in ('0', 'none', 'null'):
-        # Si estaba ASIGNADO (o incluso EN_CAMINO y querés evitar eso, según tu operativa),
-        # lo devolvemos a EN_PREPARACION sólo si no está "EN_CAMINO"
-        if pedido.estado != 'EN_CAMINO':
+    pedido.cadete_asignado = cad
+    # si aún no estaba en camino/entregado/cancelado, lo marcamos ASIGNADO
+    if pedido.estado in ("RECIBIDO", "EN_PREPARACION", "ASIGNADO"):
+        pedido.estado = "ASIGNADO"
+        if not getattr(pedido, "fecha_asignado", None):
             try:
-                pedido.cadete_asignado = None
-                pedido.save(update_fields=['cadete_asignado'])
-            except Exception:
-                pedido.cadete_asignado = None
-                pedido.save()
-
-            _marcar_estado(pedido, 'EN_PREPARACION', actor=request.user, fuente='panel_desasignar')
-
-            # Notificar WS y volver a disparar push para que los cadetes lo vean disponible
-            try:
-                _notify_panel_update(pedido)
+                pedido.fecha_asignado = timezone.now()
             except Exception:
                 pass
-            try:
-                _notify_cadetes_new_order(request, pedido)
-            except Exception:
-                pass
+    pedido.save(update_fields=["cadete_asignado", "estado", "fecha_asignado"])
 
-            return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': pedido.estado, 'cadete': None})
-        else:
-            return JsonResponse({'ok': False, 'error': 'pedido_en_camino'}, status=400)
-
-    # Asignar a un cadete específico
-    cadete = get_object_or_404(CadeteProfile, id=cadete_id)
-
-    # Evitar asignar si el cadete ya tiene un pedido activo
-    if Pedido.objects.filter(cadete_asignado=cadete, estado__in=['ASIGNADO', 'EN_CAMINO']).exists():
-        return JsonResponse({'ok': False, 'error': 'cadete_ocupado'}, status=400)
-
-    # Guardar asignación
-    try:
-        pedido.cadete_asignado = cadete
-        pedido.save(update_fields=['cadete_asignado'])
-    except Exception:
-        pedido.cadete_asignado = cadete
-        pedido.save()
-
-    # Marcar estado ASIGNADO
-    _marcar_estado(pedido, 'ASIGNADO', actor=request.user, fuente='panel_asignar_manual')
-
-    # Marcar cadete como no disponible (si el modelo tiene el campo)
-    if hasattr(cadete, 'disponible'):
-        try:
-            cadete.disponible = False
-            cadete.save(update_fields=['disponible'])
-        except Exception:
-            pass
-
-    # Notificar al panel
-    try:
-        _notify_panel_update(pedido)
-    except Exception:
-        pass
-
-    nombre = cadete.user.get_full_name() or cadete.user.username
-    return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': pedido.estado, 'cadete': nombre})
+    cadete_nombre = (cad.user.get_full_name() or cad.user.username or f"Cadete {cad.id}").strip()
+    return JsonResponse({"ok": True, "estado": pedido.estado, "cadete": cadete_nombre})
