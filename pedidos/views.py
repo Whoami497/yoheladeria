@@ -1307,56 +1307,31 @@ def panel_alertas(request):
 
 @staff_member_required
 def panel_alertas_data(request):
-    scope = (request.GET.get('scope') or 'hoy').lower()
-    hoy = timezone.localdate()
+    scope = request.GET.get('scope') or ''
 
-    if scope == 'hoy':
-        qs = (Pedido.objects
-            .filter(fecha_pedido__date=hoy)
-            .exclude(estado__in=['ENTREGADO', 'CANCELADO', 'PENDIENTE_PAGO'])
-            .order_by('-fecha_pedido'))
-    elif scope == 'hoy_finalizados':
-        qs = (Pedido.objects
-            .filter(fecha_pedido__date=hoy, estado__in=['ENTREGADO', 'CANCELADO'])
-            .order_by('-fecha_pedido'))
-    elif scope == 'ayer':
-        qs = (Pedido.objects
-            .filter(fecha_pedido__date=hoy - timedelta(days=1))
-            .order_by('-fecha_pedido'))
-    else:
-        try:
-            y, m, d = map(int, scope.split('-'))
-            fecha = timezone.datetime(y, m, d).date()
-        except Exception:
-            fecha = hoy
-        qs = Pedido.objects.filter(fecha_pedido__date=fecha).order_by('-fecha_pedido')
-
-    def serialize(p):
-        data = {
-            'id': p.id,
-            'estado': p.estado,
-            'cliente_nombre': p.cliente_nombre,
-            'cliente_direccion': p.cliente_direccion,
-            'direccion_legible': _direccion_legible_from_text(p.cliente_direccion),
-            'map_url': _map_url_from_text(p.cliente_direccion),
-            'cliente_telefono': p.cliente_telefono,
-            'metodo_pago': p.metodo_pago,
-            'total_pedido': str(_compute_total(p)),
-            'costo_envio': float(p.costo_envio or 0),
-            'cadete': (p.cadete_asignado.user.get_full_name() or p.cadete_asignado.user.username)
-                    if getattr(p, 'cadete_asignado', None) else None,
-            'detalles': [{
-                'producto_nombre': d.producto.nombre,
-                'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
-                'cantidad': d.cantidad,
-                'sabores_nombres': [s.nombre for s in d.sabores.all()],
-            } for d in p.detalles.all()],
-            'metricas': _serialize_metricas(p),
-            'logs': _serialize_logs(p),
-        }
-        return data
-
-    return JsonResponse({'pedidos': [serialize(p) for p in qs]})
+    # >>>> NUEVO: devolver cadetes <<<<
+    if scope.lower() == 'cadetes':
+        CadeteModel = apps.get_model('pedidos', 'Cadete')
+        cadetes = []
+        for c in CadeteModel.objects.select_related('user').all():
+            disponible = bool(getattr(c, 'disponible', False))
+            activo = Pedido.objects.filter(
+                cadete_asignado=c,
+                estado__in=['ASIGNADO', 'EN_CAMINO']
+            ).order_by('-id').values_list('id', flat=True).first()
+            subscription_ok = bool(
+                getattr(c, 'subscription_json', None) or getattr(c, 'subscription', None)
+            )
+            nombre = (c.user.get_full_name() or c.user.username or f'Cadete {c.pk}').strip()
+            cadetes.append({
+                'id': c.id,
+                'nombre': nombre,
+                'disponible': disponible,
+                'ocupado': bool(activo),
+                'pedido_id': activo or None,
+                'subscription_ok': subscription_ok,
+            })
+        return JsonResponse({'ok': True, 'cadetes': cadetes})
 
 
 @staff_member_required
@@ -1392,9 +1367,97 @@ def panel_alertas_anteriores(request):
     return HttpResponse(html)
 
 
+
+@staff_member_required
 @require_POST
-@login_required
 def panel_alertas_set_estado(request, pedido_id):
+    """
+    Cambia el estado del pedido (POST 'estado')
+    o asigna/desasigna cadete (POST 'cadete_id').
+    Si 'cadete_id' llega:
+        - '0' o vacío -> desasignar (modo a todos, estado EN_PREPARACION)
+        - entero > 0  -> asignar (estado ASIGNADO)
+    Respuesta JSON: {ok, estado, cadete?}
+    """
+    pedido = get_object_or_404(Pedido, pk=pedido_id)
+
+    cadete_id = request.POST.get('cadete_id', None)
+    if cadete_id is not None:
+        # --- ASIGNACIÓN / DESASIGNACIÓN ---
+        CadeteModel = apps.get_model('pedidos', 'Cadete')
+
+        if not cadete_id or cadete_id == '0':
+            # Desasignar → vuelve a "a todos"
+            pedido.cadete_asignado = None
+            if pedido.estado == 'ASIGNADO':
+                pedido.estado = 'EN_PREPARACION'
+            if hasattr(pedido, 'fecha_asignado'):
+                pedido.fecha_asignado = None
+            fields = ['cadete_asignado', 'estado']
+            if hasattr(pedido, 'fecha_asignado'):
+                fields.append('fecha_asignado')
+            pedido.save(update_fields=fields)
+            return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': '—'})
+
+        # Asignar a un cadete específico
+        try:
+            cad_id = int(cadete_id)
+        except ValueError:
+            return JsonResponse({'ok': False, 'error': 'cadete_id inválido'}, status=400)
+
+        cadete = get_object_or_404(CadeteModel, pk=cad_id)
+
+        # Evitar asignar si está ocupado en otro pedido activo
+        ocupado = Pedido.objects.filter(
+            cadete_asignado=cadete,
+            estado__in=['ASIGNADO', 'EN_CAMINO']
+        ).exclude(pk=pedido.pk).exists()
+        if ocupado:
+            return JsonResponse({'ok': False, 'error': 'Cadete ocupado'}, status=409)
+
+        pedido.cadete_asignado = cadete
+        pedido.estado = 'ASIGNADO'
+        if hasattr(pedido, 'fecha_asignado') and not pedido.fecha_asignado:
+            pedido.fecha_asignado = timezone.now()
+        fields = ['cadete_asignado', 'estado']
+        if hasattr(pedido, 'fecha_asignado'):
+            fields.append('fecha_asignado')
+        pedido.save(update_fields=fields)
+
+        cadete_name = (cadete.user.get_full_name() or cadete.user.username or f'Cadete {cadete.pk}').strip()
+        return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': cadete_name})
+
+    # --- CAMBIO DE ESTADO NORMAL (lo que ya hacía tu vista) ---
+    estado = (request.POST.get('estado') or '').upper().strip()
+    estados_validos = {'EN_PREPARACION', 'EN_CAMINO', 'ENTREGADO', 'CANCELADO', 'RECIBIDO', 'ASIGNADO'}
+    if estado not in estados_validos:
+        return JsonResponse({'ok': False, 'error': 'estado inválido'}, status=400)
+
+    # Timestamps si tu modelo los tiene (no rompe si no existen)
+    now = timezone.now()
+    try:
+        if estado == 'EN_PREPARACION' and getattr(pedido, 'fecha_en_preparacion', None) is None:
+            pedido.fecha_en_preparacion = now
+        elif estado == 'EN_CAMINO' and getattr(pedido, 'fecha_en_camino', None) is None:
+            pedido.fecha_en_camino = now
+        elif estado == 'ENTREGADO' and getattr(pedido, 'fecha_entregado', None) is None:
+            pedido.fecha_entregado = now
+        elif estado == 'CANCELADO' and getattr(pedido, 'fecha_cancelado', None) is None:
+            pedido.fecha_cancelado = now
+        elif estado == 'ASIGNADO' and getattr(pedido, 'fecha_asignado', None) is None:
+            pedido.fecha_asignado = now
+    except Exception:
+        pass
+
+    pedido.estado = estado
+    pedido.save()
+
+    cadete_name = None
+    if pedido.cadete_asignado_id:
+        u = pedido.cadete_asignado.user
+        cadete_name = (u.get_full_name() or u.username).strip()
+
+    return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': cadete_name})
     pedido = get_object_or_404(Pedido, id=pedido_id)
     estado = (request.POST.get('estado') or '').upper()
     validos = {'RECIBIDO', 'EN_PREPARACION', 'ASIGNADO', 'EN_CAMINO', 'ENTREGADO', 'CANCELADO'}
