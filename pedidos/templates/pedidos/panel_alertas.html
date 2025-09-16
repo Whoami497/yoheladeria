@@ -251,8 +251,8 @@
 
 <script>
   // ===== Endpoints cadetes =====
-  const urlCadetesData = "{% url 'panel_cadetes_data' %}";
-  const urlAsignarBase = "{% url 'panel_asignar_cadete' 0 %}"; // luego replace /0/ por /<pedido_id>/
+  const urlCadetesData = "/panel-alertas/cadetes.json";
+  const urlAsignarBase = "/panel-alertas/asignar/0/"; // luego reemplazamos /0/ por /<pedido_id>/
 
   // ===== CSRF =====
   function getCookie(name){const value=`; ${document.cookie}`;const parts=value.split(`; ${name}=`);if(parts.length===2) return parts.pop().split(';').shift();}
