@@ -25,6 +25,7 @@ import base64  # ← para PrintNode (raw_base64)
 from urllib.parse import quote_plus
 from django.template import TemplateDoesNotExist
 from django.contrib import messages
+from .models import Pedido, Cadete
 import logging
 import socket  # ← impresión TCP/RAW
 import textwrap  # ← NUEVO: wrap de líneas para ticket
@@ -2388,30 +2389,26 @@ from django.views.decorators.http import require_http_methods
 @require_GET
 def panel_cadetes_data(request):
     """
-    Devuelve un JSON con todos los cadetes y su estado actual.
-    No requiere parámetros. Solo GET.
+    GET /panel-alertas/cadetes.json
+    Devuelve el listado de cadetes con estado (disponible/ocupado y pedido actual).
     """
     cadetes_out = []
     try:
-        # Traemos cadetes con su usuario
         qs = Cadete.objects.select_related("user").all()
 
         for c in qs:
             nombre = (c.user.get_full_name() or c.user.username or f"Cadete {c.id}").strip()
 
-            # ¿Tiene un pedido en curso?
             en_curso_qs = Pedido.objects.filter(
                 cadete_asignado=c,
-                estado__in=["ASIGNADO", "EN_CAMINO"]
+                estado__in=["ASIGNADO", "EN_CAMINO"],
             ).order_by("-id")
 
             ocupado = en_curso_qs.exists()
             pedido_actual = en_curso_qs.first().id if ocupado else None
 
-            # Disponible: si el modelo no tiene el campo, cae en False
             disponible = bool(getattr(c, "disponible", False))
 
-            # ¿Tiene subscripción push guardada? (si usás webpush)
             subscription_ok = False
             try:
                 from webpush.models import PushInformation
@@ -2430,43 +2427,43 @@ def panel_cadetes_data(request):
 
         return JsonResponse({"ok": True, "cadetes": cadetes_out})
     except Exception as e:
-        # Si algo explota, devolvemos error legible (el front ya lo muestra)
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
 
 
 @staff_member_required
 @require_POST
 def panel_asignar_cadete(request, pedido_id):
-    cadete_id = request.POST.get("cadete_id", "").strip()
+    """
+    POST /panel-alertas/asignar/<pedido_id>/
+    - cadete_id=0 -> desasignar (modo “a todos”)
+    - cadete_id>0 -> asignar y pasar a ASIGNADO si corresponde
+    """
+    cadete_id = (request.POST.get("cadete_id") or "").strip()
+
     try:
         pedido = Pedido.objects.select_related("cadete_asignado").get(id=pedido_id)
     except Pedido.DoesNotExist:
         return JsonResponse({"ok": False, "error": "pedido_no_encontrado"}, status=404)
 
-    # DESASIGNAR → modo broadcast
+    # Desasignar => modo broadcast
     if cadete_id in ("", "0", "None", None):
         pedido.cadete_asignado = None
-        # si estaba ASIGNADO lo devolvemos a EN_PREPARACION
         if pedido.estado == "ASIGNADO":
             pedido.estado = "EN_PREPARACION"
         pedido.save(update_fields=["cadete_asignado", "estado"])
         return JsonResponse({"ok": True, "estado": pedido.estado, "cadete": "—"})
 
-    # ASIGNAR a un cadete específico
+    # Asignar a un cadete específico
     try:
         cad = Cadete.objects.select_related("user").get(id=int(cadete_id))
     except (Cadete.DoesNotExist, ValueError):
         return JsonResponse({"ok": False, "error": "cadete_no_encontrado"}, status=400)
 
     pedido.cadete_asignado = cad
-    # si aún no estaba en camino/entregado/cancelado, lo marcamos ASIGNADO
     if pedido.estado in ("RECIBIDO", "EN_PREPARACION", "ASIGNADO"):
         pedido.estado = "ASIGNADO"
         if not getattr(pedido, "fecha_asignado", None):
-            try:
-                pedido.fecha_asignado = timezone.now()
-            except Exception:
-                pass
+            pedido.fecha_asignado = timezone.now()
     pedido.save(update_fields=["cadete_asignado", "estado", "fecha_asignado"])
 
     cadete_nombre = (cad.user.get_full_name() or cad.user.username or f"Cadete {cad.id}").strip()
