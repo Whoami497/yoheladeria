@@ -361,6 +361,17 @@ def _broadcast_tienda_estado(abierta: bool):
 
 
 def _notify_cadetes_new_order(request, pedido):
+    """
+    Notifica por WebPush a cadetes:
+      - Si es 'Retiro en local' => no notifica.
+      - Si hay cadete asignado => solo a ese cadete.
+      - Si no hay asignado => a disponibles sin pedido activo.
+    """
+    # no notificar retiros
+    dir_legible = (_direccion_legible_from_text(pedido.cliente_direccion) or "").strip().lower()
+    if dir_legible.startswith("retiro en local"):
+        return
+
     try:
         from pywebpush import webpush, WebPushException
     except Exception as e:
@@ -374,30 +385,39 @@ def _notify_cadetes_new_order(request, pedido):
         print("WEBPUSH: Falta VAPID_PRIVATE_KEY en settings.")
         return
 
-    activos_qs = Pedido.objects.filter(
-        cadete_asignado_id=OuterRef('pk'),
-        estado__in=['ASIGNADO', 'EN_CAMINO']
-    )
+    targets = []
 
-    qs = (CadeteProfile.objects
-          .exclude(subscription_info__isnull=True)
-          .annotate(tiene_activo=Exists(activos_qs))
-          .filter(tiene_activo=False))
-
-    try:
-        has_disponible = any(f.name == 'disponible' for f in CadeteProfile._meta.get_fields())
-    except Exception:
-        has_disponible = False
-
-    if has_disponible:
-        qs = qs.filter(disponible=True)
+    # Caso: ya hay cadete asignado -> notificar solo a ese
+    if getattr(pedido, 'cadete_asignado_id', None):
+        cad = getattr(pedido, 'cadete_asignado', None)
+        if cad and isinstance(cad.subscription_info, dict):
+            targets = [cad]
+        else:
+            print("WEBPUSH: pedido tiene cadete asignado pero sin subscription_info.")
     else:
-        print("WEBPUSH: CadeteProfile sin campo 'disponible'; no se enviarán push.")
-        qs = qs.none()
+        # Caso: sin asignación -> notificar a disponibles sin pedido activo
+        activos_qs = Pedido.objects.filter(
+            cadete_asignado_id=OuterRef('pk'),
+            estado__in=['ASIGNADO', 'EN_CAMINO']
+        )
+        qs = (CadeteProfile.objects
+              .exclude(subscription_info__isnull=True)
+              .annotate(tiene_activo=Exists(activos_qs))
+              .filter(tiene_activo=False))
+        # respetar flag 'disponible' si existe
+        try:
+            has_disponible = any(f.name == 'disponible' for f in CadeteProfile._meta.get_fields())
+        except Exception:
+            has_disponible = False
+        if has_disponible:
+            qs = qs.filter(disponible=True)
+        else:
+            # si el modelo no tiene 'disponible', preferimos no spamear
+            qs = qs.none()
+        targets = list(qs)
 
-    targets = list(qs)
     if not targets:
-        print("WEBPUSH: no hay cadetes disponibles para notificar.")
+        print("WEBPUSH: no hay cadetes destino para este push.")
         return
 
     payload = {
@@ -1469,6 +1489,7 @@ def panel_alertas_set_estado(request, pedido_id):
 
     _notify_panel_update(pedido)
     return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': cadete_name})
+
 # =========================
 # === Impresión / Comandera
 # =========================
@@ -1561,6 +1582,7 @@ def _build_ticket_text(pedido) -> str:
 
     parts = header + [""] + cliente + envio + pago + detalle + totales
     return "\n".join(parts)
+# --- (sigue) pedidos/views.py
 
 def _send_ticket_webhook(text: str, title: str = "Pedido a cocina", copies: int = 1):
     url = getattr(settings, 'COMANDERA_WEBHOOK_URL', '') or ''
@@ -1783,6 +1805,11 @@ def tienda_toggle(request):
 @login_required
 @require_POST
 def aceptar_pedido(request, pedido_id):
+    """
+    Cambios:
+      - Si ya no está disponible (asignado o no EN_PREPARACION) => 200 {"ok": false, "error": "ya_no_disponible"}
+      - Si el cadete ya tiene uno activo => 200 {"ok": false, "error": "ya_tiene_activo"}
+    """
     if not hasattr(request.user, 'cadeteprofile'):
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
@@ -1793,8 +1820,9 @@ def aceptar_pedido(request, pedido_id):
         cadete_asignado=request.user.cadeteprofile,
         estado__in=['ASIGNADO', 'EN_CAMINO']
     ).exists():
+        # ahora respondemos 200, no 400
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-            return JsonResponse({'ok': False, 'error': 'ya_tiene_activo'}, status=400)
+            return JsonResponse({'ok': False, 'error': 'ya_tiene_activo'}, status=200)
         messages.warning(request, "Ya tenés un pedido en curso. Entregalo antes de aceptar otro.")
         return redirect('panel_cadete')
 
@@ -1802,14 +1830,16 @@ def aceptar_pedido(request, pedido_id):
         try:
             pedido = Pedido.objects.select_for_update().get(id=pedido_id)
         except Pedido.DoesNotExist:
+            # 200 con ok:false
             if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-                return JsonResponse({'ok': False, 'error': 'no_disponible'}, status=404)
+                return JsonResponse({'ok': False, 'error': 'ya_no_disponible'}, status=200)
             messages.warning(request, f"El Pedido #{pedido_id} no existe o ya no está disponible.")
             return redirect('panel_cadete')
 
         if pedido.estado != 'EN_PREPARACION' or pedido.cadete_asignado_id:
+            # si ya está asignado o no está en estado correcto => 200 ok:false
             if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-                return JsonResponse({'ok': False, 'error': 'no_disponible'}, status=400)
+                return JsonResponse({'ok': False, 'error': 'ya_no_disponible'}, status=200)
             messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
             return redirect('panel_cadete')
 
@@ -2049,6 +2079,7 @@ def cadete_feed(request):
       - Si está disponible: listamos pedidos EN_PREPARACION
         * no asignados (los ven todos)
         * asignados a mí (sólo yo los veo)
+      - Excluimos "Retiro en local" del feed.
     """
     if not hasattr(request.user, 'cadeteprofile'):
         return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
@@ -2078,6 +2109,7 @@ def cadete_feed(request):
     qs = (Pedido.objects
           .filter(estado='EN_PREPARACION')
           .filter(Q(cadete_asignado__isnull=True) | Q(cadete_asignado=cadete))
+          .exclude(cliente_direccion__istartswith='Retiro en local')
           .order_by('-fecha_pedido')[:50])
 
     data = []
@@ -2357,9 +2389,9 @@ def service_worker(request):
 def confirmar_pedido(request, pedido_id):
     """
     Marca el pedido como EN_PREPARACION (si corresponde),
-    envía push a cadetes disponibles, notifica al panel y
-    envía el ticket a la comandera.
-    Si ya estaba EN_PREPARACION, sólo reimprime el ticket y refresca el panel.
+    envía push a cadetes disponibles o sólo al asignado,
+    NO notifica retiros en local,
+    notifica al panel y envía el ticket a la comandera.
     """
     pedido = get_object_or_404(Pedido, id=pedido_id)
     estado_anterior = pedido.estado
@@ -2375,7 +2407,7 @@ def confirmar_pedido(request, pedido_id):
         _marcar_estado(pedido, 'EN_PREPARACION', actor=request.user, fuente='confirmar_pedido')
         cambiado = True
 
-        # Disparar push a cadetes disponibles y sin pedido activo
+        # Disparar push según reglas (asignado -> solo a él; retiro -> no)
         try:
             _notify_cadetes_new_order(request, pedido)
         except Exception as e:
@@ -2414,6 +2446,7 @@ def panel_asignar_cadete(request, pedido_id):
     """
     Asigna un cadete o vuelve a 'a todos' (cadete_id=0).
     NO cambia el estado del pedido (se mantiene EN_PREPARACION).
+    Además, cuando asignamos, enviamos push solo a ese cadete.
     """
     CadeteProfileModel = apps.get_model('pedidos', 'CadeteProfile')
     PedidoModel = apps.get_model('pedidos', 'Pedido')
@@ -2452,4 +2485,11 @@ def panel_asignar_cadete(request, pedido_id):
 
     cadete_name = cadete.user.get_full_name() or cadete.user.username
     _notify_panel_update(pedido)
+
+    # Enviar push SOLO al asignado (y respetando "retiro en local")
+    try:
+        _notify_cadetes_new_order(request, pedido)
+    except Exception as e:
+        print(f"WEBPUSH notify (asignación manual) error: {e}")
+
     return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': cadete_name})
