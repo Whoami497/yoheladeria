@@ -2334,8 +2334,9 @@ from django.views.decorators.http import require_http_methods
 def confirmar_pedido(request, pedido_id):
     """
     Marca el pedido como EN_PREPARACION (si corresponde),
-    notifica al panel y envía el ticket a la comandera.
-    Si ya estaba EN_PREPARACION, reimprime el ticket.
+    envía push a cadetes disponibles, notifica al panel y
+    envía el ticket a la comandera.
+    Si ya estaba EN_PREPARACION, sólo reimprime el ticket y refresca el panel.
     """
     pedido = get_object_or_404(Pedido, id=pedido_id)
     estado_anterior = pedido.estado
@@ -2351,6 +2352,13 @@ def confirmar_pedido(request, pedido_id):
         _marcar_estado(pedido, 'EN_PREPARACION', actor=request.user, fuente='confirmar_pedido')
         cambiado = True
 
+        # NUEVO: disparar push a cadetes disponibles y sin pedido activo
+        try:
+            _notify_cadetes_new_order(request, pedido)
+        except Exception as e:
+            print(f"WEBPUSH notify cadetes error: {e}")
+
+    # Notificar panel (WS) y imprimir ticket (si está configurado)
     try:
         _notify_panel_update(pedido, message='actualizacion_pedido')
     except Exception:
@@ -2373,3 +2381,4 @@ def confirmar_pedido(request, pedido_id):
     else:
         messages.info(request, f"Pedido #{pedido.id} ya estaba en preparación. Ticket enviado nuevamente.")
     return redirect('panel_alertas')
+
