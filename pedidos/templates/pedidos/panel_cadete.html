@@ -514,7 +514,7 @@
   fetchFeed();
   setInterval(()=>{ fetchFeed(); }, 7000);
 
-  // ===== WebSocket para ofertas en vivo (grupo cadetes_disponibles)
+  // ===== WebSocket para ofertas en vivo (grupo cadetes_disponibles) — opcional
   const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
   const cadeteWsUrl = wsProtocol + window.location.host + '/ws/cadetes/notifications/';
   try{

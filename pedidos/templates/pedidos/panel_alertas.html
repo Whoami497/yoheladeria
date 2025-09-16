@@ -6,7 +6,7 @@
   <h2 class="section-title text-center mb-1">Panel de Alertas de Pedidos</h2>
   <p class="text-center text-muted mb-4">Llegan en tiempo real y quedan visibles aun si recargás la página.</p>
 
-  <!-- ===== ESTADO TIENDA + TOGGLE (NUEVO) ===== -->
+  <!-- ===== ESTADO TIENDA + TOGGLE ===== -->
   <div class="d-flex align-items-center justify-content-center gap-3 mb-3 flex-wrap">
     <span id="tienda-estado-badge"
           class="badge {% if TIENDA_ABIERTA %}bg-success{% else %}bg-danger{% endif %}">
@@ -23,6 +23,15 @@
 
     <small class="text-muted">El checkout queda bloqueado cuando la tienda está cerrada.</small>
   </div>
+
+  <!-- ===== CADETES ===== -->
+  <section class="mb-4">
+    <div class="d-flex align-items-center justify-content-between">
+      <h5 class="mb-2">Cadetes conectados / disponibles</h5>
+      <button id="btn-refresh-cadetes" class="btn btn-sm btn-outline-secondary">Actualizar</button>
+    </div>
+    <div id="lista-cadetes" class="small text-muted">Cargando cadetes…</div>
+  </section>
 
   <hr>
 
@@ -93,7 +102,7 @@
                 </ul>
               </details>
 
-              <!-- NUEVO: línea de tiempo -->
+              <!-- Línea de tiempo -->
               <details class="mt-2 timeline-details">
                 <summary class="cursor-pointer">Ver tiempos</summary>
                 <div class="mt-2 small" id="timeline-{{ p.id }}"></div>
@@ -109,7 +118,7 @@
                 </button>
                 <div class="text-muted small mt-1">Notifica a cadetes</div>
               {% else %}
-                <div class="dropdown">
+                <div class="dropdown mb-2">
                   <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">
                     Estado
                   </button>
@@ -123,6 +132,18 @@
                   </ul>
                 </div>
               {% endif %}
+
+              <!-- Asignación manual -->
+              <div class="assignment-box">
+                <div class="input-group input-group-sm mb-1">
+                  <select class="form-select cadete-select" data-pedido="{{ p.id }}">
+                    <option value="0">— Modo “a todos” —</option>
+                  </select>
+                  <button class="btn btn-outline-primary btn-asignar-cadete" data-pedido="{{ p.id }}">Asignar</button>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary btn-desasignar-cadete w-100" data-pedido="{{ p.id }}">A todos</button>
+                <small class="text-muted d-block mt-1">Elegí un cadete o desasigná para que lo tomen todos.</small>
+              </div>
             </div>
           </div>
 
@@ -229,6 +250,10 @@
 </div>
 
 <script>
+  // ===== Endpoints cadetes =====
+  const urlCadetesData = "{% url 'panel_cadetes_data' %}";
+  const urlAsignarBase = "{% url 'panel_asignar_cadete' 0 %}"; // luego replace /0/ por /<pedido_id>/
+
   // ===== CSRF =====
   function getCookie(name){const value=`; ${document.cookie}`;const parts=value.split(`; ${name}=`);if(parts.length===2) return parts.pop().split(';').shift();}
   const csrftoken=getCookie('csrftoken');
@@ -290,7 +315,7 @@
   const alertsAyer=document.getElementById('alerts-ayer');
   const wsStatus=document.getElementById('ws-status');
 
-  // ===== NUEVO: refs estado tienda =====
+  // ===== Estado tienda =====
   const tiendaBadge = document.getElementById('tienda-estado-badge');
   const tiendaForm  = document.getElementById('form-toggle-tienda');
   const tiendaBtn   = document.getElementById('btn-toggle-tienda');
@@ -335,7 +360,7 @@
     return document.getElementById(`order-${id}`) || document.getElementById(`chip-${id}`) || document.getElementById(`chip-hoy-${id}`);
   }
 
-  // ====== TIMELINE (nuevo) ======
+  // ====== TIMELINE ======
   const fmt = n => (n==null || Number.isNaN(n)) ? '—' : `${n.toFixed(2)} min`;
   const toDate = s => s ? new Date(s) : null;
   const diffMin = (a,b) => (a && b) ? Math.round(((b - a) / 60000) * 100) / 100 : null;
@@ -346,7 +371,6 @@
     const asign    = toDate(t.fecha_asignado);
     const camino   = toDate(t.fecha_en_camino);
     const entr     = toDate(t.fecha_entregado);
-
     return {
       m_recibido_a_preparacion: diffMin(recibido, prep),
       m_preparacion_a_asignado: diffMin(prep, asign),
@@ -403,6 +427,19 @@
   document.querySelectorAll('.order-card[data-order-id]').forEach(card => renderTimelineInto(card, null));
 
   /* ===== Construcción de tarjetas/chips ===== */
+  function assignmentControlsHTML(orderId){
+    return `
+      <div class="assignment-box mt-2">
+        <div class="input-group input-group-sm mb-1">
+          <select class="form-select cadete-select" data-pedido="${orderId}">
+            <option value="0">— Modo “a todos” —</option>
+          </select>
+          <button class="btn btn-outline-primary btn-asignar-cadete" data-pedido="${orderId}">Asignar</button>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary btn-desasignar-cadete w-100" data-pedido="${orderId}">A todos</button>
+        <small class="text-muted d-block mt-1">Elegí un cadete o desasigná para que lo tomen todos.</small>
+      </div>`;
+  }
 
   function buildCard(order){
     const wrapper=document.createElement('div');
@@ -448,7 +485,7 @@
            <i class="bi bi-check-circle-fill"></i> Confirmar
          </button>
          <div class="text-muted small mt-1">Notifica a cadetes</div>`
-      : `<div class="dropdown">
+      : `<div class="dropdown mb-2">
            <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
            <ul class="dropdown-menu dropdown-menu-end">
              <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="/panel-alertas/estado/${order.id}/">En preparación</button></li>
@@ -481,6 +518,7 @@
         </div>
         <div class="text-end min-btn-col">
           ${rightControls}
+          ${assignmentControlsHTML(order.id)}
         </div>
       </div>
       <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
@@ -530,17 +568,14 @@
     try { return await res.json(); } catch { window.location.href = fallbackUrl; return null; }
   }
 
-  /* ===== CONFIRMAR: sin abrir ventana de impresión =====
-     El backend (views.confirmar_pedido) ya envía el ticket por PrintNode.
-     Solo actualizamos la UI acá. */
+  /* ===== CONFIRMAR ===== */
   document.addEventListener('click', async (ev)=>{
     const btn = ev.target.closest('.btn-confirm');
     if(!btn) return;
     ev.preventDefault();
 
-    const url     = btn.dataset.confirmUrl;
-    const card    = btn.closest('.order-card');
-    const orderId = btn.dataset.orderId;
+    const url  = btn.dataset.confirmUrl;
+    const card = btn.closest('.order-card');
 
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Confirmando...';
@@ -553,7 +588,7 @@
         badge.textContent='EN_PREPARACION';
 
         btn.parentElement.innerHTML = `
-          <div class="dropdown">
+          <div class="dropdown mb-2">
             <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
             <ul class="dropdown-menu dropdown-menu-end">
               <!-- SIN 'ASIGNADO' -->
@@ -563,16 +598,13 @@
               <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="${url.replace('/confirmar-pedido','/panel-alertas/estado')}">Cancelar</button></li>
             </ul>
           </div>`;
-
-        // <-- IMPORTANTE: ya NO abrimos /ticket/... ni mostramos diálogo de impresión
-        // console.log(`Ticket del pedido ${orderId} enviado a impresora por PrintNode`);
-
       }else{
         window.location.href=url;
       }
     }catch(e){ window.location.href=url; }
   });
 
+  // ===== Cambiar estado
   document.addEventListener('click', async (ev)=>{
     const item=ev.target.closest('.btn-set-state'); if(!item) return;
     const url=item.dataset.url, estado=item.dataset.state;
@@ -610,11 +642,111 @@
     }catch(e){ console.error(e); window.location.href=url; }
   });
 
+  // ===== Limpiar UI
   document.getElementById('clear-alerts').addEventListener('click',()=>{
     alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
     alertsHoyFinalizados.innerHTML='<div class="alert alert-light border text-center">Sin pedidos finalizados de hoy.</div>';
     alertsAyer.innerHTML='';
   });
+
+  // ====== CADETES: listado + selects ======
+  async function cargarCadetes(){
+    try{
+      const r = await fetch(urlCadetesData, {credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}});
+      const el = document.getElementById('lista-cadetes');
+      if(!r.ok){ if(el) el.textContent = 'No se pudo cargar la lista.'; return; }
+      const data = await r.json();
+      if(!el) return;
+      const arr = data.cadetes || [];
+      if(!arr.length){
+        el.textContent = 'No hay cadetes conectados.';
+        poblarSelectsCadetes([]);
+        return;
+      }
+      el.innerHTML = arr.map(c=>{
+        const tagDisp = c.disponible ? '🟢 disponible' : '⚪ no disponible';
+        const tagOcu  = c.ocupado ? `🔴 ocupado (#${c.pedido_id})` : '⚪ libre';
+        const tagSub  = c.subscription_ok ? '🔔 push' : '⏹ sin push';
+        return `<div class="py-1">
+          <strong>#${c.id} ${c.nombre}</strong> — ${tagDisp} · ${tagOcu} · ${tagSub}
+        </div>`;
+      }).join('');
+      poblarSelectsCadetes(arr);
+    }catch(e){
+      const el = document.getElementById('lista-cadetes');
+      if(el) el.textContent = 'Error cargando cadetes.';
+      poblarSelectsCadetes([]);
+    }
+  }
+  document.getElementById('btn-refresh-cadetes').addEventListener('click', cargarCadetes);
+
+  function poblarSelectsCadetes(arr){
+    const options = (arr||[]).map(c=>{
+      const estado = c.ocupado ? ' (ocupado)' : (c.disponible ? ' (disp.)' : ' (no disp.)');
+      return `<option value="${c.id}" ${c.ocupado ? 'disabled' : ''}>#${c.id} ${c.nombre}${estado}</option>`;
+    }).join('');
+    document.querySelectorAll('select.cadete-select').forEach(sel=>{
+      const current = sel.value || '0';
+      sel.innerHTML = `<option value="0">— Modo “a todos” —</option>` + options;
+      sel.value = current;
+      const btn = sel.closest('.assignment-box')?.querySelector('.btn-asignar-cadete');
+      if(btn){ btn.disabled = (arr||[]).length === 0; }
+    });
+  }
+
+  async function asignarCadete(pedidoId, cadeteId){
+    const url = urlAsignarBase.replace('/0/', `/${pedidoId}/`);
+    const fd = new FormData();
+    fd.append('csrfmiddlewaretoken', csrftoken);
+    fd.append('cadete_id', cadeteId);
+
+    // UX: deshabilitar mientras asigna
+    const box = document.querySelector(`#order-${pedidoId} .assignment-box`);
+    const btn = box?.querySelector('.btn-asignar-cadete');
+    if(btn){ btn.disabled = true; btn.textContent = 'Asignando…'; }
+
+    try{
+      const res = await fetch(url, {method:'POST', body:fd, credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}});
+      const data = await res.json();
+      if(!data.ok){
+        alert('No se pudo asignar: ' + (data.error || 'error'));
+        return;
+      }
+      // actualizar UI (badge + nombre cadete)
+      const card = document.getElementById(`order-${pedidoId}`);
+      if(card){
+        const badge = card.querySelector('.badge');
+        if(data.estado && badge){ badge.className = 'badge ' + badgeClass(data.estado); badge.textContent = data.estado; }
+        const cadNode = card.querySelector('.cadete-name');
+        if(cadNode){ cadNode.textContent = data.cadete || '—'; }
+      }
+      // refrescar lista y selects
+      cargarCadetes();
+    }catch(e){
+      alert('Error al asignar.');
+    }finally{
+      if(btn){ btn.disabled = false; btn.textContent = 'Asignar'; }
+    }
+  }
+
+  document.addEventListener('click', (ev)=>{
+    const btnA = ev.target.closest('.btn-asignar-cadete');
+    if(btnA){
+      const pedidoId = btnA.dataset.pedido;
+      const sel = document.querySelector(`select.cadete-select[data-pedido="${pedidoId}"]`);
+      const cadeteId = sel ? (sel.value || '0') : '0';
+      asignarCadete(pedidoId, cadeteId);
+    }
+    const btnD = ev.target.closest('.btn-desasignar-cadete');
+    if(btnD){
+      const pedidoId = btnD.dataset.pedido;
+      asignarCadete(pedidoId, '0'); // desasignar → modo a todos
+    }
+  });
+
+  // cargar al inicio + refrescos periódicos
+  cargarCadetes();
+  setInterval(cargarCadetes, 15000);
 
   // ===== WebSocket =====
   const wsProtocol=window.location.protocol==='https:'?'wss://':'ws://';
@@ -671,9 +803,13 @@
         const card=buildCard(orderData);
         alertsHoy.prepend(card);
         playSound();
+        cargarCadetes(); // por si entran pedidos nuevos
       }else{
         const card = document.getElementById(`order-${orderId}`);
-        if(card) renderTimelineInto(card, orderData);
+        if(card){
+          renderTimelineInto(card, orderData);
+          if(orderData.cadete){ const n = card.querySelector('.cadete-name'); if(n) n.textContent = orderData.cadete; }
+        }
       }
       return;
     }
@@ -687,6 +823,7 @@
       if(card){
         const badge=card.querySelector('.badge');
         if(estado && badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
+        if(orderData.cadete){ const n = card.querySelector('.cadete-name'); if(n) n.textContent = orderData.cadete; }
         renderTimelineInto(card, orderData || null);
         if(estado==='ASIGNADO'){ refreshCadeteName(orderId); }
         if(estado==='ENTREGADO'||estado==='CANCELADO'){ moveToFinalizadosFromCard(card, estado); }
@@ -705,6 +842,7 @@
       const card=buildCard(orderData);
       alertsHoy.prepend(card);
       playSound();
+      cargarCadetes();
     }
   };
 </script>
@@ -715,7 +853,8 @@
   .chip-client{max-width:260px}
   .order-card h6{font-size:1rem}
   .compact-line{font-size:.95rem}
-  .min-btn-col{min-width:190px}
+  .min-btn-col{min-width:220px}
+  .assignment-box .form-select{min-width: 160px;}
 
   .addr-ellipsis{
     max-width: min(44vw, 420px);
