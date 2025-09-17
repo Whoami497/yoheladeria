@@ -1747,6 +1747,61 @@ def tienda_toggle(request):
     _broadcast_tienda_estado(abierta)
     return JsonResponse({'ok': True, 'abierta': abierta})
 
+def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta: dict | None = None):
+    """
+    Actualiza el estado del pedido, setea timestamps conocidos y registra un log si existe PedidoEstadoLog.
+    """
+    anterior = getattr(pedido, 'estado', None)
+    pedido.estado = nuevo_estado
+    ahora = timezone.now()
+
+    # setear timestamps si existen en el modelo
+    try:
+        mapping = {
+            'RECIBIDO': 'fecha_pago_aprobado',
+            'EN_PREPARACION': 'fecha_en_preparacion',
+            'ASIGNADO': 'fecha_asignado',
+            'EN_CAMINO': 'fecha_en_camino',
+            'ENTREGADO': 'fecha_entregado',
+            'CANCELADO': 'fecha_cancelado',
+        }
+        campo = mapping.get(nuevo_estado)
+        update_fields = ['estado']
+        if campo and hasattr(pedido, campo) and not getattr(pedido, campo):
+            setattr(pedido, campo, ahora)
+            update_fields.append(campo)
+        pedido.save(update_fields=update_fields)
+    except Exception:
+        try:
+            pedido.save(update_fields=['estado'])
+        except Exception:
+            pedido.save()
+
+    # log de estado (si el modelo está)
+    try:
+        from .models import PedidoEstadoLog
+        actor_tipo = 'sistema'
+        if actor is not None and getattr(actor, 'is_authenticated', False):
+            if getattr(actor, 'is_staff', False):
+                actor_tipo = 'staff'
+            elif hasattr(actor, 'cadeteprofile'):
+                actor_tipo = 'cadete'
+            else:
+                actor_tipo = 'cliente'
+        PedidoEstadoLog.objects.create(
+            pedido=pedido,
+            de=anterior,
+            a=nuevo_estado,
+            actor=actor if getattr(actor, 'is_authenticated', False) else None,
+            actor_tipo=actor_tipo,
+            fuente=fuente or '',
+            meta=meta or {}
+        )
+    except Exception:
+        pass
+
+    return pedido
+
 # =========================
 # === TIENDA / CADETES
 # =========================
