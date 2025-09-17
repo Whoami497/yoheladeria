@@ -1692,6 +1692,32 @@ def ticket_pedido(request, pedido_id):
         "use_qz": (request.GET.get("qz") == "1"),
     }
     return render(request, "pedidos/ticket_pedido.html", ctx)
+from django.contrib import messages
+from django.http import JsonResponse
+from django.shortcuts import redirect
+
+def _abort_if_store_closed(request):
+    """
+    Si la tienda está cerrada:
+      - En peticiones AJAX devuelve 403 JSON
+      - En peticiones normales manda un mensaje y redirige al carrito
+    """
+    try:
+        abierta = _get_tienda_abierta()
+    except Exception:
+        abierta = True  # si algo falla, no bloqueamos
+
+    if abierta:
+        return None
+
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+        return JsonResponse({'ok': False, 'error': 'tienda_cerrada'}, status=403)
+
+    messages.error(
+        request,
+        "En este momento no estamos tomando pedidos online. Probá dentro del horario de atención."
+    )
+    return redirect('ver_carrito')
 
 # =========================
 # === TIENDA (toggle)
