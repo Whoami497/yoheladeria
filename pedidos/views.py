@@ -132,110 +132,28 @@ def _compute_total(pedido) -> Decimal:
         total += pedido.costo_envio
     return total.quantize(Decimal('0.01'))
 
+def _direccion_legible_from_text(text: str) -> str:
+    if not text:
+        return ""
+    parts = text.split(' — GPS:')
+    return parts[0].strip()
 
-# ---------- TIENDA ABIERTA / CERRADA
-def _get_tienda_abierta() -> bool:
-    default_val = bool(getattr(settings, 'TIENDA_ABIERTA_DEFAULT', True))
-    try:
-        from .models import GlobalSetting
-        try:
-            return bool(GlobalSetting.get_bool('TIENDA_ABIERTA', default=default_val))
-        except Exception:
-            pass
-    except Exception:
-        pass
+def _pedido_es_pickup(pedido_or_text) -> bool:
+    """
+    True si el pedido es 'Retiro en local' (no se debe notificar a cadetes).
+    Acepta el modelo Pedido o el string de dirección.
+    """
+    text = pedido_or_text.cliente_direccion if hasattr(pedido_or_text, 'cliente_direccion') else (pedido_or_text or "")
+    dir_legible = (_direccion_legible_from_text(text) or "").strip().lower()
+    return dir_legible.startswith("retiro en local")
 
-    try:
-        from .models import StoreStatus
-        ss = StoreStatus.get()
-        return bool(ss.is_open)
-    except Exception:
-        pass
-
-    return default_val
-
-
-def _set_tienda_abierta(value: bool) -> bool:
-    val = bool(value)
-    try:
-        from .models import GlobalSetting
-        GlobalSetting.set_bool('TIENDA_ABIERTA', val)
-        return val
-    except Exception:
-        pass
-    try:
-        from .models import StoreStatus
-        ss = StoreStatus.get()
-        if ss.is_open != val:
-            ss.is_open = val
-            ss.save(update_fields=['is_open'])
-        return val
-    except Exception:
-        pass
-    return val
-
-
-def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta: dict | None = None):
-    anterior = getattr(pedido, 'estado', None)
-    pedido.estado = nuevo_estado
-    ahora = timezone.now()
-    try:
-        mapping = {
-            'RECIBIDO': 'fecha_pago_aprobado',
-            'EN_PREPARACION': 'fecha_en_preparacion',
-            'ASIGNADO': 'fecha_asignado',
-            'EN_CAMINO': 'fecha_en_camino',
-            'ENTREGADO': 'fecha_entregado',
-            'CANCELADO': 'fecha_cancelado',
-        }
-        campo = mapping.get(nuevo_estado)
-        update_fields = ['estado']
-        if campo and hasattr(pedido, campo) and not getattr(pedido, campo):
-            setattr(pedido, campo, ahora)
-            update_fields.append(campo)
-        pedido.save(update_fields=update_fields)
-    except Exception:
-        try:
-            pedido.save(update_fields=['estado'])
-        except Exception:
-            pedido.save()
-
-    try:
-        from .models import PedidoEstadoLog
-        actor_tipo = 'sistema'
-        if actor is not None and getattr(actor, 'is_authenticated', False):
-            if getattr(actor, 'is_staff', False):
-                actor_tipo = 'staff'
-            elif hasattr(actor, 'cadeteprofile'):
-                actor_tipo = 'cadete'
-            else:
-                actor_tipo = 'cliente'
-        PedidoEstadoLog.objects.create(
-            pedido=pedido,
-            de=anterior,
-            a=nuevo_estado,
-            actor=actor if getattr(actor, 'is_authenticated', False) else None,
-            actor_tipo=actor_tipo,
-            fuente=fuente or '',
-            meta=meta or {}
-        )
-    except Exception:
-        pass
-
-    return pedido
-
-
-def _abort_if_store_closed(request):
-    try:
-        abierta = _get_tienda_abierta()
-    except Exception:
-        abierta = True
-    if abierta:
-        return None
-    if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-        return JsonResponse({'ok': False, 'error': 'tienda_cerrada'}, status=403)
-    messages.error(request, "En este momento no estamos tomando pedidos online. Probá dentro del horario de atención.")
-    return redirect('ver_carrito')
+def _map_url_from_text(text: str) -> str:
+    coords = _extract_coords(text)
+    if coords:
+        lat, lng = coords
+        return f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
+    q = quote_plus(_direccion_legible_from_text(text) or text)
+    return f"https://www.google.com/maps/search/?api=1&query={q}"
 
 
 def _serialize_logs(pedido, limit=8):
@@ -261,22 +179,6 @@ def _serialize_metricas(pedido):
         return pedido.tiempos_en_minutos()
     except Exception:
         return {}
-
-
-def _direccion_legible_from_text(text: str) -> str:
-    if not text:
-        return ""
-    parts = text.split(' — GPS:')
-    return parts[0].strip()
-
-
-def _map_url_from_text(text: str) -> str:
-    coords = _extract_coords(text)
-    if coords:
-        lat, lng = coords
-        return f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
-    q = quote_plus(_direccion_legible_from_text(text) or text)
-    return f"https://www.google.com/maps/search/?api=1&query={q}"
 
 
 def _serialize_pedido_for_panel(pedido, include_details=True):
@@ -310,6 +212,10 @@ def _serialize_pedido_for_panel(pedido, include_details=True):
 
 
 def _notify_panel_update(pedido, message='actualizacion_pedido'):
+    """
+    Envía por Channels la actualización al panel.
+    Incluye siempre el nombre del cadete (o None) para reflejar asignaciones.
+    """
     try:
         channel_layer = get_channel_layer()
         if message == 'nuevo_pedido':
@@ -323,6 +229,9 @@ def _notify_panel_update(pedido, message='actualizacion_pedido'):
                 'map_url': _map_url_from_text(pedido.cliente_direccion),
                 'total_pedido': str(_compute_total(pedido)),
                 'costo_envio': float(pedido.costo_envio or 0),
+                'cadete': (
+                    pedido.cadete_asignado.user.get_full_name() or pedido.cadete_asignado.user.username
+                ) if getattr(pedido, 'cadete_asignado', None) else None,
                 'metricas': _serialize_metricas(pedido),
                 'logs': _serialize_logs(pedido),
             }
@@ -368,8 +277,7 @@ def _notify_cadetes_new_order(request, pedido):
       - Si no hay asignado     => broadcast a disponibles sin pedido activo.
     """
     # 1) Filtrar retiros en local
-    dir_legible = _direccion_legible_from_text(pedido.cliente_direccion) or ""
-    if dir_legible.strip().lower().startswith("retiro en local"):
+    if _pedido_es_pickup(pedido):
         return
 
     try:
@@ -384,6 +292,8 @@ def _notify_cadetes_new_order(request, pedido):
     if not priv:
         print("WEBPUSH: Falta VAPID_PRIVATE_KEY en settings.")
         return
+
+    dir_legible = _direccion_legible_from_text(pedido.cliente_direccion) or ""
 
     # 2) Si hay asignado → push dirigido
     if getattr(pedido, 'cadete_asignado_id', None):
@@ -588,8 +498,8 @@ def _reverse_geocode_local(lat: float, lng: float) -> dict:
 
         if status == 'OK' and results:
             res0 = results[0]
-            out['formatted_address'] = res0.get('formatted_address')
             comps = res0.get('address_components') or []
+            out['formatted_address'] = res0.get('formatted_address')
             for c in comps:
                 types = c.get('types') or []
                 if 'locality' in types and 'sublocality' not in types:
@@ -928,6 +838,7 @@ def crear_preferencia_mp(request, pedido):
         raise RuntimeError("La preferencia no trajo init_point")
 
     return init_point
+
 def ver_carrito(request):
     carrito = request.session.get('carrito', {})
     total = Decimal('0.00')
@@ -1508,8 +1419,6 @@ def panel_alertas_set_estado(request, pedido_id):
 
     _notify_panel_update(pedido)
     return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': cadete_name})
-
-
 # =========================
 # === Impresión / Comandera
 # =========================
@@ -1540,12 +1449,6 @@ def _wrap_lines(target_list, text, initial_indent="", subsequent_indent=""):
         subsequent_indent=subsequent_indent,
     )
     target_list.extend(wrapped if wrapped else [""])
-
-def _extract_nota_from_direccion(text: str) -> str:
-    if not text:
-        return ""
-    m = re.search(r' — Nota:\s*(.+)$', text)
-    return (m.group(1).strip() if m else "")
 
 def _build_ticket_text(pedido) -> str:
     """Arma ticket en modo texto/ESC-POS con wrap correcto."""
@@ -1877,7 +1780,6 @@ def aceptar_pedido(request, pedido_id):
         if pedido.cadete_asignado_id == request.user.cadeteprofile.id:
             if pedido.estado == 'EN_PREPARACION':
                 _marcar_estado(pedido, 'ASIGNADO', actor=request.user, fuente='aceptar_pedido')
-            # Si ya estaba ASIGNADO, no hacemos nada más
         else:
             # No estaba asignado → me asigno y paso a ASIGNADO
             pedido.cadete_asignado = request.user.cadeteprofile
@@ -2116,6 +2018,7 @@ def cadete_feed(request):
       - Si está disponible: listamos pedidos EN_PREPARACION
         * no asignados (los ven todos)
         * asignados a mí (sólo yo los veo)
+      - No listamos pedidos de 'Retiro en local'.
     """
     if not hasattr(request.user, 'cadeteprofile'):
         return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
@@ -2149,6 +2052,8 @@ def cadete_feed(request):
 
     data = []
     for p in qs:
+        if _pedido_es_pickup(p):  # ocultar retiros en local del feed
+            continue
         data.append({
             'id': p.id,
             'cliente_nombre': p.cliente_nombre or '',
