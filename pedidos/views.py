@@ -1719,8 +1719,57 @@ def _abort_if_store_closed(request):
     )
     return redirect('ver_carrito')
 
+# --- Safe helpers para estado de tienda (por si faltan las funciones originales)
+def _safe_get_tienda_abierta():
+    default_val = bool(getattr(settings, 'TIENDA_ABIERTA_DEFAULT', True))
+    try:
+        from .models import GlobalSetting
+        try:
+            return bool(GlobalSetting.get_bool('TIENDA_ABIERTA', default=default_val))
+        except Exception:
+            pass
+    except Exception:
+        pass
+    try:
+        from .models import StoreStatus
+        ss = StoreStatus.get()
+        return bool(ss.is_open)
+    except Exception:
+        pass
+    return default_val
+
+def _safe_set_tienda_abierta(value: bool) -> bool:
+    val = bool(value)
+    try:
+        from .models import GlobalSetting
+        GlobalSetting.set_bool('TIENDA_ABIERTA', val)
+        return val
+    except Exception:
+        pass
+    try:
+        from .models import StoreStatus
+        ss = StoreStatus.get()
+        if ss.is_open != val:
+            ss.is_open = val
+            ss.save(update_fields=['is_open'])
+        return val
+    except Exception:
+        pass
+    return val
+
+# Aliases de compatibilidad: si faltan las originales, usar las "safe"
+try:
+    _get_tienda_abierta
+except NameError:
+    _get_tienda_abierta = _safe_get_tienda_abierta
+try:
+    _set_tienda_abierta
+except NameError:
+    _set_tienda_abierta = _safe_set_tienda_abierta
+
 # =========================
 # === TIENDA (toggle)
+
 # =========================
 @require_GET
 def tienda_estado_json(request):
