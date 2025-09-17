@@ -1808,23 +1808,13 @@ def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta
 @login_required
 @require_http_methods(["POST", "GET"])  # aceptar por POST o por GET (evita "se rompe" si tocan un link)
 def aceptar_pedido(request, pedido_id):
-    """
-    Reglas nuevas:
-      - Si NO sos cadete → 403.
-      - Si ya tenés un pedido activo distinto a éste → bloquea.
-      - Si el pedido NO existe → 404 controlado.
-      - Si el pedido está ENTREGADO/CANCELADO/EN_CAMINO → no disponible.
-      - Si está ASIGNADO a otro cadete → no disponible.
-      - Si está ASIGNADO a mí → idempotente (OK) o pasa a ASIGNADO si aún estaba EN_PREPARACION.
-      - Si no está asignado → me asigna y pasa a ASIGNADO.
-    """
     if not hasattr(request.user, 'cadeteprofile'):
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             return JsonResponse({'ok': False, 'error': 'no_cadete'}, status=403)
         messages.error(request, "Acción no permitida. No tienes un perfil de cadete.")
         return redirect('index')
 
-    # Si tiene otro pedido activo (ASIGNADO/EN_CAMINO) que NO sea éste → bloquea
+    # Si ya tiene otro activo (que NO sea éste) → bloquea
     if Pedido.objects.filter(
         cadete_asignado=request.user.cadeteprofile,
         estado__in=['ASIGNADO', 'EN_CAMINO']
@@ -1843,21 +1833,27 @@ def aceptar_pedido(request, pedido_id):
             messages.warning(request, f"El Pedido #{pedido_id} no existe o ya no está disponible.")
             return redirect('panel_cadete')
 
-        # Estados finales o en camino → no disponible
+        # Releer por si hubo cambios en paralelo
+        try:
+            pedido.refresh_from_db(fields=['estado', 'cadete_asignado'])
+        except Exception:
+            pass
+
+        # Finales o en camino → no disponible
         if pedido.estado in ('ENTREGADO', 'CANCELADO', 'EN_CAMINO'):
             if request.headers.get('x-requested-with') == 'XMLHttpRequest':
                 return JsonResponse({'ok': False, 'error': 'no_disponible'}, status=409)
             messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
             return redirect('panel_cadete')
 
-        # Si está asignado a otro → no disponible
+        # Si está ASIGNADO a otro cadete → bloquear SIEMPRE
         if pedido.cadete_asignado_id and pedido.cadete_asignado_id != request.user.cadeteprofile.id:
             if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-                return JsonResponse({'ok': False, 'error': 'no_disponible'}, status=409)
-            messages.warning(request, f"El Pedido #{pedido.id} ya fue tomado por otro cadete.")
+                return JsonResponse({'ok': False, 'error': 'asignado_a_otro'}, status=409)
+            messages.warning(request, f"El Pedido #{pedido.id} fue asignado a otro cadete.")
             return redirect('panel_cadete')
 
-        # Si está asignado a mí → idempotente / asegurar estado
+        # Si está asignado a mí y aún no pasó a ASIGNADO → llevar a ASIGNADO
         if pedido.cadete_asignado_id == request.user.cadeteprofile.id:
             if pedido.estado == 'EN_PREPARACION':
                 _marcar_estado(pedido, 'ASIGNADO', actor=request.user, fuente='aceptar_pedido')
@@ -1870,7 +1866,7 @@ def aceptar_pedido(request, pedido_id):
                 pedido.save()
             _marcar_estado(pedido, 'ASIGNADO', actor=request.user, fuente='aceptar_pedido')
 
-    # Me pongo NO disponible (hasta terminar)
+    # me pongo NO disponible (igual que antes)
     cp = request.user.cadeteprofile
     if hasattr(cp, 'disponible'):
         try:
@@ -2408,14 +2404,6 @@ def service_worker(request):
 @staff_member_required
 @require_http_methods(["GET", "POST"])
 def confirmar_pedido(request, pedido_id):
-    """
-    Marca el pedido como EN_PREPARACION (si corresponde),
-    envía push a cadetes (reglas):
-      - 'Retiro en local' → no notifica
-      - con cadete_asignado → solo a ese cadete
-      - sin asignado → broadcast a disponibles
-    Notifica al panel e imprime ticket si está configurado.
-    """
     pedido = get_object_or_404(Pedido, id=pedido_id)
     estado_anterior = pedido.estado
 
@@ -2430,13 +2418,23 @@ def confirmar_pedido(request, pedido_id):
         _marcar_estado(pedido, 'EN_PREPARACION', actor=request.user, fuente='confirmar_pedido')
         cambiado = True
 
-        # Disparar push según reglas
+        # Releer por seguridad (evita cache de instancia sin la asignación reciente)
         try:
-            _notify_cadetes_new_order(request, pedido)
+            pedido.refresh_from_db(fields=['cadete_asignado'])
+        except Exception:
+            pass
+
+        # Notificar: si hay cadete asignado => SOLO a ese, si no => a todos
+        try:
+            if getattr(pedido, 'cadete_asignado_id', None):
+                # notificación dirigida
+                _notify_cadetes_new_order(request, pedido)  # ya maneja el "dirigido"
+            else:
+                _notify_cadetes_new_order(request, pedido)  # broadcast
         except Exception as e:
             print(f"WEBPUSH notify cadetes error: {e}")
 
-    # Notificar panel (WS) y imprimir ticket (si está configurado)
+    # WS panel + impresión
     try:
         _notify_panel_update(pedido, message='actualizacion_pedido')
     except Exception:
@@ -2447,12 +2445,7 @@ def confirmar_pedido(request, pedido_id):
         pass
 
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-        return JsonResponse({
-            'ok': True,
-            'pedido_id': pedido.id,
-            'estado': pedido.estado,
-            'cambiado': cambiado,
-        })
+        return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': pedido.estado, 'cambiado': cambiado})
 
     if cambiado:
         messages.success(request, f"Pedido #{pedido.id} confirmado y enviado a cocina.")
