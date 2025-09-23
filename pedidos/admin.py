@@ -59,10 +59,16 @@ class OpcionProductoInline(admin.TabularInline):
 class ProductoAdmin(admin.ModelAdmin):
     form = ProductoAdminForm
     inlines = [OpcionProductoInline]
-    list_display = ('nombre', 'categoria', 'precio', 'sabores_maximos', 'disponible', 'mostrar_imagen_miniatura')
+
+    # ➜ Agregamos 'orden_todos' para verlo y editarlo en lista
+    list_display = (
+        'nombre', 'categoria', 'precio', 'sabores_maximos',
+        'disponible', 'orden_todos', 'mostrar_imagen_miniatura'
+    )
+    list_editable = ('precio', 'disponible', 'orden_todos')
     list_filter = ('categoria', 'disponible')
     search_fields = ('nombre', 'descripcion', 'categoria__nombre')
-    ordering = ('nombre',)
+    ordering = ('orden_todos', 'nombre')  # usa tu orden personalizado primero
 
     def mostrar_imagen_miniatura(self, obj):
         if obj.imagen:
@@ -151,7 +157,6 @@ class PedidoAdmin(admin.ModelAdmin):
             'fecha_en_camino', 'fecha_entregado', 'fecha_cancelado',
         ]
         existentes = [f for f in hitos if self._has_model_field(Pedido, f)]
-        # Siempre incluimos el bloque de métricas; si no hay método/campos, se muestra “—”
         existentes.append('metricas_minutos')
         base.append((
             'Hitos de Tiempo (solo lectura)',

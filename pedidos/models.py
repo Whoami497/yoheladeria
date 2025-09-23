@@ -114,13 +114,51 @@ class Sabor(models.Model):
 
 
 class Producto(models.Model):
-    categoria = models.ForeignKey(Categoria, on_delete=models.SET_NULL, null=True, blank=True, related_name='productos')
+    categoria = models.ForeignKey(
+        Categoria,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='productos'
+    )
     nombre = models.CharField(max_length=100)
-    descripcion = models.TextField(blank=True, null=True, help_text="Descripción detallada del producto.")
-    precio = models.DecimalField(max_digits=10, decimal_places=2, help_text="Precio base del producto. Las opciones pueden tener precios adicionales.")
-    sabores_maximos = models.PositiveIntegerField(default=0, help_text="Número máximo de sabores a elegir para este producto. Cero si no permite elección de sabores (ej. tortas, palitos).")
+    descripcion = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Descripción detallada del producto."
+    )
+    precio = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Precio base del producto. Las opciones pueden tener precios adicionales."
+    )
+    sabores_maximos = models.PositiveIntegerField(
+        default=0,
+        help_text="Número máximo de sabores a elegir para este producto. Cero si no permite elección de sabores (ej. tortas, palitos)."
+    )
     disponible = models.BooleanField(default=True)
-    imagen = models.CharField(max_length=255, blank=True, null=True, help_text="Ruta a la imagen estática del producto base (ej: 'images/pote_1_5kg.png')")
+    imagen = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Ruta a la imagen estática del producto base (ej: 'images/pote_1_5kg.png')"
+    )
+
+    # NUEVO: controla el orden en la pestaña “Todos”
+    orden_todos = models.PositiveIntegerField(
+        default=1000,
+        db_index=True,
+        help_text="Posición en la vista 'Todos'. Menor sale antes."
+    )
+
+    def __str__(self):
+        if self.categoria:
+            return f"{self.nombre} ({self.categoria.nombre})"
+        return self.nombre
+
+    class Meta:
+        # Hace que por defecto se listen ordenados primero por orden_todos y luego por nombre
+        ordering = ("orden_todos", "nombre")
 
     def __str__(self):
         if self.categoria:
