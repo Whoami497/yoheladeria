@@ -604,29 +604,27 @@ def _calcular_costo_envio(direccion_cliente: str):
 def index(request):
     q = (request.GET.get('q') or '').strip()
     cat = request.GET.get('cat')
-    sort = (request.GET.get('sort') or '').strip()
+    sort = request.GET.get('sort') or 'recientes'
 
-    productos = Producto.objects.filter(disponible=True).select_related('categoria')
+    productos = Producto.objects.filter(disponible=True)
 
     if cat:
         productos = productos.filter(categoria_id=cat)
     if q:
         productos = productos.filter(Q(nombre__icontains=q) | Q(descripcion__icontains=q))
 
-    # === ORDEN ===
-    # Por defecto: primero por 'orden', luego alfabético y por id (estable)
+    # ORDEN
     if sort == 'precio_asc':
         productos = productos.order_by('precio', 'nombre', 'id')
     elif sort == 'precio_desc':
         productos = productos.order_by('-precio', 'nombre', 'id')
     elif sort == 'nombre':
-        productos = productos.order_by('nombre', 'id')  # alfabético puro si lo piden
-    elif sort == 'recientes':
-        productos = productos.order_by('-id')           # mantiene la opción de "recientes"
+        productos = productos.order_by('nombre', 'id')
     else:
-        productos = productos.order_by('orden', 'nombre', 'id')  # ⬅️ usa tu orden manual
+        # orden manual para "Todos" (queda primero), y dentro, recientes
+        productos = productos.order_by('orden_todos', '-id')
 
-    categorias = Categoria.objects.filter(disponible=True).order_by('orden', 'nombre')
+    categorias = Categoria.objects.filter(disponible=True).order_by('orden')
 
     try:
         cat_val = int(cat) if cat else None
@@ -638,9 +636,10 @@ def index(request):
         'categorias': categorias,
         'q': q,
         'cat': cat_val,
-        'sort': sort or 'orden',
+        'sort': sort,
     }
     return render(request, 'pedidos/index.html', contexto)
+
 
 
 
