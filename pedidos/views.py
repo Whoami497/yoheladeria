@@ -604,25 +604,29 @@ def _calcular_costo_envio(direccion_cliente: str):
 def index(request):
     q = (request.GET.get('q') or '').strip()
     cat = request.GET.get('cat')
-    sort = request.GET.get('sort') or 'recientes'
+    sort = (request.GET.get('sort') or '').strip()
 
-    productos = Producto.objects.filter(disponible=True)
+    productos = Producto.objects.filter(disponible=True).select_related('categoria')
 
     if cat:
         productos = productos.filter(categoria_id=cat)
     if q:
         productos = productos.filter(Q(nombre__icontains=q) | Q(descripcion__icontains=q))
 
+    # === ORDEN ===
+    # Por defecto: primero por 'orden', luego alfabético y por id (estable)
     if sort == 'precio_asc':
-        productos = productos.order_by('precio', 'nombre')
+        productos = productos.order_by('precio', 'nombre', 'id')
     elif sort == 'precio_desc':
-        productos = productos.order_by('-precio', 'nombre')
+        productos = productos.order_by('-precio', 'nombre', 'id')
     elif sort == 'nombre':
-        productos = productos.order_by('nombre')
+        productos = productos.order_by('nombre', 'id')  # alfabético puro si lo piden
+    elif sort == 'recientes':
+        productos = productos.order_by('-id')           # mantiene la opción de "recientes"
     else:
-        productos = productos.order_by('-id')
+        productos = productos.order_by('orden', 'nombre', 'id')  # ⬅️ usa tu orden manual
 
-    categorias = Categoria.objects.filter(disponible=True).order_by('orden')
+    categorias = Categoria.objects.filter(disponible=True).order_by('orden', 'nombre')
 
     try:
         cat_val = int(cat) if cat else None
@@ -634,9 +638,10 @@ def index(request):
         'categorias': categorias,
         'q': q,
         'cat': cat_val,
-        'sort': sort,
+        'sort': sort or 'orden',
     }
     return render(request, 'pedidos/index.html', contexto)
+
 
 
 def detalle_producto(request, producto_id):
@@ -1092,17 +1097,17 @@ def carrito_set_nota(request):
 
 def productos_por_categoria(request, categoria_id):
     categoria = get_object_or_404(Categoria, pk=categoria_id)
-    productos = Producto.objects.filter(categoria=categoria, disponible=True).order_by('nombre')
+    # Respetar el orden manual dentro de la categoría
+    productos = (Producto.objects
+                 .filter(categoria=categoria, disponible=True)
+                 .order_by('orden', 'nombre', 'id'))
+
     contexto = {
         'categoria_seleccionada': categoria,
         'productos': productos,
-        'categorias': Categoria.objects.filter(disponible=True).order_by('orden'),
+        'categorias': Categoria.objects.filter(disponible=True).order_by('orden', 'nombre'),
     }
     return render(request, 'pedidos/productos_por_categoria.html', contexto)
-
-
-def pedido_exitoso(request):
-    return render(request, 'pedidos/pedido_exitoso.html', {})
 
 
 # =========================
