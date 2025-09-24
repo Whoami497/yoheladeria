@@ -443,9 +443,11 @@
             : '<strong>🔴 No estamos tomando pedidos online en este momento.</strong>';
           const help = banner.querySelector('.small-help');
           if(help){
-            help.innerHTML = isOpen
-              ? 'Podés ver el catálogo y armar el carrito.'
-              : 'Podés ver el catálogo y armar el carrito. El checkout se habilita cuando abrimos.';
+            const HORARIO = '13–16 hs y 21–00 hs';
+help.innerHTML = isOpen
+  ? 'Podés ver el catálogo y armar el carrito.'
+  : `Podés ver el catálogo y armar el carrito. El checkout se habilita cuando abrimos: <strong>${HORARIO}</strong>.`;
+
           }
         }
 
