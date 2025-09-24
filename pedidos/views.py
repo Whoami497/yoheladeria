@@ -1110,6 +1110,11 @@ def productos_por_categoria(request, categoria_id):
     return render(request, 'pedidos/productos_por_categoria.html', contexto)
 
 
+
+def pedido_exitoso(request):
+    return render(request, 'pedidos/pedido_exitoso.html', {})
+
+
 # =========================
 # === AUTENTICACIÓN Y PERFIL
 # =========================
