@@ -77,6 +77,60 @@
                     </div>
                 {% endif %}
 
+                {# === PROMO SIMPLE: 1/4 de regalo (hasta 3 sabores) si el producto tiene el flag [PROMO_SIMPLE] en su descripción === #}
+                {% if "[PROMO_SIMPLE]" in (producto.descripcion|default:"") %}
+                  <hr class="my-3">
+
+                  <div class="mb-2">
+                    <strong>1/4 de regalo</strong> — elegí hasta <b>3</b> sabores (no suma costo)
+                  </div>
+
+                  <div class="mb-2">
+                    <label for="cant-extra" class="form-label">Cantidad de sabores (1/4)</label>
+                    <select id="cant-extra" name="cantidad_sabores_extra" class="form-select" style="max-width:180px">
+                      <option value="0">0</option>
+                      <option value="1">1</option>
+                      <option value="2">2</option>
+                      <option value="3" selected>3</option>
+                    </select>
+                  </div>
+
+                  <div class="row g-2">
+                    {% for s in sabores %}
+                      <div class="col-6 col-md-4">
+                        <label class="form-check">
+                          <input class="form-check-input sabor-extra" type="checkbox" name="sabores_extra" value="{{ s.id }}">
+                          <span class="form-check-label">{{ s.nombre }}</span>
+                        </label>
+                      </div>
+                    {% endfor %}
+                  </div>
+
+                  <script>
+                    (function(){
+                      const sel = document.getElementById('cant-extra');
+                      const boxes = Array.from(document.querySelectorAll('input.sabor-extra'));
+
+                      function enforce(){
+                        const max = parseInt(sel.value || '0', 10);
+                        const on = boxes.filter(b => b.checked);
+                        // si hay más checkeados que el máximo, desmarca el último que se tildó
+                        if (on.length > max){
+                          on[on.length - 1].checked = false;
+                        }
+                        // deshabilita tildar más de los permitidos
+                        const current = boxes.filter(b => b.checked).length;
+                        boxes.forEach(b => {
+                          b.disabled = (!b.checked && current >= max);
+                        });
+                      }
+                      sel.addEventListener('change', enforce);
+                      boxes.forEach(b => b.addEventListener('change', enforce));
+                      enforce(); // estado inicial
+                    })();
+                  </script>
+                {% endif %}
+
                 {# --- INICIO: NUEVA SECCIÓN PARA LA CANTIDAD DE PRODUCTOS --- #}
                 <hr>
                 <div class="mb-3">
