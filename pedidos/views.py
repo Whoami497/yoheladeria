@@ -843,15 +843,18 @@ def crear_preferencia_mp(request, pedido):
 
     return init_point
 
+from django.db import transaction
+
 def ver_carrito(request):
-    carrito = request.session.get('carrito', {})
+    carrito = request.session.get('carrito', {})  # dict {key: item}
     total = Decimal('0.00')
     items_carrito_procesados = []
 
+    # ---- Render (GET): mostrar lo que haya en sesión
     for key, item in carrito.items():
         try:
             item_precio = Decimal(item.get('precio', '0.00'))
-            item_cantidad = item.get('cantidad', 1)
+            item_cantidad = int(item.get('cantidad', 1)) or 1
             item_subtotal = item_precio * item_cantidad
             total += item_subtotal
 
@@ -869,197 +872,261 @@ def ver_carrito(request):
                 'subtotal': item_subtotal,
             })
         except Exception as e:
-            print(f"Error procesando ítem en carrito: {e} - Item: {item}")
-            messages.warning(request, "Hubo un problema con uno de los ítems en tu carrito y fue omitido.")
+            # No abortamos el GET; solo omitimos ese ítem visualmente
+            print(f"[CART] GET omitido por error: {e} - Item: {item}")
+
+    if request.method != 'POST':
+        return render(request, 'pedidos/carrito.html', {
+            'carrito_items': items_carrito_procesados,
+            'total': total
+        })
+
+    # ---- POST: crear pedido solo si hay ítems válidos
+    resp = _abort_if_store_closed(request)
+    if resp:
+        return resp
+
+    if not carrito:
+        messages.error(request, "Tu carrito está vacío. Agregá productos para continuar.")
+        return redirect('ver_carrito')
+
+    # Prevalidar ítems (producto/opción existentes y disponibles)
+    items_validos = []
+    total_del_pedido_para_puntos = Decimal('0.00')
+    for key, raw in carrito.items():
+        try:
+            prod = Producto.objects.get(id=raw['producto_id'], disponible=True)
+        except Producto.DoesNotExist:
+            print(f"[CART] Producto inexistente/indisponible: {raw.get('producto_id')}")
+            continue
+        except Exception as e:
+            print(f"[CART] Error cargando producto: {e}")
             continue
 
-    if request.method == 'POST':
-        resp = _abort_if_store_closed(request)
-        if resp:
-            return resp
-
-        nombre = request.POST.get('cliente_nombre')
-        direccion_input = (request.POST.get('cliente_direccion') or '').strip()
-        telefono = request.POST.get('cliente_telefono')
-        metodo_pago = (request.POST.get('metodo_pago') or '').strip()
-        nota_pedido = (request.POST.get('nota_pedido') or '').strip()
-
-        modo_envio = (request.POST.get('modo_envio') or '').lower()
-        geo_latlng = (request.POST.get('geo_latlng') or '').strip()
-
-        es_pickup = (modo_envio == 'pickup') or (not direccion_input and not geo_latlng)
-
-        if es_pickup:
-            direccion_para_maps = ''
-            direccion_legible = "Retiro en local"
-        else:
-            direccion_para_maps = geo_latlng if geo_latlng else direccion_input
-            direccion_legible = None
-            if geo_latlng:
-                try:
-                    lat_str, lng_str = geo_latlng.split(",", 1)
-                    g = _reverse_geocode_any(float(lat_str), float(lng_str)) or {}
-                    direccion_legible = g.get("formatted_address")
-                except Exception:
-                    direccion_legible = None
-
-        base_dir = direccion_legible or direccion_input
-        if not base_dir and geo_latlng:
-            base_dir = f"Cerca de {geo_latlng}"
-        if not base_dir and es_pickup:
-            base_dir = "Retiro en local"
-
-        direccion_a_guardar = base_dir or ""
-        if geo_latlng:
-            direccion_a_guardar = f"{direccion_a_guardar} — GPS: {geo_latlng}"
-        if nota_pedido:
-            direccion_a_guardar = f"{direccion_a_guardar} — Nota: {nota_pedido}"
-
-        costo_envio_decimal = Decimal('0.00')
-        distancia_km = 0.0
-        if direccion_para_maps:
-            costo_envio_decimal, distancia_km = _calcular_costo_envio(direccion_para_maps)
-
-        pedido_kwargs = {
-            'cliente_nombre': nombre,
-            'cliente_direccion': direccion_a_guardar,
-            'cliente_telefono': telefono,
-            'metodo_pago': metodo_pago,
-            'costo_envio': costo_envio_decimal,
-        }
-
-        if request.user.is_authenticated:
-            pedido_kwargs['user'] = request.user
-            if hasattr(request.user, 'clienteprofile'):
-                profile = request.user.clienteprofile
-                if not nombre and request.user.first_name and request.user.last_name:
-                    pedido_kwargs['cliente_nombre'] = f"{request.user.first_name} {request.user.last_name}"
-                if not telefono and profile.telefono:
-                    pedido_kwargs['cliente_telefono'] = profile.telefono
-
-                if (not es_pickup) and (not direccion_para_maps) and profile.direccion:
-                    pedido_kwargs['cliente_direccion'] = profile.direccion
-                    costo_envio_decimal, distancia_km = _calcular_costo_envio(profile.direccion)
-                    pedido_kwargs['costo_envio'] = costo_envio_decimal
-
-        nuevo_pedido = Pedido.objects.create(**pedido_kwargs)
-
-        puntos_ganados = 0
-        total_del_pedido_para_puntos = Decimal('0.00')
-        detalles_para_notificacion = []
-
-        for key, item_data in carrito.items():
+        opcion_obj = None
+        opt_id = raw.get('opcion_id')
+        if opt_id:
             try:
-                producto = Producto.objects.get(id=item_data['producto_id'])
-                sabores_seleccionados_ids = item_data.get('sabores_ids', [])
-                sabores_seleccionados = Sabor.objects.filter(id__in=sabores_seleccionados_ids)
-
-                opcion_obj_pedido = None
-                if item_data.get('opcion_id'):
-                    opcion_obj_pedido = OpcionProducto.objects.get(id=item_data['opcion_id'])
-
-                detalle = DetallePedido.objects.create(
-                    pedido=nuevo_pedido,
-                    producto=producto,
-                    opcion_seleccionada=opcion_obj_pedido,
-                    cantidad=item_data['cantidad'],
+                opcion_obj = OpcionProducto.objects.get(
+                    id=opt_id, producto_base=prod, disponible=True
                 )
-                detalle.sabores.set(sabores_seleccionados)
-
-                precio_unitario_item = Decimal(item_data['precio'])
-                total_del_pedido_para_puntos += precio_unitario_item * item_data['cantidad']
-
-                detalles_para_notificacion.append({
-                    'producto_nombre': producto.nombre,
-                    'opcion_nombre': opcion_obj_pedido.nombre_opcion if opcion_obj_pedido else None,
-                    'cantidad': item_data['cantidad'],
-                    'sabores_nombres': [s.nombre for s in sabores_seleccionados],
-                })
-
-            except (Producto.DoesNotExist, OpcionProducto.DoesNotExist) as e:
-                messages.warning(request, f"Advertencia: Un ítem no pudo ser añadido al pedido final porque ya no existe. Error: {e}")
-                continue
-            except Exception as e:
-                messages.error(request, f"Error al procesar el detalle del pedido para {item_data.get('producto_nombre', 'un producto')}: {e}")
+            except OpcionProducto.DoesNotExist:
+                print(f"[CART] Opción inválida: {opt_id} para producto {prod.id}")
                 continue
 
-        # === FLUJO MP ===
-        if metodo_pago.strip().upper() in ('MP', 'MERCADOPAGO', 'MERCADO_PAGO', 'MERCADO PAGO'):
-            try:
-                _marcar_estado(nuevo_pedido, 'PENDIENTE_PAGO',
-                               actor=request.user if request.user.is_authenticated else None,
-                               fuente='checkout_mp')
-
-                nuevo_pedido.metodo_pago = 'MERCADOPAGO'
-                nuevo_pedido.save(update_fields=['metodo_pago'])
-
-                request.session['mp_last_order_id'] = nuevo_pedido.id
-                request.session.modified = True
-
-                init_point = crear_preferencia_mp(request, nuevo_pedido)
-
-                if 'carrito' in request.session:
-                    del request.session['carrito']
-                    request.session.modified = True
-
-                messages.info(request, f"Redirigiendo a Mercado Pago para completar el pago del pedido #{nuevo_pedido.id}.")
-                return redirect(init_point)
-            except Exception as e:
-                messages.error(request, f"No pudimos iniciar el pago con Mercado Pago. Probá de nuevo o elegí otro método. Detalle: {e}")
-                return redirect('ver_carrito')
-
-        # === SIN MP → entra a cocina ya mismo ===
+        # Precio final por unidad (producto + opción)
         try:
-            _marcar_estado(nuevo_pedido, 'RECIBIDO',
-                           actor=request.user if request.user.is_authenticated else None,
-                           fuente='checkout_no_mp')
+            precio_unit = Decimal(str(raw.get('precio', prod.precio)))
+        except Exception:
+            precio_unit = Decimal(prod.precio)
+
+        try:
+            cantidad = int(raw.get('cantidad', 1))
+            if cantidad < 1:
+                cantidad = 1
+        except Exception:
+            cantidad = 1
+
+        # Sabores (no bloqueamos si fallan; solo ignoramos ids inválidos)
+        sabores_ids = raw.get('sabores_ids', []) or []
+        sabores_qs = Sabor.objects.filter(id__in=sabores_ids)
+
+        items_validos.append({
+            'producto': prod,
+            'opcion': opcion_obj,
+            'cantidad': cantidad,
+            'sabores_qs': list(sabores_qs),
+            'precio_unit': precio_unit,
+            'nombre_para_msg': raw.get('producto_nombre') or prod.nombre,
+        })
+
+        total_del_pedido_para_puntos += (precio_unit * cantidad)
+
+    if not items_validos:
+        messages.error(
+            request,
+            "Ningún ítem de tu carrito es válido (puede que se hayan agotado o cambiado). "
+            "Volvé al catálogo y agregá productos nuevamente."
+        )
+        # limpiamos el carrito para evitar que vuelva a fallar igual
+        try:
+            del request.session['carrito']
+            request.session.modified = True
         except Exception:
             pass
+        return redirect('index')
 
-        if request.user.is_authenticated and hasattr(request.user, 'clienteprofile'):
-            puntos_ganados = int(total_del_pedido_para_puntos / Decimal('500')) * 100
-            request.user.clienteprofile.puntos_fidelidad += puntos_ganados
-            request.user.clienteprofile.save()
+    # ---- Dirección / envío
+    nombre = request.POST.get('cliente_nombre')
+    direccion_input = (request.POST.get('cliente_direccion') or '').strip()
+    telefono = request.POST.get('cliente_telefono')
+    metodo_pago = (request.POST.get('metodo_pago') or '').strip()
+    nota_pedido = (request.POST.get('nota_pedido') or '').strip()
+
+    modo_envio = (request.POST.get('modo_envio') or '').lower()
+    geo_latlng = (request.POST.get('geo_latlng') or '').strip()
+    es_pickup = (modo_envio == 'pickup') or (not direccion_input and not geo_latlng)
+
+    if es_pickup:
+        direccion_para_maps = ''
+        direccion_legible = "Retiro en local"
+    else:
+        direccion_para_maps = geo_latlng if geo_latlng else direccion_input
+        direccion_legible = None
+        if geo_latlng:
+            try:
+                lat_str, lng_str = geo_latlng.split(",", 1)
+                g = _reverse_geocode_any(float(lat_str), float(lng_str)) or {}
+                direccion_legible = g.get("formatted_address")
+            except Exception:
+                direccion_legible = None
+
+    base_dir = direccion_legible or direccion_input
+    if not base_dir and geo_latlng:
+        base_dir = f"Cerca de {geo_latlng}"
+    if not base_dir and es_pickup:
+        base_dir = "Retiro en local"
+
+    direccion_a_guardar = base_dir or ""
+    if geo_latlng:
+        direccion_a_guardar = f"{direccion_a_guardar} — GPS: {geo_latlng}"
+    if nota_pedido:
+        direccion_a_guardar = f"{direccion_a_guardar} — Nota: {nota_pedido}"
+
+    # Costo de envío SOLO si no es pickup
+    costo_envio_decimal = Decimal('0.00')
+    distancia_km = 0.0
+    if not es_pickup and direccion_para_maps:
+        costo_envio_decimal, distancia_km = _calcular_costo_envio(direccion_para_maps)
+
+    pedido_kwargs = {
+        'cliente_nombre': nombre,
+        'cliente_direccion': direccion_a_guardar,
+        'cliente_telefono': telefono,
+        'metodo_pago': metodo_pago,
+        'costo_envio': costo_envio_decimal,
+    }
+
+    if request.user.is_authenticated:
+        pedido_kwargs['user'] = request.user
+        if hasattr(request.user, 'clienteprofile'):
+            profile = request.user.clienteprofile
+            if not nombre and request.user.first_name and request.user.last_name:
+                pedido_kwargs['cliente_nombre'] = f"{request.user.first_name} {request.user.last_name}"
+            if not telefono and profile.telefono:
+                pedido_kwargs['cliente_telefono'] = profile.telefono
+            if (not es_pickup) and (not direccion_para_maps) and profile.direccion:
+                pedido_kwargs['cliente_direccion'] = profile.direccion
+                costo_envio_decimal, distancia_km = _calcular_costo_envio(profile.direccion)
+                pedido_kwargs['costo_envio'] = costo_envio_decimal
+
+    # ---- Crear pedido + detalles de forma transaccional
+    with transaction.atomic():
+        nuevo_pedido = Pedido.objects.create(**pedido_kwargs)
+
+        detalles_para_notificacion = []
+        for it in items_validos:
+            det = DetallePedido.objects.create(
+                pedido=nuevo_pedido,
+                producto=it['producto'],
+                opcion_seleccionada=it['opcion'],
+                cantidad=it['cantidad'],
+            )
+            if it['sabores_qs']:
+                det.sabores.set(it['sabores_qs'])
+
+            detalles_para_notificacion.append({
+                'producto_nombre': it['producto'].nombre,
+                'opcion_nombre': it['opcion'].nombre_opcion if it['opcion'] else None,
+                'cantidad': it['cantidad'],
+                'sabores_nombres': [s.nombre for s in it['sabores_qs']],
+            })
+
+        # Si por algo no se creó ningún detalle, revertimos
+        if not nuevo_pedido.detalles.exists():
+            raise RuntimeError("Pedido sin detalles: abortando creación.")
+
+    # === Pago MP ===
+    if metodo_pago.strip().upper() in ('MP', 'MERCADOPAGO', 'MERCADO_PAGO', 'MERCADO PAGO'):
+        try:
+            _marcar_estado(nuevo_pedido, 'PENDIENTE_PAGO',
+                           actor=request.user if request.user.is_authenticated else None,
+                           fuente='checkout_mp')
+
+            nuevo_pedido.metodo_pago = 'MERCADOPAGO'
+            nuevo_pedido.save(update_fields=['metodo_pago'])
+
+            request.session['mp_last_order_id'] = nuevo_pedido.id
+            request.session.modified = True
+
+            init_point = crear_preferencia_mp(request, nuevo_pedido)
+
+            # limpiar carrito
+            if 'carrito' in request.session:
+                del request.session['carrito']
+                request.session.modified = True
+
+            messages.info(request, f"Redirigiendo a Mercado Pago para completar el pago del pedido #{nuevo_pedido.id}.")
+            return redirect(init_point)
+        except Exception as e:
+            messages.error(request, f"No pudimos iniciar el pago con Mercado Pago. Probá de nuevo o elegí otro método. Detalle: {e}")
+            return redirect('ver_carrito')
+
+    # === SIN MP → directo a cocina
+    try:
+        _marcar_estado(nuevo_pedido, 'RECIBIDO',
+                       actor=request.user if request.user.is_authenticated else None,
+                       fuente='checkout_no_mp')
+    except Exception:
+        pass
+
+    # Puntos fidelidad
+    if request.user.is_authenticated and hasattr(request.user, 'clienteprofile'):
+        puntos_ganados = int(total_del_pedido_para_puntos / Decimal('500')) * 100
+        request.user.clienteprofile.puntos_fidelidad += puntos_ganados
+        request.user.clienteprofile.save()
+        if puntos_ganados:
             messages.success(request, f"¡Has ganado {puntos_ganados} puntos de fidelidad con este pedido!")
 
-        try:
-            channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                'pedidos_new_orders',
-                {
-                    'type': 'send_order_notification',
-                    'message': 'nuevo_pedido',
-                    'order_id': nuevo_pedido.id,
-                    'order_data': {
-                        'cliente_nombre': nuevo_pedido.cliente_nombre,
-                        'cliente_direccion': nuevo_pedido.cliente_direccion,
-                        'direccion_legible': _direccion_legible_from_text(nuevo_pedido.cliente_direccion),
-                        'map_url': _map_url_from_text(nuevo_pedido.cliente_direccion),
-                        'cliente_telefono': nuevo_pedido.cliente_telefono,
-                        'metodo_pago': nuevo_pedido.metodo_pago,
-                        'total_pedido': str(_compute_total(nuevo_pedido)),
-                        'costo_envio': float(nuevo_pedido.costo_envio or 0),
-                        'distancia_km': float(distancia_km or 0),
-                        'nota_pedido': (nota_pedido or None),
-                        'detalles': detalles_para_notificacion,
-                        'metricas': _serialize_metricas(nuevo_pedido),
-                        'logs': _serialize_logs(nuevo_pedido),
-                    }
+    # Notificación a panel
+    try:
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            'pedidos_new_orders',
+            {
+                'type': 'send_order_notification',
+                'message': 'nuevo_pedido',
+                'order_id': nuevo_pedido.id,
+                'order_data': {
+                    'cliente_nombre': nuevo_pedido.cliente_nombre,
+                    'cliente_direccion': nuevo_pedido.cliente_direccion,
+                    'direccion_legible': _direccion_legible_from_text(nuevo_pedido.cliente_direccion),
+                    'map_url': _map_url_from_text(nuevo_pedido.cliente_direccion),
+                    'cliente_telefono': nuevo_pedido.cliente_telefono,
+                    'metodo_pago': nuevo_pedido.metodo_pago,
+                    'total_pedido': str(_compute_total(nuevo_pedido)),
+                    'costo_envio': float(nuevo_pedido.costo_envio or 0),
+                    'distancia_km': float(distancia_km or 0),
+                    'nota_pedido': (nota_pedido or None),
+                    'detalles': detalles_para_notificacion,
+                    'metricas': _serialize_metricas(nuevo_pedido),
+                    'logs': _serialize_logs(nuevo_pedido),
                 }
-            )
-            print(f"Notificación de pedido #{nuevo_pedido.id} enviada a Channels.")
-        except Exception as e:
-            print(f"ERROR al enviar notificación de pedido a Channels: {e}")
-            messages.error(request, f"ERROR INTERNO: No se pudo enviar la alerta en tiempo real. Error: {e}")
+            }
+        )
+    except Exception as e:
+        print(f"WS notify error: {e}")
 
+    # limpiar carrito
+    try:
         del request.session['carrito']
         request.session.modified = True
+    except Exception:
+        pass
 
-        messages.success(request, f'¡Tu pedido #{nuevo_pedido.id} ha sido realizado con éxito! Pronto nos contactaremos.')
-        return redirect('pedido_exitoso')
+    messages.success(request, f'¡Tu pedido #{nuevo_pedido.id} ha sido realizado con éxito! Pronto nos contactaremos.')
+    return redirect('pedido_exitoso')
 
-    contexto = {'carrito_items': items_carrito_procesados, 'total': total}
-    return render(request, 'pedidos/carrito.html', contexto)
 
 
 def eliminar_del_carrito(request, item_key):
