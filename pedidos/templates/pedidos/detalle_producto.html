@@ -78,7 +78,8 @@
                 {% endif %}
 
                 {# === PROMO SIMPLE: 1/4 de regalo (hasta 3 sabores) si el producto tiene el flag [PROMO_SIMPLE] en su descripción === #}
-                {% if "[PROMO_SIMPLE]" in (producto.descripcion|default:"") %}
+                {% with desc=producto.descripcion|default_if_none:"" %}
+                {% if "[PROMO_SIMPLE]" in desc %}
                   <hr class="my-3">
 
                   <div class="mb-2">
@@ -130,6 +131,7 @@
                     })();
                   </script>
                 {% endif %}
+                {% endwith %}
 
                 {# --- INICIO: NUEVA SECCIÓN PARA LA CANTIDAD DE PRODUCTOS --- #}
                 <hr>
