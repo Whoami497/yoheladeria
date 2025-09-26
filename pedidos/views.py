@@ -925,7 +925,7 @@ def ver_carrito(request):
         messages.error(request, "Tu carrito está vacío. Agregá productos para continuar.")
         return redirect('ver_carrito')
 
-    # Prevalidar ítems (producto/opción existentes y disponibles)
+       # Prevalidar ítems (producto/opción existentes y disponibles)
     items_validos = []
     total_del_pedido_para_puntos = Decimal('0.00')
     for key, raw in carrito.items():
@@ -962,40 +962,35 @@ def ver_carrito(request):
         except Exception:
             cantidad = 1
 
-        # Sabores principales
+        # Sabores principales (del Kg)
         sabores_ids = raw.get('sabores_ids', []) or []
         sabores_qs = Sabor.objects.filter(id__in=sabores_ids)
 
-        # === PROMO 1/4: preparar también los extras ===
-        extra_names = raw.get('sabores_extra_nombres') or []
-        extra_ids = raw.get('sabores_extra_ids') or []
-        if not extra_names and extra_ids:
-            try:
-                extra_qs_tmp = Sabor.objects.filter(id__in=extra_ids)
-                extra_names = sorted([s.nombre for s in extra_qs_tmp])
-            except Exception:
-                extra_names = []
-        # queryset de extras para poder agregarlos al M2M
-        extra_qs = Sabor.objects.filter(id__in=extra_ids) if extra_ids else Sabor.objects.none()  # <<<
+        # ---- Sabores EXTRA (1/4 de regalo) -> los guardamos en nota con prefijo reconocible
+        extra_names = raw.get('sabores_extra_nombres', []) or []
+        promo_14_nota = ""
+        if extra_names:
+            # Usamos un prefijo estable que después entenderá el ticket/panel
+            promo_14_nota = "[PROMO_1/4] " + ", ".join(extra_names)
 
-        # Nota compuesta
-        nota_extra = f"Promo 1/4: {', '.join(extra_names)}" if extra_names else ""
+        # Nota manual del usuario
         nota_manual = (raw.get('nota') or '').strip()
-        nota_final_item = ", ".join([t for t in [nota_extra, nota_manual] if t])
+
+        # Combinamos (primero la promo si existe, así podemos parsearla fácil luego)
+        nota_final_item = ", ".join([t for t in [promo_14_nota, nota_manual] if t])
 
         items_validos.append({
             'producto': prod,
             'opcion': opcion_obj,
             'cantidad': cantidad,
-            'sabores_qs': list(sabores_qs),
+            'sabores_qs': list(sabores_qs),  # solo los del Kg
             'precio_unit': precio_unit,
             'nombre_para_msg': raw.get('producto_nombre') or prod.nombre,
-            'nota_final_item': nota_final_item,
-            'sabores_extra_names': extra_names,   # para panel
-            'sabores_extra_qs': list(extra_qs),   # <<< para ticket (M2M)
+            'nota_final_item': nota_final_item,  # acá puede venir la marca [PROMO_1/4]
         })
 
         total_del_pedido_para_puntos += (precio_unit * cantidad)
+
 
     if not items_validos:
         messages.error(
@@ -1690,6 +1685,8 @@ def _build_ticket_text(pedido) -> str:
 
     parts = header + [""] + cliente + envio + pago + detalle + totales
     return "\n".join(parts)
+
+
 
 
 def _send_ticket_webhook(text: str, title: str = "Pedido a cocina", copies: int = 1):
