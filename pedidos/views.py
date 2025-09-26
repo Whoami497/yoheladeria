@@ -876,6 +876,8 @@ from django.db import transaction
 
 from django.db import transaction
 
+from django.db import transaction
+
 def ver_carrito(request):
     carrito = request.session.get('carrito', {})  # dict {key: item}
     total = Decimal('0.00')
@@ -900,7 +902,6 @@ def ver_carrito(request):
                 'opcion_id': item.get('opcion_id'),
                 'opcion_nombre': item.get('opcion_nombre'),
                 'imagen_mostrada': item.get('imagen_mostrada'),
-                # mostramos también los extra en el carrito
                 'sabores_extra_nombres': item.get('sabores_extra_nombres', []),
                 'nota_extra': item.get('nota_extra') or '',
                 'nota': item.get('nota') or '',
@@ -965,23 +966,21 @@ def ver_carrito(request):
         sabores_ids = raw.get('sabores_ids', []) or []
         sabores_qs = Sabor.objects.filter(id__in=sabores_ids)
 
-        # --- (2b) / (2c) Promo 1/4 gratis: armar nota desde los sabores extra seleccionados ---
+        # === PROMO 1/4: preparar también los extras ===
         extra_names = raw.get('sabores_extra_nombres') or []
-        if not extra_names and raw.get('sabores_extra_ids'):
-            # fallback por si por alguna razón vinieron solo IDs
+        extra_ids = raw.get('sabores_extra_ids') or []
+        if not extra_names and extra_ids:
             try:
-                extra_qs = Sabor.objects.filter(id__in=raw.get('sabores_extra_ids'))
-                extra_names = sorted([s.nombre for s in extra_qs])
+                extra_qs_tmp = Sabor.objects.filter(id__in=extra_ids)
+                extra_names = sorted([s.nombre for s in extra_qs_tmp])
             except Exception:
                 extra_names = []
+        # queryset de extras para poder agregarlos al M2M
+        extra_qs = Sabor.objects.filter(id__in=extra_ids) if extra_ids else Sabor.objects.none()  # <<<
 
-        nota_extra = ""
-        if extra_names:
-            # Texto claro para que se vea en ticket/comandera
-            nota_extra = f"Promo 1/4: {', '.join(extra_names)}"
-
+        # Nota compuesta
+        nota_extra = f"Promo 1/4: {', '.join(extra_names)}" if extra_names else ""
         nota_manual = (raw.get('nota') or '').strip()
-        # combinamos si ambos existen
         nota_final_item = ", ".join([t for t in [nota_extra, nota_manual] if t])
 
         items_validos.append({
@@ -992,8 +991,8 @@ def ver_carrito(request):
             'precio_unit': precio_unit,
             'nombre_para_msg': raw.get('producto_nombre') or prod.nombre,
             'nota_final_item': nota_final_item,
-            # guardo también para la notificación al panel
-            'sabores_extra_nombres': extra_names,
+            'sabores_extra_names': extra_names,   # para panel
+            'sabores_extra_qs': list(extra_qs),   # <<< para ticket (M2M)
         })
 
         total_del_pedido_para_puntos += (precio_unit * cantidad)
@@ -1087,15 +1086,23 @@ def ver_carrito(request):
                 opcion_seleccionada=it['opcion'],
                 cantidad=it['cantidad'],
             )
+            # Sabores del kilo
             if it['sabores_qs']:
                 det.sabores.set(it['sabores_qs'])
 
+            # >>>> CLAVE: agregar también los sabores del 1/4 al M2M (para que salgan en “Sabores: …”) <<<
+            extra_qs = it.get('sabores_extra_qs') or []
+            if extra_qs:
+                try:
+                    det.sabores.add(*extra_qs)  # <<< agrega los extra
+                except Exception as e:
+                    print(f"[CART] No se pudieron agregar sabores extra al detalle: {e}")
+
             # Volcar la nota (promo 1/4 y/o manual) al detalle si existe el campo
             try:
-                if it.get('nota_final_item'):
-                    if hasattr(det, 'nota'):
-                        det.nota = it['nota_final_item']
-                        det.save(update_fields=['nota'])
+                if it.get('nota_final_item') and hasattr(det, 'nota'):
+                    det.nota = it['nota_final_item']
+                    det.save(update_fields=['nota'])
             except Exception:
                 pass
 
@@ -1104,8 +1111,7 @@ def ver_carrito(request):
                 'opcion_nombre': it['opcion'].nombre_opcion if it['opcion'] else None,
                 'cantidad': it['cantidad'],
                 'sabores_nombres': [s.nombre for s in it['sabores_qs']],
-                # (2c) incluir sabores extra en la notificación al panel (si tu frontend los quiere usar)
-                'sabores_extra_nombres': it.get('sabores_extra_nombres', []),
+                'sabores_extra_nombres': it.get('sabores_extra_names', []),  # para panel
             })
 
         if not nuevo_pedido.detalles.exists():
@@ -1190,8 +1196,6 @@ def ver_carrito(request):
 
     messages.success(request, f'¡Tu pedido #{nuevo_pedido.id} ha sido realizado con éxito! Pronto nos contactaremos.')
     return redirect('pedido_exitoso')
-
-
 
 
 
