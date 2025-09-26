@@ -652,9 +652,11 @@ def detalle_producto(request, producto_id):
         opciones_disponibles = OpcionProducto.objects.filter(producto_base=producto, disponible=True)
 
     if request.method == 'POST':
+        # --- Sabores del tamaño principal ---
         sabores_seleccionados_ids_raw = request.POST.getlist('sabores')
         sabores_seleccionados_ids = [s_id for s_id in sabores_seleccionados_ids_raw if s_id]
 
+        # --- Opción seleccionada (si corresponde) ---
         opcion_id = request.POST.get('opcion_id')
         opcion_seleccionada_obj = None
         if producto.opciones.exists() and opcion_id:
@@ -670,15 +672,11 @@ def detalle_producto(request, producto_id):
             }
             return render(request, 'pedidos/detalle_producto.html', contexto)
 
-        # --- Validación sabores principales ---
+        # Validación sabores principales
         if producto.sabores_maximos > 0:
-            try:
-                cantidad_sabores_seleccionada_en_form = int(request.POST.get('cantidad_sabores', 0))
-            except Exception:
-                cantidad_sabores_seleccionada_en_form = 0
-
+            cantidad_sabores_seleccionada_en_form = int(request.POST.get('cantidad_sabores', 0))
             if len(sabores_seleccionados_ids) != cantidad_sabores_seleccionada_en_form:
-                messages.error(request, f'Por favor, selecciona {cantidad_sabores_seleccionada_en_form} sabor(es) o ajustá la cantidad.')
+                messages.error(request, f'Por favor, selecciona {cantidad_sabores_seleccionada_en_form} sabor(es) o ajusta la cantidad de sabores a seleccionar.')
                 contexto = {
                     'producto': producto,
                     'sabores': sabores_disponibles,
@@ -688,7 +686,7 @@ def detalle_producto(request, producto_id):
                 return render(request, 'pedidos/detalle_producto.html', contexto)
 
             if len(sabores_seleccionados_ids) > producto.sabores_maximos:
-                messages.error(request, f'No podés seleccionar más de {producto.sabores_maximos} sabor(es) para este producto.')
+                messages.error(request, f'No puedes seleccionar más de {producto.sabores_maximos} sabor(es) para este producto.')
                 contexto = {
                     'producto': producto,
                     'sabores': sabores_disponibles,
@@ -696,43 +694,23 @@ def detalle_producto(request, producto_id):
                     'range_sabores': range(1, producto.sabores_maximos + 1) if producto.sabores_maximos > 0 else []
                 }
                 return render(request, 'pedidos/detalle_producto.html', contexto)
-
-        if producto.sabores_maximos == 0 and sabores_seleccionados_ids:
+        else:
             sabores_seleccionados_ids = []
 
-        # --- PROMO SIMPLE: extras del 1/4 de regalo ---
-        descripcion = producto.descripcion or ""
-        es_promo_simple = "[PROMO_SIMPLE]" in descripcion
-        extra_max = 3
-        sabores_extra_ids = []
-        sabores_extra_nombres = []
-        nota_extra = ""
+        # --- Sabores extra (PROMO 1/4) ---
+        try:
+            cant_extra = int(request.POST.get('cantidad_sabores_extra', 0))
+        except ValueError:
+            cant_extra = 0
+        cant_extra = max(0, min(3, cant_extra))  # tope 3
 
-        if es_promo_simple:
-            # Tomar cantidad y lista; limitar y validar
-            try:
-                cant_extra = int(request.POST.get('cantidad_sabores_extra', 0))
-            except Exception:
-                cant_extra = 0
-            cant_extra = max(0, min(extra_max, cant_extra))
+        sabores_extra_ids = [s for s in request.POST.getlist('sabores_extra') if s][:cant_extra]
 
-            sabores_extra_ids_raw = [sid for sid in request.POST.getlist('sabores_extra') if sid]
-            # no permitir más que lo declarado ni más de 3
-            sabores_extra_ids = sabores_extra_ids_raw[:cant_extra][:extra_max]
-
-            if sabores_extra_ids:
-                try:
-                    sabores_extra_qs = Sabor.objects.filter(id__in=sabores_extra_ids)
-                    sabores_extra_nombres = sorted([s.nombre for s in sabores_extra_qs])
-                except Exception:
-                    sabores_extra_nombres = []
-                if sabores_extra_nombres:
-                    nota_extra = "1/4 de regalo: " + ", ".join(sabores_extra_nombres)
-
+        # Armar carrito
         if 'carrito' not in request.session:
             request.session['carrito'] = {}
 
-        # Cantidad del ítem (unidades)
+        # cantidad de unidades
         try:
             cantidad_a_agregar = int(request.POST.get('cantidad_item', 1))
             if cantidad_a_agregar < 1:
@@ -740,14 +718,19 @@ def detalle_producto(request, producto_id):
         except ValueError:
             cantidad_a_agregar = 1
 
-        # Resolver nombres de sabores principales
+        # nombres sabores principales
         sabores_nombres = []
         if sabores_seleccionados_ids:
             sabores_objetos = Sabor.objects.filter(id__in=sabores_seleccionados_ids)
-            sabores_nombres = [sabor.nombre for sabor in sabores_objetos]
-            sabores_nombres.sort()
+            sabores_nombres = sorted([s.nombre for s in sabores_objetos])
 
-        # Precio y nombre final (con opción)
+        # nombres sabores extra
+        sabores_extra_nombres = []
+        if sabores_extra_ids:
+            sabores_extra_obj = Sabor.objects.filter(id__in=sabores_extra_ids)
+            sabores_extra_nombres = sorted([s.nombre for s in sabores_extra_obj])
+
+        # precio y metadatos
         precio_final_item = producto.precio
         nombre_item_carrito = producto.nombre
         opcion_id_para_carrito = None
@@ -765,50 +748,46 @@ def detalle_producto(request, producto_id):
                 else producto.imagen
             )
 
-        # Clave única del ítem (incluye opción, sabores y extras para agrupar bien)
-        item_key_parts = [str(producto.id)]
+        # clave del item en carrito (incluye los sabores para “mergear” iguales)
+        item_key = f"{producto.id}_"
         if opcion_id_para_carrito:
-            item_key_parts.append(f"opcion-{opcion_id_para_carrito}")
-        if sabores_seleccionados_ids:
-            item_key_parts.append("sab-" + "-".join(sorted(sabores_seleccionados_ids)))
+            item_key += f"opcion-{opcion_id_para_carrito}_"
+        item_key += "_".join(sorted(sabores_seleccionados_ids))
         if sabores_extra_ids:
-            item_key_parts.append("extra-" + "-".join(sorted(sabores_extra_ids)))
-        item_key = "__".join(item_key_parts)
+            item_key += "__extra_" + "_".join(sorted(sabores_extra_ids))
 
         item = {
             'producto_id': producto.id,
             'producto_nombre': nombre_item_carrito,
             'precio': str(precio_final_item),
+            'cantidad': cantidad_a_agregar,
             'sabores_ids': sabores_seleccionados_ids,
             'sabores_nombres': sabores_nombres,
-            'cantidad': cantidad_a_agregar,
             'sabores_maximos': producto.sabores_maximos,
             'opcion_id': opcion_id_para_carrito,
             'opcion_nombre': opcion_nombre_para_carrito,
             'imagen_mostrada': opcion_imagen_para_carrito if opcion_imagen_para_carrito else producto.imagen,
+            # --- promo 1/4 extra (opcional) ---
+            'sabores_extra_ids': sabores_extra_ids,
+            'sabores_extra_nombres': sabores_extra_nombres,
         }
 
-        # Guardar extras de la promo en el carrito (y nota descriptiva)
-        if es_promo_simple and (sabores_extra_ids or nota_extra):
-            item['sabores_extra_ids'] = sabores_extra_ids
-            item['sabores_extra_nombres'] = sabores_extra_nombres
-            item['nota_extra'] = nota_extra  # la vamos a volcar a det.nota al crear el pedido
-
-        # Merge / add
         if item_key in request.session['carrito']:
             request.session['carrito'][item_key]['cantidad'] += cantidad_a_agregar
             messages.info(request, f'Se han añadido {cantidad_a_agregar} unidades más de "{nombre_item_carrito}" al carrito.')
         else:
             request.session['carrito'][item_key] = item
-            messages.success(request, f'"{nombre_item_carrito}" ha sido añadido al carrito ({cantidad_a_agregar} unidad{"es" if cantidad_a_agregar > 1 else ""}).')
+            messages.success(
+                request,
+                f'"{nombre_item_carrito}" ha sido añadido al carrito '
+                f'({cantidad_a_agregar} unidad{"es" if cantidad_a_agregar > 1 else ""}).'
+            )
 
         request.session.modified = True
         return redirect('detalle_producto', producto_id=producto.id)
 
-    range_sabores = []
-    if producto.sabores_maximos > 0:
-        range_sabores = range(1, producto.sabores_maximos + 1)
-
+    # GET
+    range_sabores = range(1, producto.sabores_maximos + 1) if producto.sabores_maximos > 0 else []
     contexto = {
         'producto': producto,
         'sabores': sabores_disponibles,
@@ -816,6 +795,7 @@ def detalle_producto(request, producto_id):
         'range_sabores': range_sabores,
     }
     return render(request, 'pedidos/detalle_producto.html', contexto)
+
 
 
 
@@ -894,6 +874,8 @@ def crear_preferencia_mp(request, pedido):
 
 from django.db import transaction
 
+from django.db import transaction
+
 def ver_carrito(request):
     carrito = request.session.get('carrito', {})  # dict {key: item}
     total = Decimal('0.00')
@@ -918,7 +900,8 @@ def ver_carrito(request):
                 'opcion_id': item.get('opcion_id'),
                 'opcion_nombre': item.get('opcion_nombre'),
                 'imagen_mostrada': item.get('imagen_mostrada'),
-                'sabores_extra_nombres': item.get('sabores_extra_nombres', []),  # <-- por si querés mostrarlos
+                # mostramos también los extra en el carrito
+                'sabores_extra_nombres': item.get('sabores_extra_nombres', []),
                 'nota_extra': item.get('nota_extra') or '',
                 'nota': item.get('nota') or '',
                 'subtotal': item_subtotal,
@@ -982,8 +965,21 @@ def ver_carrito(request):
         sabores_ids = raw.get('sabores_ids', []) or []
         sabores_qs = Sabor.objects.filter(id__in=sabores_ids)
 
-        # Extras promo (solo informativos → a nota del detalle)
-        nota_extra = (raw.get('nota_extra') or '').strip()
+        # --- (2b) / (2c) Promo 1/4 gratis: armar nota desde los sabores extra seleccionados ---
+        extra_names = raw.get('sabores_extra_nombres') or []
+        if not extra_names and raw.get('sabores_extra_ids'):
+            # fallback por si por alguna razón vinieron solo IDs
+            try:
+                extra_qs = Sabor.objects.filter(id__in=raw.get('sabores_extra_ids'))
+                extra_names = sorted([s.nombre for s in extra_qs])
+            except Exception:
+                extra_names = []
+
+        nota_extra = ""
+        if extra_names:
+            # Texto claro para que se vea en ticket/comandera
+            nota_extra = f"Promo 1/4: {', '.join(extra_names)}"
+
         nota_manual = (raw.get('nota') or '').strip()
         # combinamos si ambos existen
         nota_final_item = ", ".join([t for t in [nota_extra, nota_manual] if t])
@@ -996,6 +992,8 @@ def ver_carrito(request):
             'precio_unit': precio_unit,
             'nombre_para_msg': raw.get('producto_nombre') or prod.nombre,
             'nota_final_item': nota_final_item,
+            # guardo también para la notificación al panel
+            'sabores_extra_nombres': extra_names,
         })
 
         total_del_pedido_para_puntos += (precio_unit * cantidad)
@@ -1092,7 +1090,7 @@ def ver_carrito(request):
             if it['sabores_qs']:
                 det.sabores.set(it['sabores_qs'])
 
-            # Volcar la nota (promo extra y/o manual) al detalle si existe el campo
+            # Volcar la nota (promo 1/4 y/o manual) al detalle si existe el campo
             try:
                 if it.get('nota_final_item'):
                     if hasattr(det, 'nota'):
@@ -1106,6 +1104,8 @@ def ver_carrito(request):
                 'opcion_nombre': it['opcion'].nombre_opcion if it['opcion'] else None,
                 'cantidad': it['cantidad'],
                 'sabores_nombres': [s.nombre for s in it['sabores_qs']],
+                # (2c) incluir sabores extra en la notificación al panel (si tu frontend los quiere usar)
+                'sabores_extra_nombres': it.get('sabores_extra_nombres', []),
             })
 
         if not nuevo_pedido.detalles.exists():
@@ -1190,6 +1190,7 @@ def ver_carrito(request):
 
     messages.success(request, f'¡Tu pedido #{nuevo_pedido.id} ha sido realizado con éxito! Pronto nos contactaremos.')
     return redirect('pedido_exitoso')
+
 
 
 
