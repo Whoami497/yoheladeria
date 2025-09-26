@@ -1597,10 +1597,29 @@ def _wrap_lines(target_list, text, initial_indent="", subsequent_indent=""):
     target_list.extend(wrapped if wrapped else [""])
 
 def _build_ticket_text(pedido) -> str:
-    """Arma ticket en modo texto/ESC-POS con wrap correcto."""
+    """Arma ticket en modo texto/ESC-POS con wrap correcto, separando sabores del Kg y del 1/4."""
     width = _ticket_width()
     tienda = getattr(settings, 'SITE_NAME', 'YO HELADERÍAS')
     ahora = timezone.localtime(getattr(pedido, 'fecha_pedido', None) or timezone.now())
+
+    def _parse_promo_extras(nota: str):
+        """Devuelve lista de sabores del 1/4 si en la nota viene 'Promo 1/4: ...' """
+        if not nota:
+            return []
+        txt = nota.strip()
+        # admite variantes: "Promo 1/4:", "promo 1/4 :", "PROMO 1/4:"
+        m = re.search(r'promo\s*1/4\s*:\s*(.+)$', txt, flags=re.IGNORECASE)
+        if not m:
+            return []
+        raw = m.group(1)
+        parts = [p.strip() for p in raw.split(',') if p.strip()]
+        # evitar duplicados manteniendo orden
+        seen, out = set(), []
+        for p in parts:
+            if p.lower() not in seen:
+                seen.add(p.lower())
+                out.append(p)
+        return out
 
     header = [
         "=" * width,
@@ -1614,10 +1633,10 @@ def _build_ticket_text(pedido) -> str:
         f"Tel     : {pedido.cliente_telefono or '-'}",
     ]
     direccion_legible = _direccion_legible_from_text(pedido.cliente_direccion)
-    nota = _extract_nota_from_direccion(pedido.cliente_direccion)
+    nota_dir = _extract_nota_from_direccion(pedido.cliente_direccion)
     envio = [f"Entrega : {direccion_legible or 'Retiro en local'}"]
-    if nota:
-        _wrap_lines(envio, f"Nota    : {nota}", subsequent_indent="          ")
+    if nota_dir:
+        _wrap_lines(envio, f"Nota    : {nota_dir}", subsequent_indent="          ")
 
     pago = [f"Pago    : {pedido.metodo_pago or '-'}"]
 
@@ -1628,18 +1647,38 @@ def _build_ticket_text(pedido) -> str:
             linea_base += f" ({d.opcion_seleccionada.nombre_opcion})"
         _wrap_lines(detalle, linea_base)
 
-        sabores = [s.nombre for s in d.sabores.all()]
-        if sabores:
-            label = "  Sabores: "
-            _wrap_lines(detalle, label + ", ".join(sabores), subsequent_indent=" " * len(label))
-
+        # --- separar sabores (kg) vs 1/4 usando la nota ---
+        todos = [s.nombre for s in d.sabores.all()]
         try:
             nota_item = getattr(d, 'nota', '') or ''
-            if nota_item:
-                label = "  Nota: "
-                _wrap_lines(detalle, label + nota_item, subsequent_indent=" " * len(label))
         except Exception:
-            pass
+            nota_item = ''
+        extras = _parse_promo_extras(nota_item)
+        extras_set = {e.lower() for e in extras}
+        principales = [n for n in todos if n.lower() not in extras_set]
+
+        if principales:
+            label = "  Sabores (kg): "
+            _wrap_lines(detalle, label + ", ".join(principales),
+                        subsequent_indent=" " * len(label))
+        if extras:
+            label = "  1/4 de regalo: "
+            _wrap_lines(detalle, label + ", ".join(extras),
+                        subsequent_indent=" " * len(label))
+        if not principales and not extras and todos:
+            # fallback (por si no hay nota o no matchea)
+            label = "  Sabores: "
+            _wrap_lines(detalle, label + ", ".join(todos),
+                        subsequent_indent=" " * len(label))
+
+        # nota libre (si hubiera algo más aparte de la promo)
+        resto = nota_item
+        if extras:
+            # quitamos la parte de la promo de la nota para no repetir
+            resto = re.sub(r'promo\s*1/4\s*:\s*.+$', '', nota_item, flags=re.IGNORECASE).strip(' ,;-')
+        if resto:
+            label = "  Nota: "
+            _wrap_lines(detalle, label + resto, subsequent_indent=" " * len(label))
 
     totales = ["-" * (width - 2)]
     if (pedido.costo_envio or Decimal('0')) > 0:
@@ -1651,6 +1690,7 @@ def _build_ticket_text(pedido) -> str:
 
     parts = header + [""] + cliente + envio + pago + detalle + totales
     return "\n".join(parts)
+
 
 def _send_ticket_webhook(text: str, title: str = "Pedido a cocina", copies: int = 1):
     url = getattr(settings, 'COMANDERA_WEBHOOK_URL', '') or ''
