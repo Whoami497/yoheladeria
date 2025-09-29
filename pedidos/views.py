@@ -198,17 +198,32 @@ def _serialize_pedido_for_panel(pedido, include_details=True):
         ) if getattr(pedido, 'cadete_asignado', None) else None,
     }
     if include_details:
-        data['detalles'] = [{
-            'producto_nombre': d.producto.nombre,
-            'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
-            'cantidad': d.cantidad,
-            'sabores_nombres': [s.nombre for s in d.sabores.all()],
-        } for d in pedido.detalles.all()]
+        dets = []
+        for d in pedido.detalles.all():
+            todos = [s.nombre for s in d.sabores.all()]
+            nota = (getattr(d, 'nota', '') or '')
+            m = re.search(r'promo\s*1/4\s*:\s*(.+)$', nota, flags=re.IGNORECASE)
+            extras = []
+            if m:
+                extras = [p.strip() for p in m.group(1).split(',') if p.strip()]
+            extras_set = {e.lower() for e in extras}
+            principales = [n for n in todos if n.lower() not in extras_set]
+
+            dets.append({
+                'producto_nombre': d.producto.nombre,
+                'opcion_nombre': d.opcion_seleccionada.nombre_opcion if d.opcion_seleccionada else None,
+                'cantidad': d.cantidad,
+                'sabores_nombres': principales,       # Kg
+                'sabores_1_4_nombres': extras,        # 1/4
+            })
+        data['detalles'] = dets
+
     data.update({
         'metricas': _serialize_metricas(pedido),
         'logs': _serialize_logs(pedido, limit=8),
     })
     return data
+
 
 
 def _notify_panel_update(pedido, message='actualizacion_pedido'):
@@ -879,6 +894,7 @@ from django.db import transaction
 from django.db import transaction
 
 def ver_carrito(request):
+    from decimal import Decimal
     carrito = request.session.get('carrito', {})  # dict {key: item}
     total = Decimal('0.00')
     items_carrito_procesados = []
@@ -925,7 +941,7 @@ def ver_carrito(request):
         messages.error(request, "Tu carrito está vacío. Agregá productos para continuar.")
         return redirect('ver_carrito')
 
-       # Prevalidar ítems (producto/opción existentes y disponibles)
+    # Prevalidar ítems (producto/opción existentes y disponibles)
     items_validos = []
     total_del_pedido_para_puntos = Decimal('0.00')
     for key, raw in carrito.items():
@@ -966,31 +982,35 @@ def ver_carrito(request):
         sabores_ids = raw.get('sabores_ids', []) or []
         sabores_qs = Sabor.objects.filter(id__in=sabores_ids)
 
-        # ---- Sabores EXTRA (1/4 de regalo) -> los guardamos en nota con prefijo reconocible
+        # ---- Sabores EXTRA (1/4 de regalo) → IMPORTANTE
+        extra_ids = raw.get('sabores_extra_ids', []) or []
+        extra_qs = Sabor.objects.filter(id__in=extra_ids) if extra_ids else Sabor.objects.none()
         extra_names = raw.get('sabores_extra_nombres', []) or []
+
+        # Nota con el formato que entiende el ticket
         promo_14_nota = ""
         if extra_names:
-            # Usamos un prefijo estable que después entenderá el ticket/panel
-            promo_14_nota = "[PROMO_1/4] " + ", ".join(extra_names)
+            promo_14_nota = "Promo 1/4: " + ", ".join(extra_names)
 
         # Nota manual del usuario
         nota_manual = (raw.get('nota') or '').strip()
 
-        # Combinamos (primero la promo si existe, así podemos parsearla fácil luego)
+        # Combinamos (primero la promo si existe, para poder parsear fácil luego)
         nota_final_item = ", ".join([t for t in [promo_14_nota, nota_manual] if t])
 
         items_validos.append({
             'producto': prod,
             'opcion': opcion_obj,
             'cantidad': cantidad,
-            'sabores_qs': list(sabores_qs),  # solo los del Kg
+            'sabores_qs': list(sabores_qs),          # del Kg
+            'sabores_extra_qs': list(extra_qs),      # del 1/4 (ahora sí se guarda)
             'precio_unit': precio_unit,
             'nombre_para_msg': raw.get('producto_nombre') or prod.nombre,
-            'nota_final_item': nota_final_item,  # acá puede venir la marca [PROMO_1/4]
+            'nota_final_item': nota_final_item,       # incluye "Promo 1/4: ..."
+            'sabores_extra_nombres': extra_names,     # para notificación/panel
         })
 
         total_del_pedido_para_puntos += (precio_unit * cantidad)
-
 
     if not items_validos:
         messages.error(
@@ -1085,15 +1105,15 @@ def ver_carrito(request):
             if it['sabores_qs']:
                 det.sabores.set(it['sabores_qs'])
 
-            # >>>> CLAVE: agregar también los sabores del 1/4 al M2M (para que salgan en “Sabores: …”) <<<
+            # Sabores del 1/4 → agregar también a la M2M
             extra_qs = it.get('sabores_extra_qs') or []
             if extra_qs:
                 try:
-                    det.sabores.add(*extra_qs)  # <<< agrega los extra
+                    det.sabores.add(*extra_qs)
                 except Exception as e:
                     print(f"[CART] No se pudieron agregar sabores extra al detalle: {e}")
 
-            # Volcar la nota (promo 1/4 y/o manual) al detalle si existe el campo
+            # Nota (incluye "Promo 1/4: ..." y/o nota manual)
             try:
                 if it.get('nota_final_item') and hasattr(det, 'nota'):
                     det.nota = it['nota_final_item']
@@ -1105,8 +1125,8 @@ def ver_carrito(request):
                 'producto_nombre': it['producto'].nombre,
                 'opcion_nombre': it['opcion'].nombre_opcion if it['opcion'] else None,
                 'cantidad': it['cantidad'],
-                'sabores_nombres': [s.nombre for s in it['sabores_qs']],
-                'sabores_extra_nombres': it.get('sabores_extra_names', []),  # para panel
+                'sabores_nombres': [s.nombre for s in it['sabores_qs']],         # Kg
+                'sabores_extra_nombres': it.get('sabores_extra_nombres', []),    # 1/4
             })
 
         if not nuevo_pedido.detalles.exists():
@@ -1191,6 +1211,7 @@ def ver_carrito(request):
 
     messages.success(request, f'¡Tu pedido #{nuevo_pedido.id} ha sido realizado con éxito! Pronto nos contactaremos.')
     return redirect('pedido_exitoso')
+
 
 
 
