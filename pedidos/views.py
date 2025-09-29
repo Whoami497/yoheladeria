@@ -895,11 +895,11 @@ from django.db import transaction
 
 def ver_carrito(request):
     from decimal import Decimal
-    carrito = request.session.get('carrito', {})  # dict {key: item}
+    carrito = request.session.get('carrito', {})
     total = Decimal('0.00')
     items_carrito_procesados = []
 
-    # ---- Render (GET): mostrar lo que haya en sesión
+    # ---- Render (GET)
     for key, item in carrito.items():
         try:
             item_precio = Decimal(item.get('precio', '0.00'))
@@ -932,7 +932,7 @@ def ver_carrito(request):
             'total': total
         })
 
-    # ---- POST: crear pedido solo si hay ítems válidos
+    # ---- POST: crear pedido
     resp = _abort_if_store_closed(request)
     if resp:
         return resp
@@ -941,14 +941,13 @@ def ver_carrito(request):
         messages.error(request, "Tu carrito está vacío. Agregá productos para continuar.")
         return redirect('ver_carrito')
 
-    # Prevalidar ítems (producto/opción existentes y disponibles)
     items_validos = []
     total_del_pedido_para_puntos = Decimal('0.00')
+
     for key, raw in carrito.items():
         try:
             prod = Producto.objects.get(id=raw['producto_id'], disponible=True)
         except Producto.DoesNotExist:
-            print(f"[CART] Producto inexistente/indisponible: {raw.get('producto_id')}")
             continue
         except Exception as e:
             print(f"[CART] Error cargando producto: {e}")
@@ -962,10 +961,8 @@ def ver_carrito(request):
                     id=opt_id, producto_base=prod, disponible=True
                 )
             except OpcionProducto.DoesNotExist:
-                print(f"[CART] Opción inválida: {opt_id} para producto {prod.id}")
                 continue
 
-        # Precio final por unidad (producto + opción)
         try:
             precio_unit = Decimal(str(raw.get('precio', prod.precio)))
         except Exception:
@@ -978,46 +975,35 @@ def ver_carrito(request):
         except Exception:
             cantidad = 1
 
-        # Sabores principales (del Kg)
+        # Sabores del kg (M2M)
         sabores_ids = raw.get('sabores_ids', []) or []
-        sabores_qs = Sabor.objects.filter(id__in=sabores_ids)
+        sabores_qs = list(Sabor.objects.filter(id__in=sabores_ids))
 
-        # ---- Sabores EXTRA (1/4 de regalo) → IMPORTANTE
+        # Sabores del 1/4 (M2M + nota)
         extra_ids = raw.get('sabores_extra_ids', []) or []
-        extra_qs = Sabor.objects.filter(id__in=extra_ids) if extra_ids else Sabor.objects.none()
+        extra_qs = list(Sabor.objects.filter(id__in=extra_ids)) if extra_ids else []
         extra_names = raw.get('sabores_extra_nombres', []) or []
 
-        # Nota con el formato que entiende el ticket
-        promo_14_nota = ""
-        if extra_names:
-            promo_14_nota = "Promo 1/4: " + ", ".join(extra_names)
-
-        # Nota manual del usuario
+        # Nota legible para ticket
+        promo_14_nota = "Promo 1/4: " + ", ".join(extra_names) if extra_names else ""
         nota_manual = (raw.get('nota') or '').strip()
-
-        # Combinamos (primero la promo si existe, para poder parsear fácil luego)
         nota_final_item = ", ".join([t for t in [promo_14_nota, nota_manual] if t])
 
         items_validos.append({
             'producto': prod,
             'opcion': opcion_obj,
             'cantidad': cantidad,
-            'sabores_qs': list(sabores_qs),          # del Kg
-            'sabores_extra_qs': list(extra_qs),      # del 1/4 (ahora sí se guarda)
+            'sabores_qs': sabores_qs,
+            'sabores_extra_qs': extra_qs,
             'precio_unit': precio_unit,
             'nombre_para_msg': raw.get('producto_nombre') or prod.nombre,
-            'nota_final_item': nota_final_item,       # incluye "Promo 1/4: ..."
-            'sabores_extra_nombres': extra_names,     # para notificación/panel
+            'nota_final_item': nota_final_item,       # ← se guardará en DetallePedido.nota
+            'sabores_extra_nombres': extra_names,
         })
-
         total_del_pedido_para_puntos += (precio_unit * cantidad)
 
     if not items_validos:
-        messages.error(
-            request,
-            "Ningún ítem de tu carrito es válido (puede que se hayan agotado o cambiado). "
-            "Volvé al catálogo y agregá productos nuevamente."
-        )
+        messages.error(request, "Ningún ítem de tu carrito es válido.")
         try:
             del request.session['carrito']
             request.session.modified = True
@@ -1050,9 +1036,7 @@ def ver_carrito(request):
             except Exception:
                 direccion_legible = None
 
-    base_dir = direccion_legible or direccion_input
-    if not base_dir and geo_latlng:
-        base_dir = f"Cerca de {geo_latlng}"
+    base_dir = direccion_legible or direccion_input or ("Cerca de " + geo_latlng if geo_latlng else "")
     if not base_dir and es_pickup:
         base_dir = "Retiro en local"
 
@@ -1062,7 +1046,6 @@ def ver_carrito(request):
     if nota_pedido:
         direccion_a_guardar = f"{direccion_a_guardar} — Nota: {nota_pedido}"
 
-    # Costo de envío SOLO si no es pickup
     costo_envio_decimal = Decimal('0.00')
     distancia_km = 0.0
     if not es_pickup and direccion_para_maps:
@@ -1089,7 +1072,7 @@ def ver_carrito(request):
                 costo_envio_decimal, distancia_km = _calcular_costo_envio(profile.direccion)
                 pedido_kwargs['costo_envio'] = costo_envio_decimal
 
-    # ---- Crear pedido + detalles de forma transaccional
+    # ---- Crear pedido + detalles
     with transaction.atomic():
         nuevo_pedido = Pedido.objects.create(**pedido_kwargs)
 
@@ -1101,38 +1084,30 @@ def ver_carrito(request):
                 opcion_seleccionada=it['opcion'],
                 cantidad=it['cantidad'],
             )
-            # Sabores del kilo
+            # kg
             if it['sabores_qs']:
                 det.sabores.set(it['sabores_qs'])
+            # 1/4
+            if it['sabores_extra_qs']:
+                det.sabores.add(*it['sabores_extra_qs'])
 
-            # Sabores del 1/4 → agregar también a la M2M
-            extra_qs = it.get('sabores_extra_qs') or []
-            if extra_qs:
-                try:
-                    det.sabores.add(*extra_qs)
-                except Exception as e:
-                    print(f"[CART] No se pudieron agregar sabores extra al detalle: {e}")
-
-            # Nota (incluye "Promo 1/4: ..." y/o nota manual)
-            try:
-                if it.get('nota_final_item') and hasattr(det, 'nota'):
-                    det.nota = it['nota_final_item']
-                    det.save(update_fields=['nota'])
-            except Exception:
-                pass
+            # ← GUARDA LA MARCA PARA EL TICKET
+            if it.get('nota_final_item'):
+                det.nota = it['nota_final_item']
+                det.save(update_fields=['nota'])
 
             detalles_para_notificacion.append({
                 'producto_nombre': it['producto'].nombre,
                 'opcion_nombre': it['opcion'].nombre_opcion if it['opcion'] else None,
                 'cantidad': it['cantidad'],
-                'sabores_nombres': [s.nombre for s in it['sabores_qs']],         # Kg
-                'sabores_extra_nombres': it.get('sabores_extra_nombres', []),    # 1/4
+                'sabores_nombres': [s.nombre for s in it['sabores_qs']],
+                'sabores_extra_nombres': it.get('sabores_extra_nombres', []),
             })
 
         if not nuevo_pedido.detalles.exists():
             raise RuntimeError("Pedido sin detalles: abortando creación.")
 
-    # === Pago MP ===
+    # === Pago MP (igual que antes) ===
     if metodo_pago.strip().upper() in ('MP', 'MERCADOPAGO', 'MERCADO_PAGO', 'MERCADO PAGO'):
         try:
             _marcar_estado(nuevo_pedido, 'PENDIENTE_PAGO',
@@ -1154,7 +1129,7 @@ def ver_carrito(request):
             messages.info(request, f"Redirigiendo a Mercado Pago para completar el pago del pedido #{nuevo_pedido.id}.")
             return redirect(init_point)
         except Exception as e:
-            messages.error(request, f"No pudimos iniciar el pago con Mercado Pago. Probá de nuevo o elegí otro método. Detalle: {e}")
+            messages.error(request, f"No pudimos iniciar el pago con Mercado Pago. Detalle: {e}")
             return redirect('ver_carrito')
 
     # === SIN MP → directo a cocina
@@ -1165,7 +1140,7 @@ def ver_carrito(request):
     except Exception:
         pass
 
-    # Puntos fidelidad
+    # Puntos
     if request.user.is_authenticated and hasattr(request.user, 'clienteprofile'):
         puntos_ganados = int(total_del_pedido_para_puntos / Decimal('500')) * 100
         request.user.clienteprofile.puntos_fidelidad += puntos_ganados
@@ -1173,7 +1148,7 @@ def ver_carrito(request):
         if puntos_ganados:
             messages.success(request, f"¡Has ganado {puntos_ganados} puntos de fidelidad con este pedido!")
 
-    # Notificación a panel
+    # WS panel
     try:
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
@@ -1202,7 +1177,7 @@ def ver_carrito(request):
     except Exception as e:
         print(f"WS notify error: {e}")
 
-    # limpiar carrito
+    # Limpiar carrito
     try:
         del request.session['carrito']
         request.session.modified = True
@@ -1211,6 +1186,7 @@ def ver_carrito(request):
 
     messages.success(request, f'¡Tu pedido #{nuevo_pedido.id} ha sido realizado con éxito! Pronto nos contactaremos.')
     return redirect('pedido_exitoso')
+
 
 
 
@@ -1613,27 +1589,23 @@ def _wrap_lines(target_list, text, initial_indent="", subsequent_indent=""):
     target_list.extend(wrapped if wrapped else [""])
 
 def _build_ticket_text(pedido) -> str:
-    """Arma ticket en modo texto/ESC-POS con wrap correcto, separando sabores del Kg y del 1/4."""
     width = _ticket_width()
     tienda = getattr(settings, 'SITE_NAME', 'YO HELADERÍAS')
     ahora = timezone.localtime(getattr(pedido, 'fecha_pedido', None) or timezone.now())
 
     def _parse_promo_extras(nota: str):
-        """Devuelve lista de sabores del 1/4 si en la nota viene 'Promo 1/4: ...' """
         if not nota:
             return []
-        txt = nota.strip()
-        # admite variantes: "Promo 1/4:", "promo 1/4 :", "PROMO 1/4:"
-        m = re.search(r'promo\s*1/4\s*:\s*(.+)$', txt, flags=re.IGNORECASE)
+        m = re.search(r'promo\s*1/4\s*:\s*(.+)$', nota.strip(), flags=re.IGNORECASE)
         if not m:
             return []
         raw = m.group(1)
         parts = [p.strip() for p in raw.split(',') if p.strip()]
-        # evitar duplicados manteniendo orden
         seen, out = set(), []
         for p in parts:
-            if p.lower() not in seen:
-                seen.add(p.lower())
+            key = p.lower()
+            if key not in seen:
+                seen.add(key)
                 out.append(p)
         return out
 
@@ -1653,7 +1625,6 @@ def _build_ticket_text(pedido) -> str:
     envio = [f"Entrega : {direccion_legible or 'Retiro en local'}"]
     if nota_dir:
         _wrap_lines(envio, f"Nota    : {nota_dir}", subsequent_indent="          ")
-
     pago = [f"Pago    : {pedido.metodo_pago or '-'}"]
 
     detalle = ["", "Items:", "-" * (width - 2)]
@@ -1663,12 +1634,8 @@ def _build_ticket_text(pedido) -> str:
             linea_base += f" ({d.opcion_seleccionada.nombre_opcion})"
         _wrap_lines(detalle, linea_base)
 
-        # --- separar sabores (kg) vs 1/4 usando la nota ---
         todos = [s.nombre for s in d.sabores.all()]
-        try:
-            nota_item = getattr(d, 'nota', '') or ''
-        except Exception:
-            nota_item = ''
+        nota_item = getattr(d, 'nota', '') or ''
         extras = _parse_promo_extras(nota_item)
         extras_set = {e.lower() for e in extras}
         principales = [n for n in todos if n.lower() not in extras_set]
@@ -1682,19 +1649,10 @@ def _build_ticket_text(pedido) -> str:
             _wrap_lines(detalle, label + ", ".join(extras),
                         subsequent_indent=" " * len(label))
         if not principales and not extras and todos:
-            # fallback (por si no hay nota o no matchea)
+            # Fallback
             label = "  Sabores: "
             _wrap_lines(detalle, label + ", ".join(todos),
                         subsequent_indent=" " * len(label))
-
-        # nota libre (si hubiera algo más aparte de la promo)
-        resto = nota_item
-        if extras:
-            # quitamos la parte de la promo de la nota para no repetir
-            resto = re.sub(r'promo\s*1/4\s*:\s*.+$', '', nota_item, flags=re.IGNORECASE).strip(' ,;-')
-        if resto:
-            label = "  Nota: "
-            _wrap_lines(detalle, label + resto, subsequent_indent=" " * len(label))
 
     totales = ["-" * (width - 2)]
     if (pedido.costo_envio or Decimal('0')) > 0:
@@ -1704,8 +1662,8 @@ def _build_ticket_text(pedido) -> str:
     totales.append("¡Gracias!".center(width))
     totales.append("\n\n")
 
-    parts = header + [""] + cliente + envio + pago + detalle + totales
-    return "\n".join(parts)
+    return "\n".join(header + [""] + cliente + envio + pago + detalle + totales)
+
 
 
 

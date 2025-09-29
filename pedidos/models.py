@@ -341,7 +341,7 @@ class DetallePedido(models.Model):
     opcion_seleccionada = models.ForeignKey(OpcionProducto, on_delete=models.PROTECT, null=True, blank=True)
     sabores = models.ManyToManyField(Sabor)
     cantidad = models.PositiveIntegerField(default=1)
-
+    nota = models.CharField(max_length=255, blank=True, default="")  # <— NUEVO
     def __str__(self):
         if self.opcion_seleccionada:
             return f'{self.cantidad}x {self.producto.nombre} - {self.opcion_seleccionada.nombre_opcion} en Pedido #{self.pedido.id}'
