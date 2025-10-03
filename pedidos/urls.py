@@ -71,7 +71,7 @@ urlpatterns = [
     # --- Service Worker (ambos alias por si alguno te queda cacheado) ---
     path('sw.js', views.service_worker, name='service_worker'),
     path('service-worker.js', views.service_worker, name='service_worker_root'),
-
+    path('comandera-test/', views.comandera_test, name='comandera_test'),
     # --- Otros ---
     path('pedido/en-curso/', views.pedido_en_curso, name='pedido_en_curso'),
 ]

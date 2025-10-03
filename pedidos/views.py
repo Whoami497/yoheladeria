@@ -29,7 +29,7 @@ from django.contrib import messages
 import logging
 import socket
 import textwrap
-
+from django.views.decorators.http import require_GET
 from .models import (
     Producto, Sabor, Pedido, DetallePedido, Categoria,
     OpcionProducto, ClienteProfile, ProductoCanje, CadeteProfile
@@ -2717,3 +2717,63 @@ def panel_asignar_cadete(request, pedido_id):
     except Exception as e:
         print(f"WEBPUSH panel_asignar_cadete error: {e}")
     return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': cadete_name})
+@staff_member_required
+@require_GET
+def comandera_test(request):
+    """
+    Diagnóstico de impresión:
+      - Manda un ticket de prueba ("TEST COMANDERA") por TCP, Webhook y PrintNode.
+      - Si viene ?pedido=<id> intenta imprimir ese pedido real con _print_ticket_for_pedido.
+    Devuelve JSON con resultados de cada camino.
+    """
+    results = {}
+    # 1) ticket simple de prueba (texto)
+    test_text = "=== TEST COMANDERA ===\n" \
+                "Hola! Esto es una prueba.\n" \
+                "Fecha: %s\n" \
+                "=======================\n" % timezone.localtime().strftime("%d/%m/%Y %H:%M")
+
+    # 1.a) TCP/RAW
+    try:
+        ok_tcp = _send_ticket_tcp_escpos(test_text, title="TEST", copies=1)
+        results['tcp_raw'] = 'ok' if ok_tcp else 'fail'
+    except Exception as e:
+        results['tcp_raw'] = f'error: {e!s}'
+
+    # 1.b) Webhook
+    try:
+        ok_wh = _send_ticket_webhook(test_text, title="TEST", copies=1)
+        results['webhook'] = 'ok' if ok_wh else 'fail'
+    except Exception as e:
+        results['webhook'] = f'error: {e!s}'
+
+    # 1.c) PrintNode
+    try:
+        ok_pn = _send_ticket_printnode(test_text, title="TEST", copies=1)
+        results['printnode'] = 'ok' if ok_pn else 'fail'
+    except Exception as e:
+        results['printnode'] = f'error: {e!s}'
+
+    # 2) Si piden ?pedido=ID, imprimimos el ticket real
+    pedido_id = request.GET.get('pedido')
+    if pedido_id:
+        try:
+            pedido = Pedido.objects.get(id=pedido_id)
+            _print_ticket_for_pedido(pedido)
+            results['pedido'] = f'PRINT pedido #{pedido_id} enviado (ver logs COMANDERA para ruta usada)'
+        except Pedido.DoesNotExist:
+            results['pedido'] = f'no existe #{pedido_id}'
+        except Exception as e:
+            results['pedido'] = f'error: {e!s}'
+
+    # Info de settings útil para chequear config actual
+    results['config'] = {
+        'COMANDERA_PRINTER_HOST': getattr(settings, 'COMANDERA_PRINTER_HOST', ''),
+        'COMANDERA_PRINTER_PORT': getattr(settings, 'COMANDERA_PRINTER_PORT', 9100),
+        'COMANDERA_WEBHOOK_URL': getattr(settings, 'COMANDERA_WEBHOOK_URL', ''),
+        'PRINTNODE_PRINTER_ID': getattr(settings, 'PRINTNODE_PRINTER_ID', None),
+        'COMANDERA_CUT_MODE': getattr(settings, 'COMANDERA_CUT_MODE', 'auto'),
+        'COMANDERA_ENCODING': getattr(settings, 'COMANDERA_ENCODING', 'cp437'),
+        'COMANDERA_COPIES': getattr(settings, 'COMANDERA_COPIES', 1),
+    }
+    return JsonResponse({'ok': True, 'diagnostico': results})
