@@ -2777,3 +2777,40 @@ def comandera_test(request):
         'COMANDERA_COPIES': getattr(settings, 'COMANDERA_COPIES', 1),
     }
     return JsonResponse({'ok': True, 'diagnostico': results})
+from django.views.decorators.http import require_POST
+
+@staff_member_required
+@require_POST
+def reimprimir_ticket(request, pedido_id: int):
+    """
+    Reimprime el ticket de un pedido específico.
+    Intenta TCP → Webhook → PrintNode (mismo orden que _print_ticket_for_pedido).
+    Responde JSON.
+    """
+    pedido = get_object_or_404(Pedido, pk=pedido_id)
+
+    # copias opcionales (si no mandan, cae al valor de settings en cada sender)
+    try:
+        copies = int(request.POST.get("copies", "").strip() or "0")
+    except Exception:
+        copies = 0
+    if copies < 1:
+        try:
+            copies = int(getattr(settings, 'COMANDERA_COPIES', 1) or 1)
+        except Exception:
+            copies = 1
+
+    text = _build_ticket_text(pedido)
+
+    # Enviamos en el mismo orden que usa _print_ticket_for_pedido
+    if _send_ticket_tcp_escpos(text, title=f"Reimpresión #{pedido.id}", copies=copies):
+        return JsonResponse({"ok": True, "msg": "Enviado por TCP/RAW"})
+    if _send_ticket_webhook(text, title=f"Reimpresión #{pedido.id}", copies=copies):
+        return JsonResponse({"ok": True, "msg": "Enviado por Webhook"})
+    if _send_ticket_printnode(text, title=f"Reimpresión #{pedido.id}", copies=copies):
+        return JsonResponse({"ok": True, "msg": "Enviado por PrintNode"})
+
+    return JsonResponse(
+        {"ok": False, "error": "No hay ruta de impresión disponible o falló el envío"},
+        status=500
+    )

@@ -133,6 +133,14 @@
                 </div>
               {% endif %}
 
+              <!-- Reimprimir -->
+              <button
+                class="btn btn-sm btn-outline-secondary mb-2 btn-reprint w-100"
+                data-url="{% url 'comandera_test' %}?pedido={{ p.id }}"
+                data-order-id="{{ p.id }}">
+                🖨 Reimprimir
+              </button>
+
               <!-- Asignación manual -->
               <div class="assignment-box">
                 <div class="input-group input-group-sm mb-1">
@@ -252,7 +260,7 @@
 <script>
   // ================== CONFIG ==================
   const WS_PATH  = (location.protocol === 'https:' ? 'wss://' : 'ws://')
-                 + location.host + '/ws/pedidos/notifications/';   // ajustá si tu ruta WS es distinta
+                 + location.host + '/ws/pedidos/notifications/';
   const POLL_URL = "{% url 'panel_alertas_data' %}?scope=hoy";
   const POLL_MS  = 20000;      // 20s
   const RELOAD_MIN = 10;       // si pasan 10 min sin WS, recarga
@@ -305,7 +313,7 @@
   function getLastSeen(){ return parseInt(localStorage.getItem('last_seen_order_id') || '0', 10); }
   function setLastSeen(id){ if(id) localStorage.setItem('last_seen_order_id', String(id)); }
 
-  // Tomar baseline al entrar (máximo ID actual para no sonar por pedidos viejos)
+  // Tomar baseline al entrar
   let baselineDone = false;
   async function baselineFromServer(){
     try{
@@ -354,7 +362,7 @@
     return document.getElementById(`order-${id}`) || document.getElementById(`chip-${id}`) || document.getElementById(`chip-hoy-${id}`);
   }
 
-  // ====== TIMELINE helpers (igual que antes) ======
+  // ====== TIMELINE (sin cambios de lógica) ======
   const fmt = n => (n==null || Number.isNaN(n)) ? '—' : `${n.toFixed(2)} min`;
   const toDate = s => s ? new Date(s) : null;
   const diffMin = (a,b) => (a && b) ? Math.round(((b - a) / 60000) * 100) / 100 : null;
@@ -411,7 +419,7 @@
   }
   document.querySelectorAll('.order-card[data-order-id]').forEach(card => renderTimelineInto(card, null));
 
-  /* ===== Construcción de tarjetas/chips (igual que tenías) ===== */
+  /* ===== Construcción de tarjetas/chips ===== */
   function assignmentControlsHTML(orderId){
     return `
       <div class="assignment-box mt-2">
@@ -450,13 +458,13 @@
       const sabores=(d.sabores_nombres && d.sabores_nombres.length)? d.sabores_nombres.join(', ') : 'Sin especificar';
       return `<li>${name} (x${d.cantidad})<br><span class="text-muted">Sabores: ${sabores}</span></li>`;
     }).join('');
-    const direccion = order.direccion_legible || order.cliente_direccion || '—';
-    const mapUrl = order.map_url || '';
+    const reprintBtn = `<button class="btn btn-sm btn-outline-secondary mb-2 btn-reprint w-100" data-url="/comandera-test/?pedido=${order.id}" data-order-id="${order.id}">🖨 Reimprimir</button>`;
     const rightControls = estado==='RECIBIDO'
       ? `<button class="btn btn-success fw-bold btn-confirm" data-confirm-url="/confirmar-pedido/${order.id}/" data-order-id="${order.id}">
            <i class="bi bi-check-circle-fill"></i> Confirmar
          </button>
-         <div class="text-muted small mt-1">Notifica a cadetes</div>`
+         <div class="text-muted small mt-1">Notifica a cadetes</div>
+         ${reprintBtn}`
       : `<div class="dropdown mb-2">
            <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
            <ul class="dropdown-menu dropdown-menu-end">
@@ -466,7 +474,8 @@
              <li><hr class="dropdown-divider"></li>
              <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="/panel-alertas/estado/${order.id}/">Cancelar</button></li>
            </ul>
-         </div>`;
+         </div>
+         ${reprintBtn}`;
     wrapper.innerHTML = `
       <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
         <div class="flex-grow-1">
@@ -478,8 +487,8 @@
           <div class="small text-muted mb-1 d-flex align-items-center flex-wrap gap-1">
             <span>Cliente: <span class="fw-semibold">${order.cliente_nombre||'N/A'}</span></span>
             <span>· ${order.cliente_telefono||'—'}</span>
-            <span class="addr-ellipsis" title="${direccion}">· ${direccion}</span>
-            ${mapUrl ? `<a class="btn btn-sm btn-outline-primary ms-2" target="_blank" href="${mapUrl}">Ver mapa</a>` : ``}
+            <span class="addr-ellipsis" title="${order.direccion_legible || order.cliente_direccion || '—'}">· ${order.direccion_legible || order.cliente_direccion || '—'}</span>
+            ${order.map_url ? `<a class="btn btn-sm btn-outline-primary ms-2" target="_blank" href="${order.map_url}">Ver mapa</a>` : ``}
           </div>
           ${envioHtml}
           <div class="small">Cadete: <span class="fw-semibold cadete-name">${cadeteTxt}</span></div>
@@ -530,7 +539,7 @@
     try { return await res.json(); } catch { window.location.href = fallbackUrl; return null; }
   }
 
-  /* ===== Confirmar & Cambiar estado (igual que tenías) ===== */
+  /* ===== Confirmar & Cambiar estado ===== */
   document.addEventListener('click', async (ev)=>{
     const btn = ev.target.closest('.btn-confirm'); if(!btn) return; ev.preventDefault();
     const url  = btn.dataset.confirmUrl; const card = btn.closest('.order-card');
@@ -583,6 +592,26 @@
         }
       } else if (data.error === 'no_permiso'){ alert('No tenés permiso para cambiar este estado desde aquí.'); }
     }catch(e){ console.error(e); window.location.href=url; }
+  });
+
+  /* ===== Reimprimir ticket ===== */
+  document.addEventListener('click', async (ev)=>{
+    const b = ev.target.closest('.btn-reprint'); if(!b) return;
+    ev.preventDefault();
+    const url = b.dataset.url;
+    const oldHtml = b.innerHTML;
+    b.disabled = true;
+    b.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Imprimiendo…';
+    try{
+      const r = await fetch(url, {headers:{'X-Requested-With':'XMLHttpRequest'}, cache:'no-store'});
+      // Opcionalmente se podría validar el JSON, pero con que responda 200 está bien.
+      // const j = await r.json().catch(()=>null);
+    }catch(e){
+      alert('No se pudo enviar a imprimir. Verificá la comandera.');
+    }finally{
+      b.disabled = false;
+      b.innerHTML = oldHtml;
+    }
   });
 
   // ===== Limpiar UI
@@ -666,7 +695,7 @@
       lastWsOkAt = Date.now(); reconnectAttempts = 0;
       wsSetStatus('bg-success', 'Conectado');
       if(!baselineDone) baselineFromServer();
-      if(soundEnabled) unlockAudio(); // "precalienta" el audio
+      if(soundEnabled) unlockAudio();
     };
     socket.onmessage = (ev) => {
       lastWsOkAt = Date.now();
@@ -699,7 +728,6 @@
             const card=buildCard(orderData);
             alertsHoy.prepend(card);
 
-            // >>> SONAR SOLO SI ES NUEVO VS last_seen <<<
             const lastSeen = getLastSeen();
             if(orderId > lastSeen){ playSound(); setLastSeen(orderId); }
 
@@ -731,7 +759,7 @@
             const b=chip.querySelector('.badge');
             if(estado && b){ b.className='badge '+badgeClass(estado); b.textContent=estado; }
           }else{
-            location.reload(); // algo desfasó mucho
+            location.reload();
           }
           return;
         }
@@ -745,7 +773,7 @@
     socket = null;
     wsSetStatus('bg-danger', 'Desconectado');
     reconnectAttempts = Math.min(reconnectAttempts + 1, 7);
-    const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts)); // 1s→2→4… máx 30s
+    const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
     setTimeout(connectWS, delay);
   }
 
@@ -776,7 +804,7 @@
   // Re-baseline al volver de background
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ baselineFromServer(); poll(); }});
 
-  // ===== peques utilidades restantes =====
+  // ===== util: refrescar cadete desde feed (sin cambios) =====
   async function refreshCadeteName(orderId){
     try{
       const res = await fetch("{% url 'panel_alertas_data' %}?scope=hoy", {headers:{'X-Requested-With':'XMLHttpRequest'}});
