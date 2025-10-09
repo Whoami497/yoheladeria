@@ -77,5 +77,5 @@ urlpatterns = [
     path('panel-alertas/cadetes.json', views.panel_alertas_data, name='panel_cadetes_data'),
     path('panel-alertas/asignar/<int:pedido_id>/', views.panel_asignar_cadete, name='panel_asignar_cadete'),
     path('panel-alertas/reimprimir/<int:pedido_id>/', views.reimprimir_ticket, name='reimprimir_ticket'),
-
+    path('comandera-test/', views.comandera_test, name='comandera_test'),
 ]
