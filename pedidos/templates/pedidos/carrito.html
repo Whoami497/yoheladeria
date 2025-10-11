@@ -62,6 +62,8 @@
         <input type="hidden" name="modo_envio" id="modo_envio" value="pickup">
         <input type="hidden" name="geo_latlng" id="geo-latlng" value="">
         <input type="hidden" name="cliente_direccion" id="cliente_direccion" value="">
+        <!-- Confirmación de transferencia (se setea con el checkbox) -->
+        <input type="hidden" name="transfer_confirmed" id="transfer_confirmed" value="0">
 
         <!-- Envío -->
         <div class="mb-3">
@@ -108,10 +110,33 @@
         <!-- Pago -->
         <div class="mb-3">
           <label class="form-label">Método de pago</label>
-          <select class="form-select" name="metodo_pago" required>
+          <select class="form-select" name="metodo_pago" id="metodo_pago" required>
             <option value="EFECTIVO">Efectivo</option>
             <option value="MERCADOPAGO">Mercado Pago</option>
+            <option value="TRANSFERENCIA">Transferencia bancaria</option>
           </select>
+
+          <!-- Bloque visible SOLO para TRANSFERENCIA -->
+          <div id="transfer-box" class="alert alert-warning mt-2 d-none">
+            <div class="fw-semibold mb-1">Datos para transferir</div>
+            <!-- 🔧 EDITAR ESTOS DATOS -->
+            <div><strong>Alias:</strong> yoheladerias.mp</div>
+            <div><strong>Titular:</strong> YO HELADERÍAS</div>
+            <!-- opcionales: -->
+            <!-- <div><strong>CBU:</strong> 0000000000000000000000</div> -->
+            <!-- <div><strong>CUIT/CUIL:</strong> 20-12345678-9</div> -->
+
+            <div class="form-check mt-2">
+              <input class="form-check-input" type="checkbox" id="chk-transfer">
+              <label class="form-check-label" for="chk-transfer">
+                Ya hice la transferencia (tengo el comprobante).
+              </label>
+            </div>
+            <div class="small text-muted mt-1">
+              * Si el pedido es a domicilio, el repartidor puede pedir el comprobante.  
+              * Si aún no transferiste, podés hacerlo ahora y marcar la casilla.
+            </div>
+          </div>
         </div>
 
         <!-- Totales -->
@@ -138,6 +163,9 @@
         </button>
         <div class="small text-danger mt-2" id="submit-warn" style="display:none;">
           Seleccioná una ubicación en el mapa o elegí “Retiro en local”.
+        </div>
+        <div class="small text-danger mt-1 d-none" id="transfer-warn">
+          Para pagar por transferencia, marcá “Ya hice la transferencia”.
         </div>
       </form>
 
@@ -176,7 +204,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
   integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
-<!-- JS: mapa + cálculo automático + persistencia -->
+<!-- JS: mapa + cálculo automático + persistencia + TRANSFERENCIA -->
 <script>
 (function(){
   // ---------- CONFIG ----------
@@ -207,11 +235,19 @@
   const btnMap   = document.getElementById('btn-map');
   const btnSubmit= document.getElementById('btn-submit');
   const submitWarn = document.getElementById('submit-warn');
+  const transferWarn = document.getElementById('transfer-warn');
   const form     = document.getElementById('checkout-form');
+
+  // pago/transferencia
+  const paySel         = document.getElementById('metodo_pago');
+  const transferBox    = document.getElementById('transfer-box');
+  const chkTransfer    = document.getElementById('chk-transfer');
+  const transferHidden = document.getElementById('transfer_confirmed');
 
   function setSubmitEnabled(v){
     btnSubmit.disabled = !v;
     submitWarn.style.display = v ? 'none' : '';
+    transferWarn.classList.toggle('d-none', true);
   }
 
   function hideAddr(){
@@ -228,6 +264,31 @@
     }
   }
 
+  function envioOkCond(){
+    const isPickup = envioSel.value === '0';
+    const hasPoint = !!geoHidden.value;
+    const envioCost = parseFloat(envioSel.value || '0') || 0;
+    return isPickup || (hasPoint && envioCost > 0);
+  }
+
+  function pagoOkCond(){
+    const metodo = paySel.value;
+    if (metodo === 'TRANSFERENCIA') {
+      return !!chkTransfer && chkTransfer.checked === true;
+    }
+    return true;
+  }
+
+  function recomputeSubmitAllowed(){
+    const ok = envioOkCond() && pagoOkCond();
+    setSubmitEnabled(ok);
+    if (paySel.value === 'TRANSFERENCIA' && !chkTransfer.checked) {
+      transferWarn.classList.toggle('d-none', false);
+    } else {
+      transferWarn.classList.toggle('d-none', true);
+    }
+  }
+
   function recalc(){
     const envioCost = parseFloat(envioSel.value || '0') || 0;
     envioEl.textContent     = fmtMoney(envioCost);
@@ -239,10 +300,29 @@
     modoHidden.value = isPickup ? 'pickup' : 'delivery';
     if (isPickup) hideAddr();
 
-    const hasPoint = !!geoHidden.value;
-    setSubmitEnabled(isPickup || (hasPoint && envioCost > 0));
+    recomputeSubmitAllowed();
   }
   envioSel.addEventListener('change', recalc);
+
+  // Mostrar/ocultar bloque de transferencia
+  function updatePayUI(){
+    const metodo = paySel.value;
+    if (metodo === 'TRANSFERENCIA') {
+      transferBox.classList.remove('d-none');
+    } else {
+      transferBox.classList.add('d-none');
+      chkTransfer && (chkTransfer.checked = false);
+      transferHidden.value = '0';
+    }
+    recomputeSubmitAllowed();
+  }
+  paySel.addEventListener('change', updatePayUI);
+  if (chkTransfer) {
+    chkTransfer.addEventListener('change', ()=>{
+      transferHidden.value = chkTransfer.checked ? '1' : '0';
+      recomputeSubmitAllowed();
+    });
+  }
 
   // Opción automática: SOLO mostrar los km (sin “Auto”)
   function setAutoOption(costo, km){
@@ -400,15 +480,20 @@
     recalc();
   });
 
-  // Submit: si no es retiro, exigir punto
+  // Submit: validar envío y transferencia (si aplica)
   form.addEventListener('submit', (e)=>{
-    const isPickup = envioSel.value === '0';
-    if(!isPickup && !geoHidden.value){
+    if (!envioOkCond()) {
       e.preventDefault();
       submitWarn.style.display = '';
-      const modal = new bootstrap.Modal(elMapModal);
+      const modal = new bootstrap.Modal(document.getElementById('mapModal'));
       modal.show();
       ensureMap();
+      return;
+    }
+    if (paySel.value === 'TRANSFERENCIA' && !chkTransfer.checked) {
+      e.preventDefault();
+      transferWarn.classList.remove('d-none');
+      return;
     }
   });
 
@@ -432,6 +517,8 @@
         }
       }catch(e){}
     }
+    // inicializar UI de pago
+    updatePayUI();
     recalc();
   }
   restore();

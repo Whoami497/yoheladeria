@@ -1,0 +1,26 @@
+{% extends 'pedidos/base.html' %}
+{% block content %}
+<div class="container my-5">
+  <h3 class="mb-3">Transferencia para el Pedido #{{ pedido.id }}</h3>
+  <div class="alert alert-info">
+    <div><strong>Monto:</strong> ${{ monto|floatformat:2 }}</div>
+    <div><strong>Alias:</strong> {{ alias }}</div>
+    <div><strong>Titular:</strong> {{ titular }}</div>
+    <div><strong>CUIT/CUIL:</strong> {{ cuit }}</div>
+    <hr>
+    <p class="mb-0">
+      Usá como referencia el <b>ID del pedido #{{ pedido.id }}</b>. Una vez que hagas la transferencia,
+      avisá tocando el botón de abajo.
+    </p>
+  </div>
+
+  <form method="post" action="{% url 'transferencia_avise' pedido.id %}">
+    {% csrf_token %}
+    <button class="btn btn-primary btn-lg">Ya hice la transferencia</button>
+  </form>
+
+  <p class="text-muted mt-3">
+    Luego de verificar el pago, vamos a confirmar tu pedido y empezar la preparación.
+  </p>
+</div>
+{% endblock %}

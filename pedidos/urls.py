@@ -78,4 +78,12 @@ urlpatterns = [
     path('panel-alertas/asignar/<int:pedido_id>/', views.panel_asignar_cadete, name='panel_asignar_cadete'),
     path('panel-alertas/reimprimir/<int:pedido_id>/', views.reimprimir_ticket, name='reimprimir_ticket'),
     path('comandera-test/', views.comandera_test, name='comandera_test'),
+    
+    # transferencia mp
+    path('pago/transferencia/instrucciones/', views.transferencia_instrucciones, name='transferencia_instrucciones'),
+    path('pago/transferencia/avise/<int:pedido_id>/', views.transferencia_avise, name='transferencia_avise'),
+
+    # Pago transferencia desde panel
+    path('panel-alertas/pago-transferencia/<int:pedido_id>/', views.panel_marcar_pago_transferencia,
+     name='panel_marcar_pago_transferencia'),
 ]

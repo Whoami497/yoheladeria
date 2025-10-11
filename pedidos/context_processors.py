@@ -40,3 +40,10 @@ def store_status(request):
         'VAPID_PUBLIC_KEY': vapid_pub,
         'GOOGLE_MAPS_API_KEY': maps_key,
     }
+def transferencia(request):
+    return {
+        'TRANSFERENCIA_ALIAS': getattr(settings, 'TRANSFERENCIA_ALIAS', ''),
+        'TRANSFERENCIA_TITULAR': getattr(settings, 'TRANSFERENCIA_TITULAR', ''),
+        'TRANSFERENCIA_CUIT': getattr(settings, 'TRANSFERENCIA_CUIT', ''),
+    }
+

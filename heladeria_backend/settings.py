@@ -256,4 +256,17 @@ LOGGING = {
         "django": {"level": os.environ.get('DJANGO_LOG_LEVEL', LOG_LEVEL)},
         "pedidos": {"level": LOG_LEVEL},
     },
+    
 }
+
+# === Transferencia (alias MP) ===
+TRANSFERENCIA_ALIAS = os.getenv("TRANSFERENCIA_ALIAS", "ritaregalado.mp")
+TRANSFERENCIA_TITULAR = os.getenv("TRANSFERENCIA_TITULAR", "Rita Virginia Regalado")
+TRANSFERENCIA_CUIT = os.getenv("TRANSFERENCIA_CUIT", "27-24776697-4")
+
+TEMPLATES[0]['OPTIONS']['context_processors'] += [
+    'pedidos.context_processors.transferencia',
+]
+
+
+

@@ -2814,3 +2814,76 @@ def reimprimir_ticket(request, pedido_id: int):
         {"ok": False, "error": "No hay ruta de impresión disponible o falló el envío"},
         status=500
     )
+@login_required
+def transferencia_instrucciones(request):
+    last_id = request.session.get('transfer_last_order_id')
+    if not last_id:
+        return redirect('index')
+
+    try:
+        pedido = Pedido.objects.get(id=last_id, user=request.user)
+    except Pedido.DoesNotExist:
+        return redirect('index')
+
+    ctx = {
+        'pedido': pedido,
+        'alias': getattr(settings, 'TRANSFERENCIA_ALIAS', ''),
+        'titular': getattr(settings, 'TRANSFERENCIA_TITULAR', ''),
+        'cuit': getattr(settings, 'TRANSFERENCIA_CUIT', ''),
+        'monto': _compute_total(pedido),
+    }
+    return render(request, 'pedidos/transferencia_instrucciones.html', ctx)
+
+@login_required
+@require_POST
+def transferencia_avise(request, pedido_id):
+    pedido = get_object_or_404(Pedido, id=pedido_id, user=request.user)
+
+    # (Opcional) marcar que el cliente reportó transferencia
+    try:
+        if hasattr(pedido, 'cliente_reporto_transferencia'):
+            if not pedido.cliente_reporto_transferencia:
+                pedido.cliente_reporto_transferencia = True
+                pedido.save(update_fields=['cliente_reporto_transferencia'])
+    except Exception:
+        pass
+
+    try:
+        _notify_panel_update(pedido, message='actualizacion_pedido')
+    except Exception:
+        pass
+
+    messages.info(request, "¡Gracias! Vamos a verificar tu transferencia y confirmar tu pedido.")
+    return redirect('pedido_exitoso')
+
+@staff_member_required
+@require_POST
+def panel_marcar_pago_transferencia(request, pedido_id: int):
+    """
+    Marca un pedido con método TRANSFERENCIA como 'RECIBIDO'.
+    No lo pasa a EN_PREPARACION: eso lo sigue haciendo el botón Confirmar.
+    """
+    from .models import Pedido  # evita import circular
+    try:
+        pedido = Pedido.objects.get(id=pedido_id)
+    except Pedido.DoesNotExist:
+        return JsonResponse({'ok': False, 'error': 'no_existe'}, status=404)
+
+    # Solo tiene sentido para transferencia
+    metodo = (pedido.metodo_pago or '').upper()
+    if metodo != 'TRANSFERENCIA':
+        return JsonResponse({'ok': False, 'error': 'no_transferencia'}, status=400)
+
+    # Si ya está recibido o más adelante, no hacemos nada
+    if pedido.estado in ('RECIBIDO', 'EN_PREPARACION', 'ASIGNADO', 'EN_CAMINO', 'ENTREGADO'):
+        return JsonResponse({'ok': True, 'estado': pedido.estado})
+
+    # Caso típico: estaba 'PENDIENTE_PAGO' -> 'RECIBIDO'
+    _marcar_estado(pedido, 'RECIBIDO', actor=request.user, fuente='panel_marcar_pago_transferencia')
+
+    try:
+        _notify_panel_update(pedido, message='actualizacion_pedido')
+    except Exception:
+        pass
+
+    return JsonResponse({'ok': True, 'estado': pedido.estado, 'pedido_id': pedido.id})
