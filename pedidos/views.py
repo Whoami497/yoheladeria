@@ -2706,6 +2706,13 @@ def panel_asignar_cadete(request, pedido_id):
 
     if max_activos and activos >= max_activos:
         return JsonResponse({'ok': False, 'error': f'limite_{max_activos}'}, status=400)
+     # 🔧 Permitir asignar aunque esté marcado como ocupado
+    if hasattr(cadete, 'disponible') and cadete.disponible is False:
+     cadete.disponible = True
+    try:
+        cadete.save(update_fields=['disponible'])
+    except Exception:
+        cadete.save()
 
     # Asignar
     pedido.cadete_asignado = cadete
