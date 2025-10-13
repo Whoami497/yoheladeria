@@ -2017,7 +2017,7 @@ def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta
 # === TIENDA / CADETES
 # =========================
 @login_required
-@require_http_methods(["POST", "GET"])  # aceptar por POST o por GET (evita "se rompe" si tocan un link)
+@require_http_methods(["POST", "GET"])
 def aceptar_pedido(request, pedido_id):
     if not hasattr(request.user, 'cadeteprofile'):
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
@@ -2025,15 +2025,7 @@ def aceptar_pedido(request, pedido_id):
         messages.error(request, "Acción no permitida. No tienes un perfil de cadete.")
         return redirect('index')
 
-    # Si ya tiene otro activo (que NO sea éste) → bloquea
-    if Pedido.objects.filter(
-        cadete_asignado=request.user.cadeteprofile,
-        estado__in=['ASIGNADO', 'EN_CAMINO']
-    ).exclude(id=pedido_id).exists():
-        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-            return JsonResponse({'ok': False, 'error': 'ya_tiene_activo'}, status=400)
-        messages.warning(request, "Ya tenés un pedido en curso. Entregalo antes de aceptar otro.")
-        return redirect('panel_cadete')
+    cp = request.user.cadeteprofile
 
     with transaction.atomic():
         try:
@@ -2044,41 +2036,46 @@ def aceptar_pedido(request, pedido_id):
             messages.warning(request, f"El Pedido #{pedido_id} no existe o ya no está disponible.")
             return redirect('panel_cadete')
 
-        # Releer por si hubo cambios en paralelo
-        try:
-            pedido.refresh_from_db(fields=['estado', 'cadete_asignado'])
-        except Exception:
-            pass
-
-        # Finales o en camino → no disponible
+        # Estados finales o ya en camino → no disponible
         if pedido.estado in ('ENTREGADO', 'CANCELADO', 'EN_CAMINO'):
             if request.headers.get('x-requested-with') == 'XMLHttpRequest':
                 return JsonResponse({'ok': False, 'error': 'no_disponible'}, status=409)
             messages.warning(request, f"El Pedido #{pedido.id} ya no está disponible para ser aceptado.")
             return redirect('panel_cadete')
 
-        # Si está ASIGNADO a otro cadete → bloquear SIEMPRE
-        if pedido.cadete_asignado_id and pedido.cadete_asignado_id != request.user.cadeteprofile.id:
+        # Si está asignado a OTRO cadete → bloquear
+        if pedido.cadete_asignado_id and pedido.cadete_asignado_id != cp.id:
             if request.headers.get('x-requested-with') == 'XMLHttpRequest':
                 return JsonResponse({'ok': False, 'error': 'asignado_a_otro'}, status=409)
             messages.warning(request, f"El Pedido #{pedido.id} fue asignado a otro cadete.")
             return redirect('panel_cadete')
 
-        # Si está asignado a mí y aún no pasó a ASIGNADO → llevar a ASIGNADO
-        if pedido.cadete_asignado_id == request.user.cadeteprofile.id:
-            if pedido.estado == 'EN_PREPARACION':
+        # ¿Está asignado a mí? → permitir aunque tenga otros activos (esto es lo nuevo)
+        asignado_a_mi = (pedido.cadete_asignado_id == cp.id)
+
+        # Si NO estaba asignado a mí (lo quiero tomar del feed) y ya tengo otro activo → bloquear
+        if not asignado_a_mi and Pedido.objects.filter(
+            cadete_asignado=cp, estado__in=['ASIGNADO', 'EN_CAMINO']
+        ).exclude(id=pedido_id).exists():
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'ok': False, 'error': 'ya_tiene_activo'}, status=400)
+            messages.warning(request, "Ya tenés un pedido en curso. Entregalo antes de aceptar otro.")
+            return redirect('panel_cadete')
+
+        # Si ya está asignado a mí y aún no pasó a ASIGNADO → llevarlo a ASIGNADO
+        if asignado_a_mi:
+            if pedido.estado in ('RECIBIDO', 'EN_PREPARACION'):
                 _marcar_estado(pedido, 'ASIGNADO', actor=request.user, fuente='aceptar_pedido')
         else:
             # No estaba asignado → me asigno y paso a ASIGNADO
-            pedido.cadete_asignado = request.user.cadeteprofile
+            pedido.cadete_asignado = cp
             try:
                 pedido.save(update_fields=['cadete_asignado'])
             except Exception:
                 pedido.save()
             _marcar_estado(pedido, 'ASIGNADO', actor=request.user, fuente='aceptar_pedido')
 
-    # me pongo NO disponible (igual que antes)
-    cp = request.user.cadeteprofile
+    # Al aceptar, dejamos al cadete como NO disponible (igual que antes).
     if hasattr(cp, 'disponible'):
         try:
             cp.disponible = False
@@ -2093,8 +2090,9 @@ def aceptar_pedido(request, pedido_id):
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
         return JsonResponse({'ok': True, 'pedido_id': pedido.id, 'estado': 'ASIGNADO'})
 
-    messages.success(request, f"¡Has aceptado el Pedido #{pedido.id}! Por favor, prepárate para retirarlo.")
+    messages.success(request, f"¡Pedido #{pedido.id} asignado!")
     return redirect('panel_cadete')
+
 
 def login_cadete(request):
     if request.user.is_authenticated:
@@ -2672,8 +2670,8 @@ def confirmar_pedido(request, pedido_id):
 def panel_asignar_cadete(request, pedido_id):
     """
     Asigna un cadete o vuelve a 'a todos' (cadete_id=0).
-    NO cambia el estado del pedido (se mantiene EN_PREPARACION).
-    Además, si asigna, envía push SOLO al asignado.
+    Cambia el estado a ASIGNADO para que el cadete lo vea en su panel.
+    Permite múltiples asignaciones manuales por cadete, con tope configurable.
     """
     CadeteProfileModel = apps.get_model('pedidos', 'CadeteProfile')
     PedidoModel = apps.get_model('pedidos', 'Pedido')
@@ -2692,30 +2690,45 @@ def panel_asignar_cadete(request, pedido_id):
         _notify_panel_update(pedido)
         return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': None})
 
-    # Asignar a un cadete específico
+    # Asignar a un cadete específico (permitimos varios)
     cadete = get_object_or_404(CadeteProfileModel, id=cadete_id)
 
-    # Evitar asignar a un cadete que ya está con un pedido activo
-    ocupado = PedidoModel.objects.filter(
+    # Tope opcional de pedidos activos por cadete cuando la asignación es manual
+    try:
+        max_activos = int(getattr(settings, 'MAX_PEDIDOS_POR_CADETE_MANUAL', 4) or 4)
+    except Exception:
+        max_activos = 4
+
+    activos = PedidoModel.objects.filter(
         cadete_asignado=cadete,
         estado__in=['ASIGNADO', 'EN_CAMINO']
-    ).exclude(pk=pedido.pk).exists()
-    if ocupado:
-        return JsonResponse({'ok': False, 'error': 'ocupado'}, status=400)
+    ).count()
 
+    if max_activos and activos >= max_activos:
+        return JsonResponse({'ok': False, 'error': f'limite_{max_activos}'}, status=400)
+
+    # Asignar
     pedido.cadete_asignado = cadete
     if hasattr(pedido, 'fecha_asignado') and not pedido.fecha_asignado:
         pedido.fecha_asignado = timezone.now()
-        pedido.save(update_fields=['cadete_asignado', 'fecha_asignado'])
+
+    # Asegurar que quede en ASIGNADO (para que aparezca en el panel del cadete)
+    if pedido.estado not in ('ASIGNADO', 'EN_CAMINO', 'ENTREGADO', 'CANCELADO'):
+        _marcar_estado(pedido, 'ASIGNADO', actor=request.user, fuente='panel_asignar_cadete')
     else:
-        pedido.save(update_fields=['cadete_asignado'])
+        # Guardar cambios de asignación si ya estaba en un estado final/avanzado
+        try:
+            pedido.save(update_fields=['cadete_asignado', 'fecha_asignado'] if hasattr(pedido, 'fecha_asignado') else ['cadete_asignado'])
+        except Exception:
+            pedido.save()
 
     cadete_name = cadete.user.get_full_name() or cadete.user.username
     _notify_panel_update(pedido)
     try:
-        _notify_cadetes_new_order(request, pedido)
+        _notify_cadetes_new_order(request, pedido)  # push dirigido
     except Exception as e:
         print(f"WEBPUSH panel_asignar_cadete error: {e}")
+
     return JsonResponse({'ok': True, 'estado': pedido.estado, 'cadete': cadete_name})
 @staff_member_required
 @require_GET
