@@ -268,7 +268,7 @@
 
   // ===== Endpoints cadetes =====
   const urlCadetesData = "{% url 'panel_alertas_data' %}?scope=cadetes";
-  const urlAsignarBase = "{% url 'panel_alertas_set_estado' 0 %}"; // reemplazar /0/ por /<pedido_id>/
+  const urlAsignarBase = "{% url 'panel_asignar_cadete' 0 %}"; // reemplazar /0/ por /<pedido_id>/
 
   // ===== CSRF =====
   function getCookie(name){
@@ -646,7 +646,7 @@
   function poblarSelectsCadetes(arr){
     const options = (arr||[]).map(c=>{
       const estado = c.ocupado ? ' (ocupado)' : (c.disponible ? ' (disp.)' : ' (no disp.)');
-      return `<option value="${c.id}" ${c.ocupado ? 'disabled' : ''}>#${c.id} ${c.nombre}${estado}</option>`;
+      return `<option value="${c.id}">#${c.id} ${c.nombre}${estado}</option>`;
     }).join('');
     document.querySelectorAll('select.cadete-select').forEach(sel=>{
       const current = sel.value || '0';
