@@ -55,6 +55,9 @@
     <div class="card-body p-3">
       <h5 class="mb-3">Entrega y pago</h5>
 
+      <!-- Banner: Envío gratis -->
+      <div id="free-ship-banner" class="alert py-2 px-3 d-none"></div>
+
       <form id="checkout-form" method="post">
         {% csrf_token %}
 
@@ -203,12 +206,15 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
   integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
-<!-- JS: mapa + cálculo automático + persistencia + TRANSFERENCIA -->
+<!-- JS: mapa + cálculo automático + persistencia + TRANSFERENCIA + BANNER FREE SHIPPING -->
 <script>
 (function(){
   // ---------- CONFIG ----------
   const STORE = { lat: -28.4705234, lng: -65.7937524 };
   const SERVICE_RADIUS_M = 3500; // 0 = sin límite visual
+
+  // Umbral envío gratis (viene del backend)
+  const FREE_SHIP_THRESHOLD = Number('{{ free_shipping_threshold|default:"0" }}') || 0;
 
   // ---------- LocalStorage ----------
   const LS_GEO  = 'yl_geo_latlng';
@@ -243,6 +249,9 @@
   const chkTransfer    = document.getElementById('chk-transfer');
   const transferHidden = document.getElementById('transfer_confirmed');
 
+  // Banner envío gratis
+  const freeBanner = document.getElementById('free-ship-banner');
+
   function setSubmitEnabled(v){
     btnSubmit.disabled = !v;
     submitWarn.style.display = v ? 'none' : '';
@@ -263,11 +272,11 @@
     }
   }
 
+  // Si es delivery, ahora aceptamos envío $0 (envío gratis).
   function envioOkCond(){
     const isPickup = envioSel.value === '0';
     const hasPoint = !!geoHidden.value;
-    const envioCost = parseFloat(envioSel.value || '0') || 0;
-    return isPickup || (hasPoint && envioCost > 0);
+    return isPickup || hasPoint; // antes pedía costo > 0; ahora permitimos 0 por envío gratis
   }
 
   function pagoOkCond(){
@@ -288,17 +297,41 @@
     }
   }
 
+  function updateFreeShipBanner(){
+    if (!freeBanner) return;
+    if (FREE_SHIP_THRESHOLD > 0) {
+      if (subtotal >= FREE_SHIP_THRESHOLD) {
+        freeBanner.className = 'alert alert-success py-2 px-3';
+        freeBanner.textContent = '🎉 ¡Tenés envío gratis en esta compra!';
+        freeBanner.classList.remove('d-none');
+      } else {
+        const faltan = FREE_SHIP_THRESHOLD - subtotal;
+        freeBanner.className = 'alert alert-info py-2 px-3';
+        freeBanner.textContent = '🚚 Te faltan ' + fmtMoney(faltan) + ' para obtener envío gratis.';
+        freeBanner.classList.remove('d-none');
+      }
+    } else {
+      freeBanner.classList.add('d-none');
+    }
+  }
+
   function recalc(){
-    const envioCost = parseFloat(envioSel.value || '0') || 0;
-    envioEl.textContent     = fmtMoney(envioCost);
-    envioInline.textContent = fmtMoney(envioCost);
-    totalEl.textContent     = fmtMoney(subtotal + envioCost);
+    const isPickup = envioSel.value === '0';
+    const rawEnvioCost = parseFloat(envioSel.value || '0') || 0;
+    const qualifiesFree = (FREE_SHIP_THRESHOLD > 0 && subtotal >= FREE_SHIP_THRESHOLD);
+
+    // Si es retiro, costo 0. Si es delivery y califica, costo 0. Sino, el costo calculado.
+    const finalEnvioCost = isPickup ? 0 : (qualifiesFree ? 0 : rawEnvioCost);
+
+    envioEl.textContent     = fmtMoney(finalEnvioCost);
+    envioInline.textContent = fmtMoney(finalEnvioCost);
+    totalEl.textContent     = fmtMoney(subtotal + finalEnvioCost);
     subEl.textContent       = fmtMoney(subtotal);
 
-    const isPickup = envioSel.value === '0';
     modoHidden.value = isPickup ? 'pickup' : 'delivery';
     if (isPickup) hideAddr();
 
+    updateFreeShipBanner();
     recomputeSubmitAllowed();
   }
   envioSel.addEventListener('change', recalc);
@@ -516,8 +549,9 @@
         }
       }catch(e){}
     }
-    // inicializar UI de pago
+    // inicializar UI de pago y banner
     updatePayUI();
+    updateFreeShipBanner();
     recalc();
   }
   restore();
@@ -546,4 +580,5 @@
   .addr{ margin:.35rem 0 .25rem; }
   .addr-text{ max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
+
 {% endblock %}
