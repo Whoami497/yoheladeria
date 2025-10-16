@@ -421,17 +421,17 @@ def _extract_nota_from_direccion(text: str) -> str:
 def api_costo_envio(request):
     direccion = (request.GET.get('direccion') or '').strip()
 
-    # total de productos del carrito (para el umbral)
+    # total de productos del carrito (para evaluar envío gratis)
     cart = request.session.get('carrito', {}) or {}
     total_cart = Decimal('0.00')
     for _, it in cart.items():
         try:
-            total_cart += Decimal(str(it.get('precio','0'))) * Decimal(str(it.get('cantidad',1)))
+            total_cart += Decimal(str(it.get('precio', '0'))) * Decimal(str(it.get('cantidad', 1)))
         except Exception:
             pass
 
+    # Sin dirección ⇒ pickup
     if not direccion:
-        # pickup / sin dirección → costo 0 (y marcamos free si aplica)
         return JsonResponse({
             'ok': True,
             'costo_envio': 0.0,
@@ -440,23 +440,35 @@ def api_costo_envio(request):
             'free_shipping': _aplica_envio_gratis(total_cart),
         })
 
+    # Armar dirección legible (por coords o por texto)
+    addr_full = ''
+    coords = _extract_coords(direccion)
+    if coords:
+        try:
+            lat, lng = float(coords[0]), float(coords[1])
+            g = _reverse_geocode_any(lat, lng) or {}
+            addr_full = g.get('formatted_address') or g.get('direccion_legible') or ''
+        except Exception:
+            addr_full = ''
+    if not addr_full:
+        addr_full = direccion
+
+    # Calcular costo/ distancia
     costo, km = _calcular_costo_envio(direccion)
 
-    # >>> Pisar a 0 si supera umbral
+    # Envío gratis si supera umbral
     if _aplica_envio_gratis(total_cart):
         costo = Decimal('0.00')
 
-    # ... resto tal cual, pero agrega la bandera:
-    payload = {
+    return JsonResponse({
         'ok': True,
         'costo_envio': float(costo),
         'distancia_km': float(km),
         'mode': 'maps',
         'direccion_legible': addr_full,
-        # ...
+        'direccion_corta': _short_address(addr_full),
         'free_shipping': _aplica_envio_gratis(total_cart),
-    }
-    return JsonResponse(payload)
+    })
 
 
 def _short_address(formatted: str, max_len: int = 60) -> str:
