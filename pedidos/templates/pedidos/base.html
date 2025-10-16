@@ -173,7 +173,15 @@
               </div>
               <div class="small-help text-muted">
                 Podés ver el catálogo y armar el carrito.
-                {% if not TIENDA_ABIERTA %} El checkout se habilita cuando abrimos de 13 a 16 hs y de 21 a 00hs.{% endif %}
+                {% if not TIENDA_ABIERTA %}
+                  El checkout se habilita cuando abrimos de 13 a 16 hs y de 21 a 00hs.
+                {% endif %}
+                {% if FREE_SHIPPING_THRESHOLD and FREE_SHIPPING_THRESHOLD|floatformat:0 != "0" %}
+                  <span class="ms-1">
+                    🛵 Envío <strong>gratis</strong> a partir de
+                    <strong>${{ FREE_SHIPPING_THRESHOLD|floatformat:0 }}</strong>.
+                  </span>
+                {% endif %}
               </div>
             </div>
 
@@ -444,10 +452,14 @@
           const help = banner.querySelector('.small-help');
           if(help){
             const HORARIO = '13–16 hs y 21–00 hs';
-help.innerHTML = isOpen
-  ? 'Podés ver el catálogo y armar el carrito.'
-  : `Podés ver el catálogo y armar el carrito. El checkout se habilita cuando abrimos: <strong>${HORARIO}</strong>.`;
+            const TH = '{{ FREE_SHIPPING_THRESHOLD|floatformat:0 }}';
+            const shippingHTML = (TH && TH !== '0')
+              ? `<span class="ms-1">🛵 Envío <strong>gratis</strong> a partir de <strong>$${TH}</strong>.</span>`
+              : '';
 
+            help.innerHTML = isOpen
+              ? `Podés ver el catálogo y armar el carrito. ${shippingHTML}`
+              : `Podés ver el catálogo y armar el carrito. El checkout se habilita cuando abrimos: <strong>${HORARIO}</strong>. ${shippingHTML}`;
           }
         }
 

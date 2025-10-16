@@ -267,6 +267,7 @@ TRANSFERENCIA_CUIT = os.getenv("TRANSFERENCIA_CUIT", "27-24776697-4")
 
 TEMPLATES[0]['OPTIONS']['context_processors'] += [
     'pedidos.context_processors.transferencia',
+ "pedidos.context_processors.shop_extras",
 ]
 
 FREE_SHIPPING_THRESHOLD = Decimal('10000')  # envío gratis desde $10.000

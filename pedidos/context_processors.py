@@ -1,5 +1,6 @@
 # pedidos/context_processors.py
 from django.conf import settings
+from decimal import Decimal
 
 def store_status(request):
     """
@@ -47,3 +48,9 @@ def transferencia(request):
         'TRANSFERENCIA_CUIT': getattr(settings, 'TRANSFERENCIA_CUIT', ''),
     }
 
+
+def shop_extras(_request):
+    return {
+        "TIENDA_ABIERTA": True,  # si ya lo tenías de antes, dejalo como estuviera
+        "FREE_SHIPPING_THRESHOLD": getattr(settings, "FREE_SHIPPING_THRESHOLD", Decimal("0")),
+    }
