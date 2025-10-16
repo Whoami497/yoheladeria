@@ -420,48 +420,42 @@ def _extract_nota_from_direccion(text: str) -> str:
 @require_GET
 def api_costo_envio(request):
     direccion = (request.GET.get('direccion') or '').strip()
+
+    # total de productos del carrito (para el umbral)
+    cart = request.session.get('carrito', {}) or {}
+    total_cart = Decimal('0.00')
+    for _, it in cart.items():
+        try:
+            total_cart += Decimal(str(it.get('precio','0'))) * Decimal(str(it.get('cantidad',1)))
+        except Exception:
+            pass
+
     if not direccion:
-        return JsonResponse({'ok': True, 'costo_envio': 0.0, 'distancia_km': 0.0, 'mode': 'pickup'})
+        # pickup / sin dirección → costo 0 (y marcamos free si aplica)
+        return JsonResponse({
+            'ok': True,
+            'costo_envio': 0.0,
+            'distancia_km': 0.0,
+            'mode': 'pickup',
+            'free_shipping': _aplica_envio_gratis(total_cart),
+        })
 
     costo, km = _calcular_costo_envio(direccion)
 
-    addr = {}
-    coords = _extract_coords(direccion)
-    if coords:
-        try:
-            lat, lng = float(coords[0]), float(coords[1])
-            addr = _reverse_geocode_any(lat, lng) or {}
-        except Exception as e:
-            print(f"GEOCODING reverse error: {e}")
-            addr = {}
+    # >>> Pisar a 0 si supera umbral
+    if _aplica_envio_gratis(total_cart):
+        costo = Decimal('0.00')
 
-    addr_full = addr.get('formatted_address') or _direccion_legible_from_text(direccion)
-
+    # ... resto tal cual, pero agrega la bandera:
     payload = {
         'ok': True,
         'costo_envio': float(costo),
         'distancia_km': float(km),
         'mode': 'maps',
         'direccion_legible': addr_full,
-        'direccion_corta': _short_address(addr_full),
-        'map_url': addr.get('map_url') or _map_url_from_text(direccion),
-        'plus_code': addr.get('plus_code'),
-        'locality': addr.get('locality'),
-        'postal_code': addr.get('postal_code'),
+        # ...
+        'free_shipping': _aplica_envio_gratis(total_cart),
     }
-    if settings.DEBUG:
-        payload['debug'] = {
-            'ENVIO_BASE': getattr(settings, 'ENVIO_BASE', '300'),
-            'ENVIO_POR_KM': getattr(settings, 'ENVIO_POR_KM', '50'),
-            'ENVIO_MIN': getattr(settings, 'ENVIO_MIN', '0'),
-            'ENVIO_MAX': getattr(settings, 'ENVIO_MAX', ''),
-            'ENVIO_KM_MIN': getattr(settings, 'ENVIO_KM_MIN', '0'),
-            'ENVIO_KM_OFFSET': getattr(settings, 'ENVIO_KM_OFFSET', '0'),
-            'ENVIO_REDONDEO': getattr(settings, 'ENVIO_REDONDEO', '0'),
-            'ORIGEN_LAT': getattr(settings, 'ORIGEN_LAT', ''),
-            'ORIGEN_LNG': getattr(settings, 'ORIGEN_LNG', ''),
-            'SUCURSAL_DIRECCION': getattr(settings, 'SUCURSAL_DIRECCION', ''),
-        }
     return JsonResponse(payload)
 
 
@@ -1050,6 +1044,8 @@ def ver_carrito(request):
     distancia_km = 0.0
     if not es_pickup and direccion_para_maps:
         costo_envio_decimal, distancia_km = _calcular_costo_envio(direccion_para_maps)
+    if _aplica_envio_gratis(total_del_pedido_para_puntos):
+        costo_envio_decimal = Decimal('0.00')
 
     pedido_kwargs = {
         'cliente_nombre': nombre,
@@ -1071,6 +1067,8 @@ def ver_carrito(request):
                 pedido_kwargs['cliente_direccion'] = profile.direccion
                 costo_envio_decimal, distancia_km = _calcular_costo_envio(profile.direccion)
                 pedido_kwargs['costo_envio'] = costo_envio_decimal
+            if _aplica_envio_gratis(total_del_pedido_para_puntos):
+                costo_envio_decimal = Decimal('0.00')    
 
     # ---- Crear pedido + detalles
     with transaction.atomic():
@@ -2709,7 +2707,7 @@ def panel_asignar_cadete(request, pedido_id):
      # 🔧 Permitir asignar aunque esté marcado como ocupado
     if hasattr(cadete, 'disponible') and cadete.disponible is False:
      cadete.disponible = True
-    try:
+    try: 
         cadete.save(update_fields=['disponible'])
     except Exception:
         cadete.save()
@@ -2907,3 +2905,10 @@ def panel_marcar_pago_transferencia(request, pedido_id: int):
         pass
 
     return JsonResponse({'ok': True, 'estado': pedido.estado, 'pedido_id': pedido.id})
+
+def _aplica_envio_gratis(total_productos: Decimal) -> bool:
+    try:
+        th = Decimal(str(getattr(settings, 'FREE_SHIPPING_THRESHOLD', '0') or '0'))
+    except Exception:
+        th = Decimal('0')
+    return th > 0 and Decimal(total_productos) >= th

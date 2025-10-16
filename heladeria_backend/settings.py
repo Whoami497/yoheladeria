@@ -268,5 +268,8 @@ TEMPLATES[0]['OPTIONS']['context_processors'] += [
     'pedidos.context_processors.transferencia',
 ]
 
+FREE_SHIPPING_THRESHOLD = Decimal('10000')  # envío gratis desde $10.000
+
+
 
 
