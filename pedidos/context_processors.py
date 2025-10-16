@@ -6,7 +6,7 @@ def store_status(request):
     """
     Variables globales disponibles en todos los templates.
     Lee TIENDA_ABIERTA desde GlobalSetting si existe; si no, cae a StoreStatus.
-    También expone TIENDA_MSG (mensaje opcional).
+    También expone TIENDA_MSG (mensaje opcional), VAPID y Maps.
     """
     abierta_default = bool(getattr(settings, 'TIENDA_ABIERTA_DEFAULT', True))
     abierta = abierta_default
@@ -36,11 +36,12 @@ def store_status(request):
     maps_key = getattr(settings, 'GOOGLE_MAPS_API_KEY', '')
 
     return {
-        'TIENDA_ABIERTA': abierta,
+        'TIENDA_ABIERTA': abierta,   # ← única fuente para templates
         'TIENDA_MSG': msg,
         'VAPID_PUBLIC_KEY': vapid_pub,
         'GOOGLE_MAPS_API_KEY': maps_key,
     }
+
 def transferencia(request):
     return {
         'TRANSFERENCIA_ALIAS': getattr(settings, 'TRANSFERENCIA_ALIAS', ''),
@@ -48,9 +49,8 @@ def transferencia(request):
         'TRANSFERENCIA_CUIT': getattr(settings, 'TRANSFERENCIA_CUIT', ''),
     }
 
-
 def shop_extras(_request):
+    # ⚠️ NO reinyectar TIENDA_ABIERTA acá (estaba forzando True y pisando al anterior).
     return {
-        "TIENDA_ABIERTA": True,  # si ya lo tenías de antes, dejalo como estuviera
-        "FREE_SHIPPING_THRESHOLD": getattr(settings, "FREE_SHIPPING_THRESHOLD", Decimal("0")),
+        'FREE_SHIPPING_THRESHOLD': getattr(settings, 'FREE_SHIPPING_THRESHOLD', Decimal('0')),
     }
