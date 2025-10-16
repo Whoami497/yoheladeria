@@ -3,6 +3,7 @@
 from pathlib import Path
 import os
 import dj_database_url
+from decimal import Decimal
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
