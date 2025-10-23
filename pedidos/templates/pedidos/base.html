@@ -483,6 +483,130 @@
       })();
     </script>
 
+    <!-- ===== GEO: pedir ubicación y bloquear pedidos fuera de zona ===== -->
+    <script>
+      (function(){
+        // --- CSRF (nuevo scope)
+        function getCookieGeo(name){
+          const v = `; ${document.cookie}`.split(`; ${name}=`);
+          if (v.length === 2) return v.pop().split(';').shift();
+        }
+        const csrftoken = getCookieGeo('csrftoken');
+
+        const API_SET = "{% url 'api_set_location' %}";
+        const API_CAN = "{% url 'api_can_order' %}";
+        const LS_KEY = 'geo_last_v1';
+
+        function disableCheckout(reasonHtml){
+          let el = document.getElementById('geoBlockModal');
+          if(!el){
+            const div = document.createElement('div');
+            div.innerHTML = `
+              <div class="modal fade" id="geoBlockModal" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered">
+                  <div class="modal-content">
+                    <div class="modal-header">
+                      <h5 class="modal-title">Fuera de cobertura</h5>
+                      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                    </div>
+                    <div class="modal-body">
+                      <div class="alert alert-warning mb-0">${reasonHtml}</div>
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Entendido</button>
+                    </div>
+                  </div>
+                </div>
+              </div>`;
+            document.body.appendChild(div.firstElementChild);
+            el = document.getElementById('geoBlockModal');
+          }
+          const modal = new bootstrap.Modal(el, {backdrop:'static', keyboard:false});
+          modal.show();
+
+          // Deshabilitar botones de acción típicos de checkout / pedido / retiro
+          document.querySelectorAll('a,button,input[type=submit]').forEach(b=>{
+            const t = (b.textContent || b.value || '').toLowerCase();
+            if (/pagar|pedido|checkout|finalizar|confirmar|retirar|retiro/i.test(t)) {
+              b.classList.add('disabled');
+              b.setAttribute('aria-disabled','true');
+              if ('disabled' in b) b.disabled = true;
+              b.addEventListener('click', (ev)=>{ ev.preventDefault(); ev.stopPropagation(); }, {capture:true});
+            }
+          });
+        }
+
+        async function postJSON(url, data){
+          const r = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type':'application/json',
+              'X-CSRFToken': csrftoken,
+              'X-Requested-With':'XMLHttpRequest'
+            },
+            body: JSON.stringify(data)
+          });
+          return r.json();
+        }
+
+        async function checkCoverage(){
+          const r = await fetch(API_CAN, {headers:{'X-Requested-With':'XMLHttpRequest'}});
+          return r.json();
+        }
+
+        async function sendPosition(lat,lng){
+          const j = await postJSON(API_SET, {lat, lng});
+          localStorage.setItem(LS_KEY, JSON.stringify({lat, lng, ts: Date.now()}));
+          if (j && j.ok && j.can_order === false) {
+            const km = (j.distance_km != null) ? j.distance_km.toFixed(2) : '?';
+            disableCheckout(`Tu ubicación está a ${km} km del local y el radio máximo es ${j.radius_km} km. No podemos tomar pedidos en esta zona.`);
+          }
+        }
+
+        async function initGeo(){
+          const last = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+
+          // Estado inicial (por si usuario negó permisos)
+          try {
+            const c0 = await checkCoverage();
+            if (c0 && c0.can_order === false) {
+              const km = (c0.distance_km != null) ? c0.distance_km.toFixed(2) : '?';
+              disableCheckout(`Estás a ${km} km del local (radio ${c0.radius_km} km).`);
+            }
+          } catch (_) {}
+
+          if (!navigator.geolocation) return;
+
+          navigator.geolocation.getCurrentPosition(async pos=>{
+            const { latitude, longitude } = pos.coords;
+            // Si casi no cambió, no spamear
+            if (last && Math.abs(last.lat - latitude) < 0.0008 && Math.abs(last.lng - longitude) < 0.0008) {
+              try {
+                const c1 = await checkCoverage();
+                if (c1 && c1.can_order === false) {
+                  const km = (c1.distance_km != null) ? c1.distance_km.toFixed(2) : '?';
+                  disableCheckout(`Estás a ${km} km del local (radio ${c1.radius_km} km).`);
+                }
+              } catch (_){}
+              return;
+            }
+            await sendPosition(latitude, longitude);
+          }, async (_err)=>{
+            // Si falla el permiso, igual chequear contra server (usa última ubi guardada/sesión si hay)
+            try {
+              const c2 = await checkCoverage();
+              if (c2 && c2.can_order === false) {
+                const km = (c2.distance_km != null) ? c2.distance_km.toFixed(2) : '?';
+                disableCheckout(`Estás a ${km} km del local (radio ${c2.radius_km} km).`);
+              }
+            } catch (_){}
+          }, { enableHighAccuracy:false, timeout:7000, maximumAge: 120000 });
+        }
+
+        document.addEventListener('DOMContentLoaded', initGeo);
+      })();
+    </script>
+
     {% block extra_js %}{% endblock %}
   </body>
 </html>

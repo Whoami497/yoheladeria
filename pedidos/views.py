@@ -15,9 +15,12 @@ from django.utils import timezone
 from datetime import timedelta
 from django.views.decorators.csrf import csrf_exempt
 from decimal import Decimal, ROUND_HALF_UP
+from django.http import JsonResponse, HttpRequest
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.apps import apps
+from .utils.geo import haversine_km
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 import json
 import mercadopago
 import requests
@@ -34,6 +37,8 @@ from .models import (
     Producto, Sabor, Pedido, DetallePedido, Categoria,
     OpcionProducto, ClienteProfile, ProductoCanje, CadeteProfile
 )
+import json, time
+from .utils.geo import is_inside_radius, distance_from_store
 
 # ====== Forms ======
 try:
@@ -2807,7 +2812,7 @@ def comandera_test(request):
         'COMANDERA_COPIES': getattr(settings, 'COMANDERA_COPIES', 1),
     }
     return JsonResponse({'ok': True, 'diagnostico': results})
-from django.views.decorators.http import require_POST
+
 
 @staff_member_required
 @require_POST
@@ -2924,3 +2929,109 @@ def _aplica_envio_gratis(total_productos: Decimal) -> bool:
     except Exception:
         th = Decimal('0')
     return th > 0 and Decimal(total_productos) >= th
+
+
+# Helpers de config con defaults seguros
+STORE_COORDS = getattr(settings, "STORE_COORDS", {"lat": -28.4725234, "lng": -65.7937524})
+DELIVERY_RADIUS_KM = float(getattr(settings, "DELIVERY_RADIUS_KM", 4.0))
+ALLOW_PICKUP_OUTSIDE_RADIUS = bool(getattr(settings, "ALLOW_PICKUP_OUTSIDE_RADIUS", False))
+
+SESSION_KEY = "user_geo"  # donde guardamos la última ubicación del usuario
+
+def _compute_status(lat: float, lng: float):
+    """Calcula distancia al local y si está dentro del radio."""
+    dist = haversine_km(float(lat), float(lng), float(STORE_COORDS["lat"]), float(STORE_COORDS["lng"]))
+    inside = dist <= DELIVERY_RADIUS_KM
+    return dist, inside
+
+@require_POST
+def api_set_location(request: HttpRequest):
+    """
+    Guarda lat/lng del usuario en sesión y devuelve si puede pedir.
+    Acepta Content-Type: application/json o form-data.
+    """
+    try:
+        if request.content_type and "application/json" in request.content_type.lower():
+            data = json.loads(request.body.decode("utf-8") or "{}")
+        else:
+            data = request.POST
+        lat = float(data.get("lat"))
+        lng = float(data.get("lng"))
+    except Exception:
+        return JsonResponse({"ok": False, "error": "bad_params"}, status=400)
+
+    dist, inside = _compute_status(lat, lng)
+
+    # Guardamos en sesión
+    request.session[SESSION_KEY] = {"lat": lat, "lng": lng, "dist_km": dist, "inside": inside}
+    request.session.modified = True
+
+    can_order = inside or ALLOW_PICKUP_OUTSIDE_RADIUS is True
+    return JsonResponse({
+        "ok": True,
+        "distance_km": round(dist, 3),
+        "inside": inside,
+        "can_order": can_order,
+        "radius_km": DELIVERY_RADIUS_KM,
+    })
+
+def api_can_order(request: HttpRequest):
+    """
+    Devuelve el estado actual según lo guardado en sesión.
+    Si no hay ubicación aún, can_order=False y pedimos location al front.
+    """
+    geo = request.session.get(SESSION_KEY)
+    if not geo:
+        return JsonResponse({"ok": True, "have_location": False, "can_order": False})
+
+    dist, inside = _compute_status(geo.get("lat"), geo.get("lng"))
+    can_order = inside or ALLOW_PICKUP_OUTSIDE_RADIUS is True
+
+    # refrescamos en sesión por si cambió la config
+    geo.update({"dist_km": dist, "inside": inside})
+    request.session[SESSION_KEY] = geo
+    request.session.modified = True
+
+    return JsonResponse({
+        "ok": True,
+        "have_location": True,
+        "distance_km": round(dist, 3),
+        "inside": inside,
+        "can_order": can_order,
+        "radius_km": DELIVERY_RADIUS_KM,
+    })
+@require_POST
+def api_set_location(request):
+    """
+    Guarda ubicación (lat, lng, addr?) en sesión y devuelve si está dentro del radio.
+    """
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        lat = float(payload.get("lat"))
+        lng = float(payload.get("lng"))
+        addr = (payload.get("addr") or "").strip()
+    except Exception:
+        return JsonResponse({"ok": False, "error": "bad_payload"}, status=400)
+
+    inside = is_inside_radius(lat, lng)
+    dist = distance_from_store(lat, lng)
+
+    request.session["yh_geo"] = {"lat": lat, "lng": lng, "addr": addr, "ts": int(time.time())}
+    request.session["yh_inside"] = bool(inside)
+    request.session.modified = True
+
+    return JsonResponse({"ok": True, "inside": inside, "dist_km": round(dist, 2)})
+
+def assert_inside_or_redirect(request):
+    """
+    Usalo en vistas sensibles (checkout, retiro, confirmar).
+    Devuelve True si puede continuar, False si lo redirigimos con mensaje.
+    """
+    geo = request.session.get("yh_geo")
+    if not geo:
+        messages.error(request, "Necesitamos tu ubicación para continuar.")
+        return False
+    if not is_inside_radius(geo["lat"], geo["lng"]):
+        messages.error(request, "Estás fuera de la zona de cobertura.")
+        return False
+    return True

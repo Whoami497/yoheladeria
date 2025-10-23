@@ -41,7 +41,6 @@ urlpatterns = [
     path('panel-alertas/data/', views.panel_alertas_data, name='panel_alertas_data'),
     path('panel-alertas/board/', views.panel_alertas, name='panel_alertas_board'),
     path('panel-alertas/anteriores/', views.panel_alertas_anteriores, name='panel_alertas_anteriores'),
-    path('panel-alertas/estado/<int:pedido_id>/', views.panel_alertas_set_estado, name='panel_alertas_set_estado'),
     # Confirmación de pedido (tienda)
     path('confirmar-pedido/<int:pedido_id>/', views.confirmar_pedido, name='confirmar_pedido'),
     # Alias opcional por si algún botón viejo apunta a esta ruta
@@ -68,22 +67,23 @@ urlpatterns = [
     path('pagos/mp/success/', views.mp_success, name='mp_success'),
     path('pagos/mp/refund/<int:pedido_id>/', views.mp_refund, name='mp_refund'),
 
-    # --- Service Worker (ambos alias por si alguno te queda cacheado) ---
-    path('sw.js', views.service_worker, name='service_worker'),
-    path('service-worker.js', views.service_worker, name='service_worker_root'),
-
     # --- Otros ---
     path('pedido/en-curso/', views.pedido_en_curso, name='pedido_en_curso'),
     path('panel-alertas/cadetes.json', views.panel_alertas_data, name='panel_cadetes_data'),
     path('panel-alertas/asignar/<int:pedido_id>/', views.panel_asignar_cadete, name='panel_asignar_cadete'),
     path('panel-alertas/reimprimir/<int:pedido_id>/', views.reimprimir_ticket, name='reimprimir_ticket'),
-    path('comandera-test/', views.comandera_test, name='comandera_test'),
     
     # transferencia mp
     path('pago/transferencia/instrucciones/', views.transferencia_instrucciones, name='transferencia_instrucciones'),
     path('pago/transferencia/avise/<int:pedido_id>/', views.transferencia_avise, name='transferencia_avise'),
 
     # Pago transferencia desde panel
-    path('panel-alertas/pago-transferencia/<int:pedido_id>/', views.panel_marcar_pago_transferencia,
-     name='panel_marcar_pago_transferencia'),
+    path(
+        'panel-alertas/pago-transferencia/<int:pedido_id>/',
+        views.panel_marcar_pago_transferencia,
+        name='panel_marcar_pago_transferencia'
+    ),
+    path("api/location/set/", views.api_set_location, name="api_set_location"),
+    path("api/location/can-order/", views.api_can_order, name="api_can_order"),
+    path("api/set-location/", views.api_set_location, name="api_set_location"),
 ]

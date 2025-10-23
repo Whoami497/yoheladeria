@@ -54,3 +54,8 @@ def shop_extras(_request):
     return {
         'FREE_SHIPPING_THRESHOLD': getattr(settings, 'FREE_SHIPPING_THRESHOLD', Decimal('0')),
     }
+def pwa_flags(_request):
+    from django.conf import settings
+    return {
+        'PWA_ENABLE': getattr(settings, 'PWA_ENABLE', False),
+    }
