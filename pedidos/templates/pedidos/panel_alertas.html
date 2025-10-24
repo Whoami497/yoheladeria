@@ -8,15 +8,13 @@
 
   <!-- ===== ESTADO TIENDA + TOGGLE ===== -->
   <div class="d-flex align-items-center justify-content-center gap-3 mb-3 flex-wrap">
-    <span id="tienda-estado-badge"
-          class="badge {% if TIENDA_ABIERTA %}bg-success{% else %}bg-danger{% endif %}">
+    <span id="tienda-estado-badge" class="badge {% if TIENDA_ABIERTA %}bg-success{% else %}bg-danger{% endif %}">
       {% if TIENDA_ABIERTA %}Tienda ABIERTA{% else %}Tienda CERRADA{% endif %}
     </span>
 
     <form id="form-toggle-tienda" method="post" action="{% url 'tienda_toggle' %}" class="d-inline">
       {% csrf_token %}
-      <button type="submit" id="btn-toggle-tienda"
-              class="btn {% if TIENDA_ABIERTA %}btn-outline-danger{% else %}btn-outline-success{% endif %}">
+      <button type="submit" id="btn-toggle-tienda" class="btn {% if TIENDA_ABIERTA %}btn-outline-danger{% else %}btn-outline-success{% endif %}">
         {% if TIENDA_ABIERTA %}Apagar sistema{% else %}Encender sistema{% endif %}
       </button>
     </form>
@@ -40,123 +38,125 @@
   <div id="alerts-hoy">
     {% if pedidos_hoy %}
       {% for p in pedidos_hoy %}
-        <div
-          class="order-card alert alert-primary alert-dismissible fade show mb-3 p-3"
-          id="order-{{ p.id }}"
-          data-order-id="{{ p.id }}"
-          data-estado="{{ p.estado }}"
-          data-ts-pedido="{{ p.fecha_pedido|date:'c' }}"
-          data-ts-pago="{{ p.fecha_pago_aprobado|date:'c' }}"
-          data-ts-preparacion="{{ p.fecha_en_preparacion|date:'c' }}"
-          data-ts-asignado="{{ p.fecha_asignado|date:'c' }}"
-          data-ts-camino="{{ p.fecha_en_camino|date:'c' }}"
-          data-ts-entregado="{{ p.fecha_entregado|date:'c' }}"
-          data-ts-cancelado="{{ p.fecha_cancelado|date:'c' }}"
-        >
-          <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
-            <div class="flex-grow-1">
-              <div class="d-flex align-items-center gap-2 mb-1">
-                <h6 class="mb-0">#{{ p.id }}</h6>
-                <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
-                <small class="text-muted">Total: ${{ p.total_pedido|default_if_none:"0.00"|floatformat:2 }}</small>
-              </div>
-
-              <div class="small text-muted mb-1 d-flex align-items-center flex-wrap gap-1">
-                <span>Cliente: <span class="fw-semibold">{{ p.cliente_nombre|default:"N/A" }}</span></span>
-                <span>· {{ p.cliente_telefono|default:"—" }}</span>
-                <span class="addr-ellipsis" title="{{ p.direccion_legible|default:'—' }}">· {{ p.direccion_legible|default:"—" }}</span>
-                {% if p.map_url %}
-                  <a class="btn btn-sm btn-outline-primary ms-2" target="_blank" href="{{ p.map_url }}">Ver mapa</a>
-                {% endif %}
-              </div>
-
-              <div class="small text-muted">
-                Envío:
-                {% if p.costo_envio %}
-                  ${{ p.costo_envio|floatformat:2 }}
-                {% else %}
-                  a calcular
-                {% endif %}
-              </div>
-
-              <div class="small mt-1">
-                Cadete:
-                <span class="fw-semibold cadete-name">
-                  {% if p.cadete_asignado %}
-                    {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
-                  {% else %}—{% endif %}
-                </span>
-              </div>
-
-              <details class="mt-2">
-                <summary class="cursor-pointer">Ver productos</summary>
-                <ul class="mb-0 small mt-2">
-                  {% for d in p.detalles.all %}
-                    <li>
-                      {{ d.producto.nombre }}{% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %} (x{{ d.cantidad }})
-                      <br><span class="text-muted">Sabores:
-                        {% with sab=d.sabores.all %}{% if sab %}{{ sab|join:", " }}{% else %}Sin especificar{% endif %}{% endwith %}
-                      </span>
-                    </li>
-                  {% endfor %}
-                </ul>
-              </details>
-
-              <!-- Línea de tiempo -->
-              <details class="mt-2 timeline-details">
-                <summary class="cursor-pointer">Ver tiempos</summary>
-                <div class="mt-2 small" id="timeline-{{ p.id }}"></div>
-              </details>
+      <div
+        class="order-card alert alert-primary alert-dismissible fade show mb-3 p-3"
+        id="order-{{ p.id }}"
+        data-order-id="{{ p.id }}"
+        data-estado="{{ p.estado }}"
+        data-ts-pedido="{{ p.fecha_pedido|date:'c' }}"
+        data-ts-pago="{{ p.fecha_pago_aprobado|date:'c' }}"
+        data-ts-preparacion="{{ p.fecha_en_preparacion|date:'c' }}"
+        data-ts-asignado="{{ p.fecha_asignado|date:'c' }}"
+        data-ts-camino="{{ p.fecha_en_camino|date:'c' }}"
+        data-ts-entregado="{{ p.fecha_entregado|date:'c' }}"
+        data-ts-cancelado="{{ p.fecha_cancelado|date:'c' }}"
+      >
+        <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
+          <div class="flex-grow-1">
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <h6 class="mb-0">#{{ p.id }}</h6>
+              <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
+              <small class="text-muted">Total: ${{ p.total_pedido|default_if_none:"0.00"|floatformat:2 }}</small>
             </div>
 
-            <div class="text-end min-btn-col">
-              {% if p.estado == 'RECIBIDO' %}
-                <button class="btn btn-success fw-bold btn-confirm"
-                        data-confirm-url="{% url 'confirmar_pedido' p.id %}"
-                        data-order-id="{{ p.id }}">
-                  <i class="bi bi-check-circle-fill"></i> Confirmar
-                </button>
-                <div class="text-muted small mt-1">Notifica a cadetes</div>
-              {% else %}
-                <div class="dropdown mb-2">
-                  <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">
-                    Estado
-                  </button>
-                  <ul class="dropdown-menu dropdown-menu-end">
-                    <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="{% url 'panel_alertas_set_estado' p.id %}">En preparación</button></li>
-                    <!-- SIN 'ASIGNADO' -->
-                    <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="{% url 'panel_alertas_set_estado' p.id %}">En camino</button></li>
-                    <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Entregado</button></li>
-                    <li><hr class="dropdown-divider"></li>
-                    <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Cancelar</button></li>
-                  </ul>
-                </div>
+            <div class="small text-muted mb-1 d-flex align-items-center flex-wrap gap-1">
+              <span>Cliente: <span class="fw-semibold">{{ p.cliente_nombre|default:"N/A" }}</span></span>
+              <span>· {{ p.cliente_telefono|default:"—" }}</span>
+              <span class="addr-ellipsis" title="{{ p.direccion_legible|default:'—' }}">· {{ p.direccion_legible|default:"—" }}</span>
+              {% if p.map_url %}
+                <a class="btn btn-sm btn-outline-primary ms-2" target="_blank" href="{{ p.map_url }}">Ver mapa</a>
               {% endif %}
-
-              <!-- Reimprimir -->
-              <button
-                class="btn btn-sm btn-outline-secondary mb-2 btn-reprint w-100"
-                data-url="{% url 'comandera_test' %}?pedido={{ p.id }}"
-                data-order-id="{{ p.id }}">
-                🖨 Reimprimir
-              </button>
-
-              <!-- Asignación manual -->
-              <div class="assignment-box">
-                <div class="input-group input-group-sm mb-1">
-                  <select class="form-select cadete-select" data-pedido="{{ p.id }}">
-                    <option value="0">— Modo “a todos” —</option>
-                  </select>
-                  <button class="btn btn-outline-primary btn-asignar-cadete" data-pedido="{{ p.id }}">Asignar</button>
-                </div>
-                <button class="btn btn-sm btn-outline-secondary btn-desasignar-cadete w-100" data-pedido="{{ p.id }}">A todos</button>
-                <small class="text-muted d-block mt-1">Elegí un cadete o desasigná para que lo tomen todos.</small>
-              </div>
             </div>
+
+            <div class="small text-muted">
+              Envío:
+              {% if p.costo_envio %}
+                ${{ p.costo_envio|floatformat:2 }}
+              {% else %}
+                a calcular
+              {% endif %}
+            </div>
+
+            <div class="small mt-1">
+              Cadete:
+              <span class="fw-semibold cadete-name">
+                {% if p.cadete_asignado %}
+                  {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
+                {% else %}—{% endif %}
+              </span>
+            </div>
+
+            <details class="mt-2">
+              <summary class="cursor-pointer">Ver productos</summary>
+              <ul class="mb-0 small mt-2">
+                {% for d in p.detalles.all %}
+                  <li>
+                    {{ d.producto.nombre }}{% if d.opcion_seleccionada %} - {{ d.opcion_seleccionada.nombre_opcion }}{% endif %} (x{{ d.cantidad }})
+                    <br><span class="text-muted">Sabores:
+                      {% with sab=d.sabores.all %}
+                        {% if sab %}{{ sab|join:", " }}{% else %}Sin especificar{% endif %}
+                      {% endwith %}
+                    </span>
+                  </li>
+                {% endfor %}
+              </ul>
+            </details>
+
+            <!-- Línea de tiempo -->
+            <details class="mt-2 timeline-details">
+              <summary class="cursor-pointer">Ver tiempos</summary>
+              <div class="mt-2 small" id="timeline-{{ p.id }}"></div>
+            </details>
           </div>
 
-          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          <div class="text-end min-btn-col">
+            {% if p.estado == 'RECIBIDO' %}
+              <button
+                class="btn btn-success fw-bold btn-confirm"
+                data-confirm-url="{% url 'confirmar_pedido' p.id %}"
+                data-order-id="{{ p.id }}"
+              >
+                <i class="bi bi-check-circle-fill"></i> Confirmar
+              </button>
+              <div class="text-muted small mt-1">Notifica a cadetes</div>
+            {% else %}
+              <div class="dropdown mb-2">
+                <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown"> Estado </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                  <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="{% url 'panel_alertas_set_estado' p.id %}">En preparación</button></li>
+                  <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="{% url 'panel_alertas_set_estado' p.id %}">En camino</button></li>
+                  <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Entregado</button></li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Cancelar</button></li>
+                </ul>
+              </div>
+            {% endif %}
+
+            <!-- Reimprimir -->
+            <button
+              class="btn btn-sm btn-outline-secondary mb-2 btn-reprint w-100"
+              data-url="{% url 'comandera_test' %}?pedido={{ p.id }}"
+              data-order-id="{{ p.id }}"
+            >
+              🖨 Reimprimir
+            </button>
+
+            <!-- Asignación manual -->
+            <div class="assignment-box">
+              <div class="input-group input-group-sm mb-1">
+                <select class="form-select cadete-select" data-pedido="{{ p.id }}">
+                  <option value="0">— Modo “a todos” —</option>
+                </select>
+                <button class="btn btn-outline-primary btn-asignar-cadete" data-pedido="{{ p.id }}">Asignar</button>
+              </div>
+              <button class="btn btn-sm btn-outline-secondary btn-desasignar-cadete w-100" data-pedido="{{ p.id }}">A todos</button>
+              <small class="text-muted d-block mt-1">Elegí un cadete o desasigná para que lo tomen todos.</small>
+            </div>
+          </div>
         </div>
+
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
       {% endfor %}
     {% else %}
       <div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>
@@ -169,32 +169,32 @@
     <div id="alerts-hoy-finalizados" class="mt-3">
       {% if entregados_hoy %}
         {% for p in entregados_hoy %}
-          <div class="order-chip d-flex align-items-center justify-content-between" id="chip-hoy-{{ p.id }}" data-order-id="{{ p.id }}">
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-              <span class="chip-id">#{{ p.id }}</span>
-              <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
-              <span class="text-muted small">$ {{ p.total_pedido|default_if_none:"0.00"|floatformat:2 }}</span>
-              <span class="small text-truncate chip-client">{{ p.cliente_nombre|default:"N/A" }}</span>
-              <span class="small text-muted">· Cadete:
-                {% if p.cadete_asignado %}
-                  {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
-                {% else %}—{% endif %}
-              </span>
-              {% if p.costo_envio %}
-                <span class="small text-muted">· Envío ${{ p.costo_envio|floatformat:2 }}</span>
-              {% endif %}
-            </div>
-            <div class="dropdown">
-              <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
-              <ul class="dropdown-menu dropdown-menu-end">
-                <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="{% url 'panel_alertas_set_estado' p.id %}">En preparación</button></li>
-                <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="{% url 'panel_alertas_set_estado' p.id %}">En camino</button></li>
-                <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Entregado</button></li>
-                <li><hr class="dropdown-divider"></li>
-                <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Cancelar</button></li>
-              </ul>
-            </div>
+        <div class="order-chip d-flex align-items-center justify-content-between" id="chip-hoy-{{ p.id }}" data-order-id="{{ p.id }}">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="chip-id">#{{ p.id }}</span>
+            <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
+            <span class="text-muted small">$ {{ p.total_pedido|default_if_none:"0.00"|floatformat:2 }}</span>
+            <span class="small text-truncate chip-client">{{ p.cliente_nombre|default:"N/A" }}</span>
+            <span class="small text-muted">· Cadete:
+              {% if p.cadete_asignado %}
+                {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
+              {% else %}—{% endif %}
+            </span>
+            {% if p.costo_envio %}
+              <span class="small text-muted">· Envío ${{ p.costo_envio|floatformat:2 }}</span>
+            {% endif %}
           </div>
+          <div class="dropdown">
+            <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="{% url 'panel_alertas_set_estado' p.id %}">En preparación</button></li>
+              <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="{% url 'panel_alertas_set_estado' p.id %}">En camino</button></li>
+              <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Entregado</button></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Cancelar</button></li>
+            </ul>
+          </div>
+        </div>
         {% endfor %}
       {% else %}
         <div class="alert alert-light border text-center">Sin pedidos finalizados de hoy.</div>
@@ -208,32 +208,32 @@
     <div id="alerts-ayer" class="mt-3">
       {% if pedidos_ayer %}
         {% for p in pedidos_ayer %}
-          <div class="order-chip d-flex align-items-center justify-content-between" id="chip-{{ p.id }}" data-order-id="{{ p.id }}">
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-              <span class="chip-id">#{{ p.id }}</span>
-              <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
-              <span class="text-muted small">$ {{ p.total_pedido|default_if_none:"0.00"|floatformat:2 }}</span>
-              <span class="small text-truncate chip-client">{{ p.cliente_nombre|default:"N/A" }}</span>
-              <span class="small text-muted">· Cadete:
-                {% if p.cadete_asignado %}
-                  {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
-                {% else %}—{% endif %}
-              </span>
-              {% if p.costo_envio %}
-                <span class="small text-muted">· Envío ${{ p.costo_envio|floatformat:2 }}</span>
-              {% endif %}
-            </div>
-            <div class="dropdown">
-              <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
-              <ul class="dropdown-menu dropdown-menu-end">
-                <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="{% url 'panel_alertas_set_estado' p.id %}">En preparación</button></li>
-                <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="{% url 'panel_alertas_set_estado' p.id %}">En camino</button></li>
-                <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Entregado</button></li>
-                <li><hr class="dropdown-divider"></li>
-                <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Cancelar</button></li>
-              </ul>
-            </div>
+        <div class="order-chip d-flex align-items-center justify-content-between" id="chip-{{ p.id }}" data-order-id="{{ p.id }}">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="chip-id">#{{ p.id }}</span>
+            <span class="badge bg-status-{{ p.estado|lower }}">{{ p.estado }}</span>
+            <span class="text-muted small">$ {{ p.total_pedido|default_if_none:"0.00"|floatformat:2 }}</span>
+            <span class="small text-truncate chip-client">{{ p.cliente_nombre|default:"N/A" }}</span>
+            <span class="small text-muted">· Cadete:
+              {% if p.cadete_asignado %}
+                {{ p.cadete_asignado.user.get_full_name|default:p.cadete_asignado.user.username }}
+              {% else %}—{% endif %}
+            </span>
+            {% if p.costo_envio %}
+              <span class="small text-muted">· Envío ${{ p.costo_envio|floatformat:2 }}</span>
+            {% endif %}
           </div>
+          <div class="dropdown">
+            <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="{% url 'panel_alertas_set_estado' p.id %}">En preparación</button></li>
+              <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="{% url 'panel_alertas_set_estado' p.id %}">En camino</button></li>
+              <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Entregado</button></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="{% url 'panel_alertas_set_estado' p.id %}">Cancelar</button></li>
+            </ul>
+          </div>
+        </div>
         {% endfor %}
       {% else %}
         <div class="alert alert-light border text-center">Sin pedidos de ayer.</div>
@@ -258,598 +258,731 @@
 </div>
 
 <script>
-  // ================== CONFIG ==================
-  const WS_PATH  = (location.protocol === 'https:' ? 'wss://' : 'ws://')
-                 + location.host + '/ws/pedidos/notifications/';
-  const POLL_URL = "{% url 'panel_alertas_data' %}?scope=hoy";
-  const POLL_MS  = 20000;      // 20s
-  const RELOAD_MIN = 10;       // si pasan 10 min sin WS, recarga
-  const orderSoundUrl = "{% static 'pedidos/sounds/new-order.mp3' %}";
+// ================== CONFIG ==================
+const WS_PATH = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/pedidos/notifications/';
+const POLL_URL = "{% url 'panel_alertas_data' %}?scope=hoy";
+const POLL_MS = 20000; // 20s
+const RELOAD_MIN = 10; // si pasan 10 min sin WS, recarga
+const orderSoundUrl = "{% static 'pedidos/sounds/new-order.mp3' %}";
 
-  // ===== Endpoints cadetes =====
-  const urlCadetesData = "{% url 'panel_alertas_data' %}?scope=cadetes";
-  const urlAsignarBase = "{% url 'panel_asignar_cadete' 0 %}"; // reemplazar /0/ por /<pedido_id>/
+// URL base correcta para set-estado
+const URL_SET_ESTADO_BASE = "{% url 'panel_alertas_set_estado' 0 %}".replace('/0/', '/');
 
-  // ===== CSRF =====
-  function getCookie(name){
-    const value=`; ${document.cookie}`; const parts=value.split(`; ${name}=`); if(parts.length===2) return parts.pop().split(';').shift();
-  }
-  const csrftoken=getCookie('csrftoken');
+// ===== Endpoints cadetes =====
+const urlCadetesData = "{% url 'panel_alertas_data' %}?scope=cadetes";
+const urlAsignarBase = "{% url 'panel_asignar_cadete' 0 %}"; // reemplazar /0/ por /<pedido_id>/
 
-  // ================== SONIDO ==================
-  let soundEnabled = (localStorage.getItem('panel_sound') ?? 'on') !== 'off';
-  const btnToggleSound = document.getElementById('toggle-sound');
-  const btnTestSound   = document.getElementById('test-sound');
-  const soundStatus    = document.getElementById('sound-status');
-  const audioEl = new Audio(orderSoundUrl); audioEl.preload = 'auto';
-  let audioUnlocked = false;
+// ===== CSRF =====
+function getCookie(name){
+  const cookies = document.cookie ? document.cookie.split('; ') : [];
+  for (let i=0; i<cookies.length; i++){
+    const [k, v] = cookies[i].split('=');
+    if (k === name) return decodeURIComponent(v);
+  }
+  return null;
+}
+const csrftoken = getCookie('csrftoken');
 
-  function updateSoundBtn(){
-    btnToggleSound.textContent = soundEnabled ? '🔔 Sonido: ON' : '🔕 Sonido: OFF';
-    btnToggleSound.classList.toggle('btn-outline-primary', soundEnabled);
-    btnToggleSound.classList.toggle('btn-outline-secondary', !soundEnabled);
-  }
-  function unlockAudio(){
-    audioEl.play().then(()=>{
-      audioEl.pause(); audioEl.currentTime = 0; audioUnlocked = true; soundStatus.classList.add('d-none');
-    }).catch(()=>{ audioUnlocked = false; soundStatus.classList.remove('d-none'); });
-  }
-  function playSound(){
-    if(!soundEnabled) return;
-    if(!audioUnlocked){ unlockAudio(); return; }
-    try{ audioEl.currentTime = 0; audioEl.play().catch(()=>{}); }catch(e){}
-  }
-  btnToggleSound.addEventListener('click', ()=>{
-    soundEnabled = !soundEnabled; localStorage.setItem('panel_sound', soundEnabled ? 'on':'off');
-    updateSoundBtn(); if(soundEnabled) unlockAudio();
+// ================== SONIDO ==================
+let soundEnabled = (localStorage.getItem('panel_sound') ?? 'on') !== 'off';
+const btnToggleSound = document.getElementById('toggle-sound');
+const btnTestSound = document.getElementById('test-sound');
+const soundStatus = document.getElementById('sound-status');
+const audioEl = new Audio(orderSoundUrl);
+audioEl.preload = 'auto';
+let audioUnlocked = false;
+
+function updateSoundBtn(){
+  btnToggleSound.textContent = soundEnabled ? '🔔 Sonido: ON' : '🔕 Sonido: OFF';
+  btnToggleSound.classList.toggle('btn-outline-primary', soundEnabled);
+  btnToggleSound.classList.toggle('btn-outline-secondary', !soundEnabled);
+}
+function unlockAudio(){
+  audioEl.play().then(()=>{
+    audioEl.pause(); audioEl.currentTime = 0;
+    audioUnlocked = true;
+    soundStatus.classList.add('d-none');
+  }).catch(()=>{
+    audioUnlocked = false;
+    soundStatus.classList.remove('d-none');
   });
-  btnTestSound.addEventListener('click', ()=>{ unlockAudio(); if(soundEnabled){ try{ audioEl.currentTime=0; audioEl.play().catch(()=>{});}catch(e){} }});
-  ['click','touchstart','keydown'].forEach(evt=>{
-    document.addEventListener(evt, function once(){ if(!audioUnlocked) unlockAudio(); document.removeEventListener(evt, once, {passive:true}); }, {passive:true});
-  });
+}
+function playSound(){
+  if(!soundEnabled) return;
+  if(!audioUnlocked){ unlockAudio(); return; }
+  try{ audioEl.currentTime = 0; audioEl.play().catch(()=>{}); }catch(e){}
+}
+btnToggleSound.addEventListener('click', ()=>{
+  soundEnabled = !soundEnabled;
+  localStorage.setItem('panel_sound', soundEnabled ? 'on':'off');
   updateSoundBtn();
+  if(soundEnabled) unlockAudio();
+});
+btnTestSound.addEventListener('click', ()=>{
+  unlockAudio();
+  if(soundEnabled){ try{ audioEl.currentTime=0; audioEl.play().catch(()=>{});}catch(e){} }
+});
+['click','touchstart','keydown'].forEach(evt=>{
+  document.addEventListener(evt, function once(){
+    if(!audioUnlocked) unlockAudio();
+    document.removeEventListener(evt, once, {passive:true});
+  }, {passive:true});
+});
+updateSoundBtn();
 
-  // ================== LAST SEEN ==================
-  function getLastSeen(){ return parseInt(localStorage.getItem('last_seen_order_id') || '0', 10); }
-  function setLastSeen(id){ if(id) localStorage.setItem('last_seen_order_id', String(id)); }
+// ================== LAST SEEN ==================
+function getLastSeen(){ return parseInt(localStorage.getItem('last_seen_order_id') || '0', 10); }
+function setLastSeen(id){ if(id) localStorage.setItem('last_seen_order_id', String(id)); }
 
-  // Tomar baseline al entrar
-  let baselineDone = false;
-  async function baselineFromServer(){
-    try{
-      const r = await fetch(POLL_URL, {cache:'no-store'});
-      const j = await r.json();
-      if(j && j.ok && Array.isArray(j.pedidos)){
-        const maxId = j.pedidos.reduce((m,p)=>Math.max(m, Number(p.id||0)), 0);
-        if(getLastSeen() === 0) setLastSeen(maxId);
-        baselineDone = true;
-      }
-    }catch(e){}
-  }
-
-  // ================== HELPERS UI ==================
-  const alertsHoy=document.getElementById('alerts-hoy');
-  const alertsHoyFinalizados=document.getElementById('alerts-hoy-finalizados');
-  const alertsAyer=document.getElementById('alerts-ayer');
-  const wsStatus=document.getElementById('ws-status');
-  const tiendaBadge = document.getElementById('tienda-estado-badge');
-  const tiendaForm  = document.getElementById('form-toggle-tienda');
-  const tiendaBtn   = document.getElementById('btn-toggle-tienda');
-
-  function applyStoreState(isOpen){
-    if(!tiendaBadge || !tiendaBtn) return;
-    tiendaBadge.classList.toggle('bg-success', !!isOpen);
-    tiendaBadge.classList.toggle('bg-danger', !isOpen);
-    tiendaBadge.textContent = isOpen ? 'Tienda ABIERTA' : 'Tienda CERRADA';
-    tiendaBtn.classList.toggle('btn-outline-danger', !!isOpen);
-    tiendaBtn.classList.toggle('btn-outline-success', !isOpen);
-    tiendaBtn.textContent = isOpen ? 'Apagar sistema' : 'Encender sistema';
-  }
-  if(tiendaForm){
-    tiendaForm.addEventListener('submit', async (e)=>{
-      e.preventDefault(); tiendaBtn.disabled = true;
-      try{
-        const res = await fetch(tiendaForm.action, { method:'POST', headers:{ 'X-CSRFToken': csrftoken, 'X-Requested-With':'XMLHttpRequest' }});
-        const ct = (res.headers.get('content-type') || '').toLowerCase();
-        if(ct.includes('application/json')){
-          const data = await res.json(); if(data && 'abierta' in data){ applyStoreState(!!data.abierta);} else { e.target.submit(); }
-        }else{ e.target.submit(); }
-      }catch(err){ e.target.submit(); } finally{ tiendaBtn.disabled = false; }
-    });
-  }
-  function badgeClass(estado){return `bg-status-${(estado||'').toLowerCase()}`}
-  function orderExists(id){
-    return document.getElementById(`order-${id}`) || document.getElementById(`chip-${id}`) || document.getElementById(`chip-hoy-${id}`);
-  }
-
-  // ====== TIMELINE (sin cambios de lógica) ======
-  const fmt = n => (n==null || Number.isNaN(n)) ? '—' : `${n.toFixed(2)} min`;
-  const toDate = s => s ? new Date(s) : null;
-  const diffMin = (a,b) => (a && b) ? Math.round(((b - a) / 60000) * 100) / 100 : null;
-  function computeMetricasFromTs(t){
-    const recibido = toDate(t.fecha_pago_aprobado || t.fecha_pedido);
-    const prep     = toDate(t.fecha_en_preparacion);
-    const asign    = toDate(t.fecha_asignado);
-    const camino   = toDate(t.fecha_en_camino);
-    const entr     = toDate(t.fecha_entregado);
-    return {
-      m_recibido_a_preparacion: diffMin(recibido, prep),
-      m_preparacion_a_asignado: diffMin(prep, asign),
-      m_asignado_a_en_camino:   diffMin(asign, camino),
-      m_en_camino_a_entregado:  diffMin(camino, entr),
-      m_total:                  diffMin(recibido, entr),
-    };
-  }
-  function renderTimelineHTML(timestamps, metricas, logs){
-    const ts = timestamps || {};
-    const m  = metricas || computeMetricasFromTs(ts);
-    const rows = `
-      <table class="timeline-table">
-        <tr><th>Recibido → Preparación</th><td>${fmt(m.m_recibido_a_preparacion)}</td><td class="muted">${ts.fecha_en_preparacion || '—'}</td></tr>
-        <tr><th>Preparación → Asignado</th><td>${fmt(m.m_preparacion_a_asignado)}</td><td class="muted">${ts.fecha_asignado || '—'}</td></tr>
-        <tr><th>Asignado → En camino</th><td>${fmt(m.m_asignado_a_en_camino)}</td><td class="muted">${ts.fecha_en_camino || '—'}</td></tr>
-        <tr><th>En camino → Entregado</th><td>${fmt(m.m_en_camino_a_entregado)}</td><td class="muted">${ts.fecha_entregado || '—'}</td></tr>
-        <tr class="sep"><td colspan="3"></td></tr>
-        <tr class="total"><th>Total</th><td>${fmt(m.m_total)}</td><td></td></tr>
-      </table>`;
-    const logsArr = logs || [];
-    const logsHtml = (logsArr && logsArr.length)
-      ? `<div class="timeline-logs mt-2">
-          <div class="fw-semibold mb-1">Historial:</div>
-          <ul class="small mb-0">
-            ${logsArr.map(l => `<li><span class="muted">${l.created_at||''}</span> — <span class="badge badge-sm ${badgeClass(l.a)}">${l.a}</span> <span class="muted">(${l.actor || l.actor_tipo || ''}${l.fuente ? ' · '+l.fuente : ''})</span></li>`).join('')}
-          </ul>
-        </div>` : '';
-    return rows + logsHtml;
-  }
-  function renderTimelineInto(root, enriched){
-    const box = root.querySelector(`#timeline-${root.dataset.orderId}`); if(!box) return;
-    const ts = (enriched && enriched.timestamps) ? enriched.timestamps : {
-      fecha_pedido: root.dataset.tsPedido || null,
-      fecha_pago_aprobado: root.dataset.tsPago || null,
-      fecha_en_preparacion: root.dataset.tsPreparacion || null,
-      fecha_asignado: root.dataset.tsAsignado || null,
-      fecha_en_camino: root.dataset.tsCamino || null,
-      fecha_entregado: root.dataset.tsEntregado || null,
-      fecha_cancelado: root.dataset.tsCancelado || null,
-    };
-    const metricas = enriched && enriched.metricas ? enriched.metricas : null;
-    const logs = enriched && (enriched.logs_estado || enriched.logs) ? (enriched.logs_estado || enriched.logs) : null;
-    box.innerHTML = renderTimelineHTML(ts, metricas, logs);
-  }
-  document.querySelectorAll('.order-card[data-order-id]').forEach(card => renderTimelineInto(card, null));
-
-  /* ===== Construcción de tarjetas/chips ===== */
-  function assignmentControlsHTML(orderId){
-    return `
-      <div class="assignment-box mt-2">
-        <div class="input-group input-group-sm mb-1">
-          <select class="form-select cadete-select" data-pedido="${orderId}">
-            <option value="0">— Modo “a todos” —</option>
-          </select>
-          <button class="btn btn-outline-primary btn-asignar-cadete" data-pedido="${orderId}">Asignar</button>
-        </div>
-        <button class="btn btn-sm btn-outline-secondary btn-desasignar-cadete w-100" data-pedido="${orderId}">A todos</button>
-        <small class="text-muted d-block mt-1">Elegí un cadete o desasigná para que lo tomen todos.</small>
-      </div>`;
-  }
-  function buildCard(order){
-    const wrapper=document.createElement('div');
-    wrapper.className='order-card alert alert-primary alert-dismissible fade show mb-3 p-3';
-    wrapper.id=`order-${order.id}`; wrapper.dataset.orderId=order.id;
-    if(order.timestamps){
-      wrapper.dataset.tsPedido      = order.timestamps.fecha_pedido || '';
-      wrapper.dataset.tsPago        = order.timestamps.fecha_pago_aprobado || '';
-      wrapper.dataset.tsPreparacion = order.timestamps.fecha_en_preparacion || '';
-      wrapper.dataset.tsAsignado    = order.timestamps.fecha_asignado || '';
-      wrapper.dataset.tsCamino      = order.timestamps.fecha_en_camino || '';
-      wrapper.dataset.tsEntregado   = order.timestamps.fecha_entregado || '';
-      wrapper.dataset.tsCancelado   = order.timestamps.fecha_cancelado || '';
+// Tomar baseline al entrar
+let baselineDone = false;
+async function baselineFromServer(){
+  try{
+    const r = await fetch(POLL_URL, {cache:'no-store'});
+    const j = await r.json();
+    if(j && j.ok && Array.isArray(j.pedidos)){
+      const maxId = j.pedidos.reduce((m,p)=>Math.max(m, Number(p.id||0)), 0);
+      if(getLastSeen() === 0) setLastSeen(maxId);
+      baselineDone = true;
     }
-    const cadeteTxt = order.cadete || '—';
-    const total = parseFloat(order.total_pedido||0).toFixed(2);
-    const estado = order.estado||'RECIBIDO';
-    const envioCosto = (order.costo_envio!==undefined && order.costo_envio!==null && order.costo_envio!=='') ? Number(order.costo_envio) : null;
-    const envioHtml = (envioCosto!==null && !Number.isNaN(envioCosto))
-      ? `<div class="small text-muted">Envío: $${envioCosto.toFixed(2)}</div>`
-      : `<div class="small text-muted">Envío: a calcular</div>`;
-    const detailsHtml = (order.detalles||[]).map(d=>{
-      const name=d.opcion_nombre ? `${d.producto_nombre} - ${d.opcion_nombre}` : d.producto_nombre;
-      const sabores=(d.sabores_nombres && d.sabores_nombres.length)? d.sabores_nombres.join(', ') : 'Sin especificar';
-      return `<li>${name} (x${d.cantidad})<br><span class="text-muted">Sabores: ${sabores}</span></li>`;
-    }).join('');
-    const reprintBtn = `<button class="btn btn-sm btn-outline-secondary mb-2 btn-reprint w-100" data-url="/comandera-test/?pedido=${order.id}" data-order-id="${order.id}">🖨 Reimprimir</button>`;
-    const rightControls = estado==='RECIBIDO'
-      ? `<button class="btn btn-success fw-bold btn-confirm" data-confirm-url="/confirmar-pedido/${order.id}/" data-order-id="${order.id}">
-           <i class="bi bi-check-circle-fill"></i> Confirmar
-         </button>
-         <div class="text-muted small mt-1">Notifica a cadetes</div>
-         ${reprintBtn}`
-      : `<div class="dropdown mb-2">
-           <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
-           <ul class="dropdown-menu dropdown-menu-end">
-             <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="/panel-alertas/estado/${order.id}/">En preparación</button></li>
-             <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="/panel-alertas/estado/${order.id}/">En camino</button></li>
-             <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="/panel-alertas/estado/${order.id}/">Entregado</button></li>
-             <li><hr class="dropdown-divider"></li>
-             <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="/panel-alertas/estado/${order.id}/">Cancelar</button></li>
-           </ul>
-         </div>
-         ${reprintBtn}`;
-    wrapper.innerHTML = `
-      <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
-        <div class="flex-grow-1">
-          <div class="d-flex align-items-center gap-2 mb-1">
-            <h6 class="mb-0">#${order.id}</h6>
-            <span class="badge ${badgeClass(estado)}">${estado}</span>
-            <small class="text-muted">Total: $${total}</small>
-          </div>
-          <div class="small text-muted mb-1 d-flex align-items-center flex-wrap gap-1">
-            <span>Cliente: <span class="fw-semibold">${order.cliente_nombre||'N/A'}</span></span>
-            <span>· ${order.cliente_telefono||'—'}</span>
-            <span class="addr-ellipsis" title="${order.direccion_legible || order.cliente_direccion || '—'}">· ${order.direccion_legible || order.cliente_direccion || '—'}</span>
-            ${order.map_url ? `<a class="btn btn-sm btn-outline-primary ms-2" target="_blank" href="${order.map_url}">Ver mapa</a>` : ``}
-          </div>
-          ${envioHtml}
-          <div class="small">Cadete: <span class="fw-semibold cadete-name">${cadeteTxt}</span></div>
-          <details class="mt-2"><summary>Ver productos</summary><ul class="mb-0 small mt-2">${detailsHtml}</ul></details>
-          <details class="mt-2 timeline-details"><summary>Ver tiempos</summary><div class="mt-2 small" id="timeline-${order.id}"></div></details>
-        </div>
-        <div class="text-end min-btn-col">
-          ${rightControls}
-          ${assignmentControlsHTML(order.id)}
-        </div>
-      </div>
-      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    `;
-    renderTimelineInto(wrapper, order);
-    return wrapper;
-  }
-  function buildChip(order, inTodayFinalizados=false){
-    const chip=document.createElement('div');
-    chip.className='order-chip d-flex align-items-center justify-content-between';
-    chip.id= inTodayFinalizados ? `chip-hoy-${order.id}` : `chip-${order.id}`;
-    chip.dataset.orderId=order.id;
-    const envioCosto = (order.costo_envio!==undefined && order.costo_envio!==null && order.costo_envio!=='') ? Number(order.costo_envio) : null;
-    const envioMini = (envioCosto!==null && !Number.isNaN(envioCosto)) ? `<span class="small text-muted">· Envío $${envioCosto.toFixed(2)}</span>` : '';
-    chip.innerHTML=`
-      <div class="d-flex align-items-center gap-2 flex-wrap">
-        <span class="chip-id">#${order.id}</span>
-        <span class="badge ${badgeClass(order.estado)}">${order.estado}</span>
-        <span class="text-muted small">$${parseFloat(order.total_pedido||0).toFixed(2)}</span>
-        <span class="small text-truncate chip-client">${order.cliente_nombre||'N/A'}</span>
-        <span class="small text-muted">· Cadete: ${order.cadete||'—'}</span>
-        ${envioMini}
-      </div>
-      <div class="dropdown">
-        <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
-        <ul class="dropdown-menu dropdown-menu-end">
-          <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="/panel-alertas/estado/${order.id}/">En preparación</button></li>
-          <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="/panel-alertas/estado/${order.id}/">En camino</button></li>
-          <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="/panel-alertas/estado/${order.id}/">Entregado</button></li>
-          <li><hr class="dropdown-divider"></li>
-          <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="/panel-alertas/estado/${order.id}/">Cancelar</button></li>
-        </ul>
-      </div>`;
-    return chip;
-  }
-  async function parseJSONorRedirect(res, fallbackUrl){
-    const ct = (res.headers.get('content-type') || '').toLowerCase();
-    if (!ct.includes('application/json')) { window.location.href = fallbackUrl; return null; }
-    try { return await res.json(); } catch { window.location.href = fallbackUrl; return null; }
-  }
+  }catch(e){}
+}
 
-  /* ===== Confirmar & Cambiar estado ===== */
-  document.addEventListener('click', async (ev)=>{
-    const btn = ev.target.closest('.btn-confirm'); if(!btn) return; ev.preventDefault();
-    const url  = btn.dataset.confirmUrl; const card = btn.closest('.order-card');
-    btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Confirmando...';
+// ================== HELPERS UI ==================
+const alertsHoy=document.getElementById('alerts-hoy');
+const alertsHoyFinalizados=document.getElementById('alerts-hoy-finalizados');
+const alertsAyer=document.getElementById('alerts-ayer');
+const wsStatus=document.getElementById('ws-status');
+const tiendaBadge = document.getElementById('tienda-estado-badge');
+const tiendaForm = document.getElementById('form-toggle-tienda');
+const tiendaBtn = document.getElementById('btn-toggle-tienda');
+
+function applyStoreState(isOpen){
+  if(!tiendaBadge || !tiendaBtn) return;
+  tiendaBadge.classList.toggle('bg-success', !!isOpen);
+  tiendaBadge.classList.toggle('bg-danger', !isOpen);
+  tiendaBadge.textContent = isOpen ? 'Tienda ABIERTA' : 'Tienda CERRADA';
+  tiendaBtn.classList.toggle('btn-outline-danger', !!isOpen);
+  tiendaBtn.classList.toggle('btn-outline-success', !isOpen);
+  tiendaBtn.textContent = isOpen ? 'Apagar sistema' : 'Encender sistema';
+}
+if(tiendaForm){
+  tiendaForm.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    tiendaBtn.disabled = true;
     try{
-      const res = await fetch(url,{method:'POST',headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'}});
-      if(res.ok){
-        const badge=card.querySelector('.badge');
-        badge.className='badge '+badgeClass('EN_PREPARACION'); badge.textContent='EN_PREPARACION';
-        btn.parentElement.innerHTML = `
-          <div class="dropdown mb-2">
-            <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
-            <ul class="dropdown-menu dropdown-menu-end">
-              <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="${url.replace('/confirmar-pedido','/panel-alertas/estado')}">En camino</button></li>
-              <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="${url.replace('/confirmar-pedido','/panel-alertas/estado')}">Entregado</button></li>
-              <li><hr class="dropdown-divider"></li>
-              <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="${url.replace('/confirmar-pedido','/panel-alertas/estado')}">Cancelar</button></li>
-            </ul>
-          </div>`;
-      }else{ window.location.href=url; }
-    }catch(e){ window.location.href=url; }
-  });
-  document.addEventListener('click', async (ev)=>{
-    const item=ev.target.closest('.btn-set-state'); if(!item) return;
-    const url=item.dataset.url, estado=item.dataset.state;
-    const root = ev.target.closest('.order-card, .order-chip');
-    try{
-      const res=await fetch(url,{
+      const res = await fetch(tiendaForm.action, {
         method:'POST',
-        headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest','Content-Type':'application/x-www-form-urlencoded'},
-        body:`estado=${encodeURIComponent(estado)}`
+        headers:{ 'X-CSRFToken': csrftoken, 'X-Requested-With':'XMLHttpRequest' }
       });
-      const data = await parseJSONorRedirect(res, url); if(!data) return;
-      if(data.ok){
-        const badge = root.querySelector('.badge'); if(badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
-        if((estado==='ENTREGADO'||estado==='CANCELADO') && root.classList.contains('order-card')){
-          const id = root.dataset.orderId;
-          const total = root.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
-          const cliente = root.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
-          const cadeteNode = root.querySelector('.cadete-name');
-          const cadete = (data.cadete) || (cadeteNode ? cadeteNode.textContent.trim() : '—');
-          const order = { id, estado, total_pedido: total, cliente_nombre: cliente, cadete };
-          const chip = buildChip(order, true);
-          const empty = alertsHoyFinalizados.querySelector('.alert'); if(empty) empty.remove();
-          alertsHoyFinalizados.prepend(chip);
-          root.remove();
-          if(!alertsHoy.querySelector('.order-card')){
-            alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
-          }
-        }
-      } else if (data.error === 'no_permiso'){ alert('No tenés permiso para cambiar este estado desde aquí.'); }
-    }catch(e){ console.error(e); window.location.href=url; }
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if(ct.includes('application/json')){
+        const data = await res.json();
+        if(data && 'abierta' in data){ applyStoreState(!!data.abierta); }
+        else { e.target.submit(); }
+      }else{ e.target.submit(); }
+    }catch(err){ e.target.submit(); }
+    finally{ tiendaBtn.disabled = false; }
   });
+}
 
-  /* ===== Reimprimir ticket ===== */
-  document.addEventListener('click', async (ev)=>{
-    const b = ev.target.closest('.btn-reprint'); if(!b) return;
-    ev.preventDefault();
-    const url = b.dataset.url;
-    const oldHtml = b.innerHTML;
-    b.disabled = true;
-    b.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Imprimiendo…';
-    try{
-      const r = await fetch(url, {headers:{'X-Requested-With':'XMLHttpRequest'}, cache:'no-store'});
-      // Opcionalmente se podría validar el JSON, pero con que responda 200 está bien.
-      // const j = await r.json().catch(()=>null);
-    }catch(e){
-      alert('No se pudo enviar a imprimir. Verificá la comandera.');
-    }finally{
-      b.disabled = false;
-      b.innerHTML = oldHtml;
-    }
-  });
+function badgeClass(estado){ return `bg-status-${(estado||'').toLowerCase()}`; }
+function orderExists(id){
+  return document.getElementById(`order-${id}`) || document.getElementById(`chip-${id}`) || document.getElementById(`chip-hoy-${id}`);
+}
 
-  // ===== Limpiar UI
-  document.getElementById('clear-alerts').addEventListener('click',()=>{
-    alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
-    alertsHoyFinalizados.innerHTML='<div class="alert alert-light border text-center">Sin pedidos finalizados de hoy.</div>';
-    alertsAyer.innerHTML='';
-  });
+// ====== TIMELINE ======
+const fmt = n => (n==null || Number.isNaN(n)) ? '—' : `${n.toFixed(2)} min`;
+const toDate = s => s ? new Date(s) : null;
+const diffMin = (a,b) => (a && b) ? Math.round(((b - a) / 60000) * 100) / 100 : null;
 
-  // ====== CADETES: listado + selects ======
-  async function cargarCadetes(){
-    try{
-      const r = await fetch(urlCadetesData, {credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}});
-      const el = document.getElementById('lista-cadetes');
-      if(!r.ok){ if(el) el.textContent = 'No se pudo cargar la lista.'; return; }
-      const data = await r.json(); if(!el) return;
-      const arr = data.cadetes || [];
-      if(!arr.length){ el.textContent = 'No hay cadetes conectados.'; poblarSelectsCadetes([]); return; }
-      el.innerHTML = arr.map(c=>{
-        const tagDisp = c.disponible ? '🟢 disponible' : '⚪ no disponible';
-        const tagOcu  = c.ocupado ? `🔴 ocupado (#${c.pedido_id})` : '⚪ libre';
-        const tagSub  = c.subscription_ok ? '🔔 push' : '⏹ sin push';
-        return `<div class="py-1"><strong>#${c.id} ${c.nombre}</strong> — ${tagDisp} · ${tagOcu} · ${tagSub}</div>`;
-      }).join('');
-      poblarSelectsCadetes(arr);
-    }catch(e){
-      const el = document.getElementById('lista-cadetes');
-      if(el) el.textContent = 'Error cargando cadetes.'; poblarSelectsCadetes([]);
-    }
+function computeMetricasFromTs(t){
+  const recibido = toDate(t.fecha_pago_aprobado || t.fecha_pedido);
+  const prep = toDate(t.fecha_en_preparacion);
+  const asign = toDate(t.fecha_asignado);
+  const camino = toDate(t.fecha_en_camino);
+  const entr = toDate(t.fecha_entregado);
+  return {
+    m_recibido_a_preparacion: diffMin(recibido, prep),
+    m_preparacion_a_asignado: diffMin(prep, asign),
+    m_asignado_a_en_camino: diffMin(asign, camino),
+    m_en_camino_a_entregado: diffMin(camino, entr),
+    m_total: diffMin(recibido, entr),
+  };
+}
+
+function renderTimelineHTML(timestamps, metricas, logs){
+  const ts = timestamps || {};
+  const m = metricas || computeMetricasFromTs(ts);
+  const rows = `
+    <table class="timeline-table">
+      <tr><th>Recibido → Preparación</th><td>${fmt(m.m_recibido_a_preparacion)}</td><td class="muted">${ts.fecha_en_preparacion || '—'}</td></tr>
+      <tr><th>Preparación → Asignado</th><td>${fmt(m.m_preparacion_a_asignado)}</td><td class="muted">${ts.fecha_asignado || '—'}</td></tr>
+      <tr><th>Asignado → En camino</th><td>${fmt(m.m_asignado_a_en_camino)}</td><td class="muted">${ts.fecha_en_camino || '—'}</td></tr>
+      <tr><th>En camino → Entregado</th><td>${fmt(m.m_en_camino_a_entregado)}</td><td class="muted">${ts.fecha_entregado || '—'}</td></tr>
+      <tr class="sep"><td colspan="3"></td></tr>
+      <tr class="total"><th>Total</th><td>${fmt(m.m_total)}</td><td></td></tr>
+    </table>`;
+  const logsArr = logs || [];
+  const logsHtml = (logsArr && logsArr.length) ? `
+    <div class="timeline-logs mt-2">
+      <div class="fw-semibold mb-1">Historial:</div>
+      <ul class="small mb-0">
+        ${logsArr.map(l => `
+          <li>
+            <span class="muted">${l.created_at||''}</span> —
+            <span class="badge badge-sm ${badgeClass(l.a)}">${l.a}</span>
+            <span class="muted">(${l.actor || l.actor_tipo || ''}${l.fuente ? ' · '+l.fuente : ''})</span>
+          </li>`).join('')}
+      </ul>
+    </div>` : '';
+  return rows + logsHtml;
+}
+
+function renderTimelineInto(root, enriched){
+  const box = root.querySelector(`#timeline-${root.dataset.orderId}`);
+  if(!box) return;
+  const ts = (enriched && enriched.timestamps) ? enriched.timestamps : {
+    fecha_pedido: root.dataset.tsPedido || null,
+    fecha_pago_aprobado: root.dataset.tsPago || null,
+    fecha_en_preparacion: root.dataset.tsPreparacion || null,
+    fecha_asignado: root.dataset.tsAsignado || null,
+    fecha_en_camino: root.dataset.tsCamino || null,
+    fecha_entregado: root.dataset.tsEntregado || null,
+    fecha_cancelado: root.dataset.tsCancelado || null,
+  };
+  const metricas = enriched && enriched.metricas ? enriched.metricas : null;
+  const logs = enriched && (enriched.logs_estado || enriched.logs) ? (enriched.logs_estado || enriched.logs) : null;
+  box.innerHTML = renderTimelineHTML(ts, metricas, logs);
+}
+document.querySelectorAll('.order-card[data-order-id]').forEach(card => renderTimelineInto(card, null));
+
+/* ===== Construcción de tarjetas/chips ===== */
+function assignmentControlsHTML(orderId){
+  return `
+  <div class="assignment-box mt-2">
+    <div class="input-group input-group-sm mb-1">
+      <select class="form-select cadete-select" data-pedido="${orderId}">
+        <option value="0">— Modo “a todos” —</option>
+      </select>
+      <button class="btn btn-outline-primary btn-asignar-cadete" data-pedido="${orderId}">Asignar</button>
+    </div>
+    <button class="btn btn-sm btn-outline-secondary btn-desasignar-cadete w-100" data-pedido="${orderId}">A todos</button>
+    <small class="text-muted d-block mt-1">Elegí un cadete o desasigná para que lo tomen todos.</small>
+  </div>`;
+}
+
+function buildCard(order){
+  const wrapper=document.createElement('div');
+  wrapper.className='order-card alert alert-primary alert-dismissible fade show mb-3 p-3';
+  wrapper.id=`order-${order.id}`;
+  wrapper.dataset.orderId=order.id;
+
+  if(order.timestamps){
+    wrapper.dataset.tsPedido = order.timestamps.fecha_pedido || '';
+    wrapper.dataset.tsPago = order.timestamps.fecha_pago_aprobado || '';
+    wrapper.dataset.tsPreparacion = order.timestamps.fecha_en_preparacion || '';
+    wrapper.dataset.tsAsignado = order.timestamps.fecha_asignado || '';
+    wrapper.dataset.tsCamino = order.timestamps.fecha_en_camino || '';
+    wrapper.dataset.tsEntregado = order.timestamps.fecha_entregado || '';
+    wrapper.dataset.tsCancelado = order.timestamps.fecha_cancelado || '';
   }
-  document.getElementById('btn-refresh-cadetes').addEventListener('click', cargarCadetes);
-  function poblarSelectsCadetes(arr){
-    const options = (arr||[]).map(c=>{
-      const estado = c.ocupado ? ' (ocupado)' : (c.disponible ? ' (disp.)' : ' (no disp.)');
-      return `<option value="${c.id}">#${c.id} ${c.nombre}${estado}</option>`;
-    }).join('');
-    document.querySelectorAll('select.cadete-select').forEach(sel=>{
-      const current = sel.value || '0';
-      sel.innerHTML = `<option value="0">— Modo “a todos” —</option>` + options;
-      sel.value = current;
-      const btn = sel.closest('.assignment-box')?.querySelector('.btn-asignar-cadete');
-      if(btn){ btn.disabled = (arr||[]).length === 0; }
+
+  const cadeteTxt = order.cadete || '—';
+  const total = parseFloat(order.total_pedido||0).toFixed(2);
+  const estado = order.estado||'RECIBIDO';
+
+  const envioCosto = (order.costo_envio!==undefined && order.costo_envio!==null && order.costo_envio!=='') ? Number(order.costo_envio) : null;
+  const envioHtml = (envioCosto!==null && !Number.isNaN(envioCosto))
+    ? `<div class="small text-muted">Envío: $${envioCosto.toFixed(2)}</div>`
+    : `<div class="small text-muted">Envío: a calcular</div>`;
+
+  const detailsHtml = (order.detalles||[]).map(d=>{
+    const name = d.opcion_nombre ? `${d.producto_nombre} - ${d.opcion_nombre}` : d.producto_nombre;
+    const sabores = (d.sabores_nombres && d.sabores_nombres.length)? d.sabores_nombres.join(', ') : 'Sin especificar';
+    return `<li>${name} (x${d.cantidad})<br><span class="text-muted">Sabores: ${sabores}</span></li>`;
+  }).join('');
+
+  const reprintBtn = `
+    <button class="btn btn-sm btn-outline-secondary mb-2 btn-reprint w-100"
+      data-url="/comandera-test/?pedido=${order.id}"
+      data-order-id="${order.id}">🖨 Reimprimir</button>`;
+
+  const rightControls = (estado==='RECIBIDO')
+    ? `
+      <button class="btn btn-success fw-bold btn-confirm" data-confirm-url="/confirmar-pedido/${order.id}/" data-order-id="${order.id}">
+        <i class="bi bi-check-circle-fill"></i> Confirmar
+      </button>
+      <div class="text-muted small mt-1">Notifica a cadetes</div>
+      ${reprintBtn}
+    `
+    : `
+      <div class="dropdown mb-2">
+        <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
+        <ul class="dropdown-menu dropdown-menu-end">
+          <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="${URL_SET_ESTADO_BASE}${order.id}/">En preparación</button></li>
+          <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="${URL_SET_ESTADO_BASE}${order.id}/">En camino</button></li>
+          <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="${URL_SET_ESTADO_BASE}${order.id}/">Entregado</button></li>
+          <li><hr class="dropdown-divider"></li>
+          <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="${URL_SET_ESTADO_BASE}${order.id}/">Cancelar</button></li>
+        </ul>
+      </div>
+      ${reprintBtn}
+    `;
+
+  wrapper.innerHTML = `
+    <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
+      <div class="flex-grow-1">
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <h6 class="mb-0">#${order.id}</h6>
+          <span class="badge ${badgeClass(estado)}">${estado}</span>
+          <small class="text-muted">Total: $${total}</small>
+        </div>
+
+        <div class="small text-muted mb-1 d-flex align-items-center flex-wrap gap-1">
+          <span>Cliente: <span class="fw-semibold">${order.cliente_nombre||'N/A'}</span></span>
+          <span>· ${order.cliente_telefono||'—'}</span>
+          <span class="addr-ellipsis" title="${order.direccion_legible || order.cliente_direccion || '—'}">· ${order.direccion_legible || order.cliente_direccion || '—'}</span>
+          ${order.map_url ? `<a class="btn btn-sm btn-outline-primary ms-2" target="_blank" href="${order.map_url}">Ver mapa</a>` : ``}
+        </div>
+
+        ${envioHtml}
+
+        <div class="small">Cadete: <span class="fw-semibold cadete-name">${cadeteTxt}</span></div>
+
+        <details class="mt-2"><summary>Ver productos</summary><ul class="mb-0 small mt-2">${detailsHtml}</ul></details>
+
+        <details class="mt-2 timeline-details"><summary>Ver tiempos</summary><div class="mt-2 small" id="timeline-${order.id}"></div></details>
+      </div>
+
+      <div class="text-end min-btn-col">
+        ${rightControls}
+        ${assignmentControlsHTML(order.id)}
+      </div>
+    </div>
+
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  `;
+
+  renderTimelineInto(wrapper, order);
+  return wrapper;
+}
+
+function buildChip(order, inTodayFinalizados=false){
+  const chip=document.createElement('div');
+  chip.className='order-chip d-flex align-items-center justify-content-between';
+  chip.id= inTodayFinalizados ? `chip-hoy-${order.id}` : `chip-${order.id}`;
+  chip.dataset.orderId=order.id;
+
+  const envioCosto = (order.costo_envio!==undefined && order.costo_envio!==null && order.costo_envio!=='') ? Number(order.costo_envio) : null;
+  const envioMini = (envioCosto!==null && !Number.isNaN(envioCosto)) ? `<span class="small text-muted">· Envío $${envioCosto.toFixed(2)}</span>` : '';
+
+  chip.innerHTML= `
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <span class="chip-id">#${order.id}</span>
+      <span class="badge ${badgeClass(order.estado)}">${order.estado}</span>
+      <span class="text-muted small">$${parseFloat(order.total_pedido||0).toFixed(2)}</span>
+      <span class="small text-truncate chip-client">${order.cliente_nombre||'N/A'}</span>
+      <span class="small text-muted">· Cadete: ${order.cadete||'—'}</span>
+      ${envioMini}
+    </div>
+    <div class="dropdown">
+      <button class="btn btn-sm btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
+      <ul class="dropdown-menu dropdown-menu-end">
+        <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="${URL_SET_ESTADO_BASE}${order.id}/">En preparación</button></li>
+        <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="${URL_SET_ESTADO_BASE}${order.id}/">En camino</button></li>
+        <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="${URL_SET_ESTADO_BASE}${order.id}/">Entregado</button></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="${URL_SET_ESTADO_BASE}${order.id}/">Cancelar</button></li>
+      </ul>
+    </div>`;
+  return chip;
+}
+
+async function parseJSONorRedirect(res, fallbackUrl){
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  if (!ct.includes('application/json')) { window.location.href = fallbackUrl; return null; }
+  try { return await res.json(); }
+  catch { window.location.href = fallbackUrl; return null; }
+}
+
+/* ===== Confirmar & Cambiar estado ===== */
+document.addEventListener('click', async (ev)=>{
+  const btn = ev.target.closest('.btn-confirm'); if(!btn) return;
+  ev.preventDefault();
+  const url = btn.dataset.confirmUrl;
+  const card = btn.closest('.order-card');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Confirmando...';
+
+  try{
+    const res = await fetch(url,{
+      method:'POST',
+      headers:{'X-CSRFToken':csrftoken,'X-Requested-With':'XMLHttpRequest'}
     });
+    if(res.ok){
+      const badge=card.querySelector('.badge');
+      badge.className='badge '+badgeClass('EN_PREPARACION');
+      badge.textContent='EN_PREPARACION';
+      const stateUrl = `${URL_SET_ESTADO_BASE}${card.dataset.orderId}/`;
+      btn.parentElement.innerHTML = `
+        <div class="dropdown mb-2">
+          <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO"  data-url="${stateUrl}">En camino</button></li>
+            <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="${stateUrl}">Entregado</button></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="${stateUrl}">Cancelar</button></li>
+          </ul>
+        </div>`;
+    }else{
+      window.location.href=url;
+    }
+  }catch(e){
+    window.location.href=url;
   }
-  async function asignarCadete(pedidoId, cadeteId){
-    const url = urlAsignarBase.replace('/0/', `/${pedidoId}/`);
-    const fd = new FormData(); fd.append('csrfmiddlewaretoken', csrftoken); fd.append('cadete_id', cadeteId);
-    try{
-      const res = await fetch(url, { method:'POST', body: fd, credentials:'same-origin', headers: {'X-Requested-With':'XMLHttpRequest', 'X-CSRFToken': csrftoken}});
-      const ct = (res.headers.get('content-type')||'').toLowerCase(); if(!ct.includes('application/json')){ window.location.href = url; return; }
-      const data = await res.json();
-      if(!data.ok){ alert('No se pudo asignar: ' + (data.error || 'error')); return; }
-      const card = document.getElementById(`order-${pedidoId}`);
-      if(card){
-        const badge = card.querySelector('.badge'); if(badge){ badge.className = 'badge ' + badgeClass(data.estado); badge.textContent = data.estado; }
-        const cadNode = card.querySelector('.cadete-name'); if(cadNode){ cadNode.textContent = data.cadete || '—'; }
-      }
-      cargarCadetes();
-    }catch(e){ alert('Error al asignar.'); }
-  }
-  document.addEventListener('click', (ev)=>{
-    const btnA = ev.target.closest('.btn-asignar-cadete'); if(btnA){ const pedidoId = btnA.dataset.pedido; const sel = document.querySelector(`select.cadete-select[data-pedido="${pedidoId}"]`); const cadeteId = sel ? (sel.value || '0') : '0'; asignarCadete(pedidoId, cadeteId); }
-    const btnD = ev.target.closest('.btn-desasignar-cadete'); if(btnD){ const pedidoId = btnD.dataset.pedido; asignarCadete(pedidoId, '0'); }
-  });
-  cargarCadetes(); setInterval(cargarCadetes, 15000);
+});
 
-  // ================== WEBSOCKET + RECONNECT ==================
-  let socket = null;
-  let reconnectAttempts = 0;
-  let lastWsOkAt = Date.now();
+document.addEventListener('click', async (ev)=>{
+  const item=ev.target.closest('.btn-set-state'); if(!item) return;
+  const url=item.dataset.url, estado=item.dataset.state;
+  const root = ev.target.closest('.order-card, .order-chip');
 
-  function wsSetStatus(colorClass, text){
-    wsStatus.className = 'badge ' + colorClass; wsStatus.textContent = text;
-  }
+  try{
+    const res=await fetch(url,{
+      method:'POST',
+      headers:{
+        'X-CSRFToken':csrftoken,
+        'X-Requested-With':'XMLHttpRequest',
+        'Content-Type':'application/x-www-form-urlencoded'
+      },
+      body:`estado=${encodeURIComponent(estado)}`
+    });
+    const data = await parseJSONorRedirect(res, url);
+    if(!data) return;
 
-  function connectWS(){
-    try{ socket = new WebSocket(WS_PATH); }
-    catch(e){ scheduleReconnect(); return; }
+    if(data.ok){
+      const badge = root.querySelector('.badge');
+      if(badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
 
-    socket.onopen = () => {
-      lastWsOkAt = Date.now(); reconnectAttempts = 0;
-      wsSetStatus('bg-success', 'Conectado');
-      if(!baselineDone) baselineFromServer();
-      if(soundEnabled) unlockAudio();
-    };
-    socket.onmessage = (ev) => {
-      lastWsOkAt = Date.now();
-      try{
-        const data = JSON.parse(ev.data || "{}");
-        const kind = data.message || "";
-        const orderId = Number(data.order_id || 0);
-        const orderData = data.order_data || {};
-
-        if(kind==='tienda_estado'){ applyStoreState(!!(orderData && orderData.abierta)); return; }
-
-        function moveToFinalizadosFromCard(card, estadoActual){
-          const total = card.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
-          const cliente = card.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
-          const cadeteNode = card.querySelector('.cadete-name');
-          const cadete = cadeteNode ? cadeteNode.textContent.trim() : '—';
-          const simple = { id: orderId, estado: estadoActual, total_pedido: total, cliente_nombre: cliente, cadete };
-          const chip = buildChip(simple, true);
-          const empty = alertsHoyFinalizados.querySelector('.alert'); if (empty) empty.remove();
-          alertsHoyFinalizados.prepend(chip);
-          card.remove();
-          if (!alertsHoy.querySelector('.order-card')){
-            alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
-          }
+      if((estado==='ENTREGADO'||estado==='CANCELADO') && root.classList.contains('order-card')){
+        const id = root.dataset.orderId;
+        const total = root.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
+        const cliente = root.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
+        const cadeteNode = root.querySelector('.cadete-name');
+        const cadete = (data.cadete) || (cadeteNode ? cadeteNode.textContent.trim() : '—');
+        const order = { id, estado, total_pedido: total, cliente_nombre: cliente, cadete };
+        const chip = buildChip(order, true);
+        const empty = alertsHoyFinalizados.querySelector('.alert');
+        if(empty) empty.remove();
+        alertsHoyFinalizados.prepend(chip);
+        root.remove();
+        if(!alertsHoy.querySelector('.order-card')){
+          alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
         }
+      }
+    } else if (data.error === 'no_permiso'){
+      alert('No tenés permiso para cambiar este estado desde aquí.');
+    }
+  }catch(e){
+    console.error(e);
+    window.location.href=url;
+  }
+});
 
-        if(kind==='nuevo_pedido'){
-          if(!orderExists(orderId)){
-            orderData.id=orderId;
-            const card=buildCard(orderData);
-            alertsHoy.prepend(card);
+/* ===== Reimprimir ticket ===== */
+document.addEventListener('click', async (ev)=>{
+  const b = ev.target.closest('.btn-reprint'); if(!b) return;
+  ev.preventDefault();
+  const url = b.dataset.url;
+  const oldHtml = b.innerHTML;
+  b.disabled = true;
+  b.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Imprimiendo…';
+  try{
+    await fetch(url, {headers:{'X-Requested-With':'XMLHttpRequest'}, cache:'no-store'});
+  }catch(e){
+    alert('No se pudo enviar a imprimir. Verificá la comandera.');
+  }finally{
+    b.disabled = false;
+    b.innerHTML = oldHtml;
+  }
+});
 
-            const lastSeen = getLastSeen();
-            if(orderId > lastSeen){ playSound(); setLastSeen(orderId); }
+// ===== Limpiar UI
+document.getElementById('clear-alerts').addEventListener('click',()=>{
+  alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
+  alertsHoyFinalizados.innerHTML='<div class="alert alert-light border text-center">Sin pedidos finalizados de hoy.</div>';
+  alertsAyer.innerHTML='';
+});
 
-            cargarCadetes();
-          }else{
-            const card = document.getElementById(`order-${orderId}`);
-            if(card){
-              renderTimelineInto(card, orderData);
-              if(orderData.cadete){ const n = card.querySelector('.cadete-name'); if(n) n.textContent = orderData.cadete; }
+// ====== CADETES: listado + selects ======
+async function cargarCadetes(){
+  try{
+    const r = await fetch(urlCadetesData, {credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}});
+    const el = document.getElementById('lista-cadetes');
+    if(!r.ok){ if(el) el.textContent = 'No se pudo cargar la lista.'; return; }
+    const data = await r.json();
+    if(!el) return;
+    const arr = data.cadetes || [];
+    if(!arr.length){
+      el.textContent = 'No hay cadetes conectados.';
+      poblarSelectsCadetes([]);
+      return;
+    }
+    el.innerHTML = arr.map(c=>{
+      const tagDisp = c.disponible ? '🟢 disponible' : '⚪ no disponible';
+      const tagOcu = c.ocupado ? `🔴 ocupado (#${c.pedido_id})` : '⚪ libre';
+      const tagSub = c.subscription_ok ? '🔔 push' : '⏹ sin push';
+      return `<div class="py-1"><strong>#${c.id} ${c.nombre}</strong> — ${tagDisp} · ${tagOcu} · ${tagSub}</div>`;
+    }).join('');
+    poblarSelectsCadetes(arr);
+  }catch(e){
+    const el = document.getElementById('lista-cadetes');
+    if(el) el.textContent = 'Error cargando cadetes.';
+    poblarSelectsCadetes([]);
+  }
+}
+document.getElementById('btn-refresh-cadetes').addEventListener('click', cargarCadetes);
+
+function poblarSelectsCadetes(arr){
+  const options = (arr||[]).map(c=>{
+    const estado = c.ocupado ? ' (ocupado)' : (c.disponible ? ' (disp.)' : ' (no disp.)');
+    return `<option value="${c.id}">#${c.id} ${c.nombre}${estado}</option>`;
+  }).join('');
+  document.querySelectorAll('select.cadete-select').forEach(sel=>{
+    const current = sel.value || '0';
+    sel.innerHTML = `<option value="0">— Modo “a todos” —</option>` + options;
+    sel.value = current;
+    const btn = sel.closest('.assignment-box')?.querySelector('.btn-asignar-cadete');
+    if(btn){ btn.disabled = (arr||[]).length === 0; }
+  });
+}
+
+async function asignarCadete(pedidoId, cadeteId){
+  const url = urlAsignarBase.replace('/0/', `/${pedidoId}/`);
+  const fd = new FormData();
+  fd.append('csrfmiddlewaretoken', csrftoken);
+  fd.append('cadete_id', cadeteId);
+  try{
+    const res = await fetch(url, {
+      method:'POST',
+      body: fd,
+      credentials:'same-origin',
+      headers: {'X-Requested-With':'XMLHttpRequest', 'X-CSRFToken': csrftoken}
+    });
+    const ct = (res.headers.get('content-type')||'').toLowerCase();
+    if(!ct.includes('application/json')){ window.location.href = url; return; }
+    const data = await res.json();
+    if(!data.ok){ alert('No se pudo asignar: ' + (data.error || 'error')); return; }
+
+    const card = document.getElementById(`order-${pedidoId}`);
+    if(card){
+      const badge = card.querySelector('.badge');
+      if(badge){ badge.className = 'badge ' + badgeClass(data.estado); badge.textContent = data.estado; }
+      const cadNode = card.querySelector('.cadete-name');
+      if(cadNode){ cadNode.textContent = data.cadete || '—'; }
+    }
+    cargarCadetes();
+  }catch(e){
+    alert('Error al asignar.');
+  }
+}
+
+document.addEventListener('click', (ev)=>{
+  const btnA = ev.target.closest('.btn-asignar-cadete');
+  if(btnA){
+    const pedidoId = btnA.dataset.pedido;
+    const sel = document.querySelector(`select.cadete-select[data-pedido="${pedidoId}"]`);
+    const cadeteId = sel ? (sel.value || '0') : '0';
+    asignarCadete(pedidoId, cadeteId);
+  }
+  const btnD = ev.target.closest('.btn-desasignar-cadete');
+  if(btnD){
+    const pedidoId = btnD.dataset.pedido;
+    asignarCadete(pedidoId, '0');
+  }
+});
+
+cargarCadetes();
+setInterval(cargarCadetes, 15000);
+
+// ================== WEBSOCKET + RECONNECT ==================
+let socket = null;
+let reconnectAttempts = 0;
+let lastWsOkAt = Date.now();
+
+function wsSetStatus(colorClass, text){
+  wsStatus.className = 'badge ' + colorClass;
+  wsStatus.textContent = text;
+}
+function connectWS(){
+  try{ socket = new WebSocket(WS_PATH); }
+  catch(e){ scheduleReconnect(); return; }
+
+  socket.onopen = () => {
+    lastWsOkAt = Date.now();
+    reconnectAttempts = 0;
+    wsSetStatus('bg-success', 'Conectado');
+    if(!baselineDone) baselineFromServer();
+    if(soundEnabled) unlockAudio();
+  };
+
+  socket.onmessage = (ev) => {
+    lastWsOkAt = Date.now();
+    try{
+      const data = JSON.parse(ev.data || "{}");
+      const kind = data.message || "";
+      const orderId = Number(data.order_id || 0);
+      const orderData = data.order_data || {};
+
+      if(kind==='tienda_estado'){
+        applyStoreState(!!(orderData && orderData.abierta));
+        return;
+      }
+
+      function moveToFinalizadosFromCard(card, estadoActual){
+        const total = card.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
+        const cliente = card.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
+        const cadeteNode = card.querySelector('.cadete-name');
+        const cadete = cadeteNode ? cadeteNode.textContent.trim() : '—';
+        const simple = { id: orderId, estado: estadoActual, total_pedido: total, cliente_nombre: cliente, cadete };
+        const chip = buildChip(simple, true);
+        const empty = alertsHoyFinalizados.querySelector('.alert');
+        if (empty) empty.remove();
+        alertsHoyFinalizados.prepend(chip);
+        card.remove();
+        if (!alertsHoy.querySelector('.order-card')){
+          alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
+        }
+      }
+
+      if(kind==='nuevo_pedido'){
+        if(!orderExists(orderId)){
+          orderData.id=orderId;
+          const card=buildCard(orderData);
+          alertsHoy.prepend(card);
+          const lastSeen = getLastSeen();
+          if(orderId > lastSeen){ playSound(); setLastSeen(orderId); }
+          cargarCadetes();
+        }else{
+          const card = document.getElementById(`order-${orderId}`);
+          if(card){
+            renderTimelineInto(card, orderData);
+            if(orderData.cadete){
+              const n = card.querySelector('.cadete-name');
+              if(n) n.textContent = orderData.cadete;
             }
           }
-          return;
         }
+        return;
+      }
 
-        if(kind==='actualizacion_pedido'){
-          const estado=orderData.estado;
-          const card=document.getElementById(`order-${orderId}`);
-          const chipHoy=document.getElementById(`chip-hoy-${orderId}`);
-          const chipAyer=document.getElementById(`chip-${orderId}`);
+      if(kind==='actualizacion_pedido'){
+        const estado=orderData.estado;
+        const card=document.getElementById(`order-${orderId}`);
+        const chipHoy=document.getElementById(`chip-hoy-${orderId}`);
+        const chipAyer=document.getElementById(`chip-${orderId}`);
 
-          if(card){
-            const badge=card.querySelector('.badge');
-            if(estado && badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
-            if(orderData.cadete){ const n = card.querySelector('.cadete-name'); if(n) n.textContent = orderData.cadete; }
-            renderTimelineInto(card, orderData || null);
-            if(estado==='ENTREGADO'||estado==='CANCELADO'){ moveToFinalizadosFromCard(card, estado); }
-          }else if(chipHoy||chipAyer){
-            const chip = chipHoy || chipAyer;
-            const b=chip.querySelector('.badge');
-            if(estado && b){ b.className='badge '+badgeClass(estado); b.textContent=estado; }
-          }else{
-            location.reload();
+        if(card){
+          const badge=card.querySelector('.badge');
+          if(estado && badge){ badge.className='badge '+badgeClass(estado); badge.textContent=estado; }
+          if(orderData.cadete){
+            const n = card.querySelector('.cadete-name');
+            if(n) n.textContent = orderData.cadete;
           }
-          return;
+          renderTimelineInto(card, orderData || null);
+          if(estado==='ENTREGADO'||estado==='CANCELADO'){ moveToFinalizadosFromCard(card, estado); }
+        }else if(chipHoy||chipAyer){
+          const chip = chipHoy || chipAyer;
+          const b=chip.querySelector('.badge');
+          if(estado && b){ b.className='badge '+badgeClass(estado); b.textContent=estado; }
+        }else{
+          location.reload();
         }
-      }catch(e){}
-    };
-    socket.onclose = scheduleReconnect;
-    socket.onerror = scheduleReconnect;
-  }
-  function scheduleReconnect(){
-    try{ if(socket) socket.close(); }catch(e){}
-    socket = null;
-    wsSetStatus('bg-danger', 'Desconectado');
-    reconnectAttempts = Math.min(reconnectAttempts + 1, 7);
-    const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
-    setTimeout(connectWS, delay);
-  }
-
-  // ================== POLLING (fallback) ==================
-  async function poll(){
-    try{
-      const r = await fetch(POLL_URL, {cache:'no-store'}); if(!r.ok) return;
-      const j = await r.json(); if(!j || !j.ok) return;
-      const ids = (j.pedidos || []).map(p => Number(p.id||0)).filter(Boolean);
-      if(ids.length){
-        const maxId = Math.max(...ids);
-        if(maxId > getLastSeen()){ playSound(); setLastSeen(maxId); }
+        return;
       }
     }catch(e){}
-  }
+  };
 
-  // ================== AUTO-RELOAD anti-zombies ==================
-  setInterval(()=>{
-    const msFromWsOk = Date.now() - lastWsOkAt;
-    if(msFromWsOk > RELOAD_MIN * 60 * 1000){ location.reload(); }
-  }, 60000);
+  socket.onclose = scheduleReconnect;
+  socket.onerror = scheduleReconnect;
+}
+function scheduleReconnect(){
+  try{ if(socket) socket.close(); }catch(e){}
+  socket = null;
+  wsSetStatus('bg-danger', 'Desconectado');
+  reconnectAttempts = Math.min(reconnectAttempts + 1, 7);
+  const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
+  setTimeout(connectWS, delay);
+}
 
-  // Arranque
-  connectWS();
-  baselineFromServer();
-  setInterval(poll, POLL_MS);
+// ================== POLLING (fallback) ==================
+async function poll(){
+  try{
+    const r = await fetch(POLL_URL, {cache:'no-store'});
+    if(!r.ok) return;
+    const j = await r.json();
+    if(!j || !j.ok) return;
+    const ids = (j.pedidos || []).map(p => Number(p.id||0)).filter(Boolean);
+    if(ids.length){
+      const maxId = Math.max(...ids);
+      if(maxId > getLastSeen()){ playSound(); setLastSeen(maxId); }
+    }
+  }catch(e){}
+}
 
-  // Re-baseline al volver de background
-  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ baselineFromServer(); poll(); }});
+// ================== AUTO-RELOAD anti-zombies ==================
+setInterval(()=>{
+  const msFromWsOk = Date.now() - lastWsOkAt;
+  if(msFromWsOk > RELOAD_MIN * 60 * 1000){ location.reload(); }
+}, 60000);
 
-  // ===== util: refrescar cadete desde feed (sin cambios) =====
-  async function refreshCadeteName(orderId){
-    try{
-      const res = await fetch("{% url 'panel_alertas_data' %}?scope=hoy", {headers:{'X-Requested-With':'XMLHttpRequest'}});
-      if(!res.ok) return;
-      const data = await res.json();
-      const match = (data.pedidos || []).find(p => String(p.id) === String(orderId));
-      if(match && match.cadete){
-        const node = document.querySelector(`#order-${orderId} .cadete-name`);
-        if(node) node.textContent = match.cadete;
-      }
-    }catch(e){}
-  }
+// Arranque
+connectWS();
+baselineFromServer();
+setInterval(poll, POLL_MS);
+
+// Re-baseline al volver de background
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden){ baselineFromServer(); poll(); }
+});
+
+// ===== util: refrescar cadete desde feed =====
+async function refreshCadeteName(orderId){
+  try{
+    const res = await fetch("{% url 'panel_alertas_data' %}?scope=hoy", {headers:{'X-Requested-With':'XMLHttpRequest'}});
+    if(!res.ok) return;
+    const data = await res.json();
+    const match = (data.pedidos || []).find(p => String(p.id) === String(orderId));
+    if(match && match.cadete){
+      const node = document.querySelector(`#order-${orderId} .cadete-name`);
+      if(node) node.textContent = match.cadete;
+    }
+  }catch(e){}
+}
 </script>
 
 <style>
-  .order-chip{border:1px solid var(--bs-primary);background:rgba(13,110,253,.08);border-radius:.75rem;padding:.5rem .75rem;margin-bottom:.6rem}
-  .chip-id{font-weight:700}
-  .chip-client{max-width:260px}
-  .order-card h6{font-size:1rem}
-  .compact-line{font-size:.95rem}
-  .min-btn-col{min-width:220px}
-  .assignment-box .form-select{min-width: 160px;}
-
-  .addr-ellipsis{
-    max-width: min(44vw, 420px);
-    display:inline-block;
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    vertical-align:bottom;
-  }
-
-  .bg-status-recibido{background:#0d6efd !important}
-  .bg-status-en_preparacion{background:#0dcaf0 !important}
-  .bg-status-asignado{background:#6f42c1 !important}
-  .bg-status-en_camino{background:#ffc107 !important;color:#212529 !important}
-  .bg-status-entregado{background:#198754 !important}
-  .bg-status-cancelado{background:#dc3545 !important}
-
-  .timeline-table{width:100%; border-collapse:collapse}
-  .timeline-table th{font-weight:600; padding:.15rem .35rem 0 0}
-  .timeline-table td{padding:.15rem .35rem}
-  .timeline-table tr.sep td{border-top:1px solid #ddd; padding-top:.4rem}
-  .timeline-table tr.total th{font-size:.95rem}
-  .timeline-table .muted{color:#6c757d; font-weight:400}
-  .badge-sm{font-size:.75rem}
+.order-chip{border:1px solid var(--bs-primary);background:rgba(13,110,253,.08);border-radius:.75rem;padding:.5rem .75rem;margin-bottom:.6rem}
+.chip-id{font-weight:700}
+.chip-client{max-width:260px}
+.order-card h6{font-size:1rem}
+.compact-line{font-size:.95rem}
+.min-btn-col{min-width:220px}
+.assignment-box .form-select{min-width: 160px;}
+.addr-ellipsis{ max-width: min(44vw, 420px); display:inline-block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom; }
+.bg-status-recibido{background:#0d6efd !important}
+.bg-status-en_preparacion{background:#0dcaf0 !important}
+.bg-status-asignado{background:#6f42c1 !important}
+.bg-status-en_camino{background:#ffc107 !important;color:#212529 !important}
+.bg-status-entregado{background:#198754 !important}
+.bg-status-cancelado{background:#dc3545 !important}
+.timeline-table{width:100%; border-collapse:collapse}
+.timeline-table th{font-weight:600; padding:.15rem .35rem 0 0}
+.timeline-table td{padding:.15rem .35rem}
+.timeline-table tr.sep td{border-top:1px solid #ddd; padding-top:.4rem}
+.timeline-table tr.total th{font-size:.95rem}
+.timeline-table .muted{color:#6c757d; font-weight:400}
+.badge-sm{font-size:.75rem}
 </style>
 {% endblock %}
