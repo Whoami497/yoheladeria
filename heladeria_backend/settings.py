@@ -268,9 +268,24 @@ TRANSFERENCIA_CUIT = os.getenv("TRANSFERENCIA_CUIT", "27-24776697-4")
 TEMPLATES[0]['OPTIONS']['context_processors'] += [
     'pedidos.context_processors.transferencia',
  "pedidos.context_processors.shop_extras",
+ 'pedidos.context_processors.pwa_flags',
 ]
 
 FREE_SHIPPING_THRESHOLD = Decimal('10000')  # envío gratis desde $10.000
+
+# --- PWA toggle seguro ---
+PWA_ENABLE = False  # En producción queda apagado (no afecta nada)
+
+# === Geocerca / cobertura ===
+STORE_COORDS = {
+    "lat": -28.4705234,   # <--- LATITUD DEL LOCAL (cambiá si hace falta)
+    "lng": -65.7937524,   # <--- LONGITUD DEL LOCAL
+}
+DELIVERY_RADIUS_KM = 5.0  # Radio permitido para operar (delivery y retiro), cambialo si querés.
+ALLOW_PICKUP_OUTSIDE_RADIUS = False
+
+# Re-pedir ubicación si cambió > X metros o si pasaron 24h
+REASK_THRESHOLD_METERS = 250
 
 
 
