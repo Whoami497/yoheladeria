@@ -10,6 +10,7 @@ from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
 from django.views.decorators.http import require_POST, require_GET, require_http_methods
 from django.contrib.admin.views.decorators import staff_member_required
+from django.http import JsonResponse, HttpResponseRedirect
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
@@ -3098,3 +3099,10 @@ def _get_setting_bool(key, default=False):
 
 def _set_setting_bool(key, value: bool):
     _set_setting_text(key, "1" if value else "0")
+    # Import del modelo que faltaba:
+try:
+    from .models import GlobalSetting  # <— este es el nombre en tu app
+except Exception:
+    # fallback robusto por si el import relativo falla en Render
+    from django.apps import apps
+    GlobalSetting = apps.get_model('pedidos', 'GlobalSetting')
