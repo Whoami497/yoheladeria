@@ -99,6 +99,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'pedidos.context_processors.store_status',  # banner/estado tienda abierta/cerrada
+                'pedidos.context_processors.pwa_flags',
             ],
         },
     },
@@ -271,6 +272,11 @@ TEMPLATES[0]['OPTIONS']['context_processors'] += [
 ]
 
 FREE_SHIPPING_THRESHOLD = Decimal('10000')  # envío gratis desde $10.000
+
+# --- PWA toggle seguro ---
+PWA_ENABLE = False  # En producción queda apagado (no afecta nada)
+
+
 
 
 
