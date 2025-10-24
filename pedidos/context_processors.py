@@ -50,9 +50,13 @@ def transferencia(request):
     }
 
 def shop_extras(_request):
-    # ⚠️ NO reinyectar TIENDA_ABIERTA acá (estaba forzando True y pisando al anterior).
     return {
-        'FREE_SHIPPING_THRESHOLD': getattr(settings, 'FREE_SHIPPING_THRESHOLD', Decimal('0')),
+        "TIENDA_ABIERTA": True,
+        "FREE_SHIPPING_THRESHOLD": getattr(settings, "FREE_SHIPPING_THRESHOLD", Decimal("0")),
+        # === claves nuevas para geocerca ===
+        "STORE_COORDS": getattr(settings, "STORE_COORDS", {}),
+        "DELIVERY_RADIUS_KM": getattr(settings, "DELIVERY_RADIUS_KM", None),
+        "REASK_THRESHOLD_METERS": getattr(settings, "REASK_THRESHOLD_METERS", 250),
     }
 def pwa_flags(_request):
     from django.conf import settings
