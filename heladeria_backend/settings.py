@@ -277,7 +277,7 @@ FREE_SHIPPING_THRESHOLD = Decimal('10000')  # envío gratis desde $10.000
 # --- PWA toggle seguro ---
 PWA_ENABLE = False  # En producción queda apagado (no afecta nada)
 
-<<<<<<< HEAD
+
 # === Geocerca / cobertura ===
 STORE_COORDS = {
     "lat": -28.4705234,   # <--- LATITUD DEL LOCAL (cambiá si hace falta)
@@ -288,9 +288,9 @@ ALLOW_PICKUP_OUTSIDE_RADIUS = False
 
 # Re-pedir ubicación si cambió > X metros o si pasaron 24h
 REASK_THRESHOLD_METERS = 250
-=======
 
->>>>>>> pwa-setup
+
+
 
 
 
