@@ -86,4 +86,10 @@ urlpatterns = [
     path("api/location/set/", views.api_set_location, name="api_set_location"),
     path("api/location/can-order/", views.api_can_order, name="api_can_order"),
     path("api/set-location/", views.api_set_location, name="api_set_location"),
+    
+    path(
+        "panel-alertas/set-estado/<int:pk>/",
+        views.panel_alertas_set_estado,
+        name="panel_alertas_set_estado",
+    ),
 ]
