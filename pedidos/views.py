@@ -3036,19 +3036,3 @@ def assert_inside_or_redirect(request):
         messages.error(request, "Estás fuera de la zona de cobertura.")
         return False
     return True
-@staff_member_required
-@require_POST
-def panel_alertas_set_estado(request, pk):
-    """
-    Cambia el estado de un pedido desde el panel de alertas.
-    Espera POST con 'state' en: EN_PREPARACION | EN_CAMINO | ENTREGADO | CANCELADO
-    """
-    state = (request.POST.get("state") or "").upper().strip()
-    VALID = {"EN_PREPARACION", "EN_CAMINO", "ENTREGADO", "CANCELADO"}
-    if state not in VALID:
-        return HttpResponseBadRequest("estado inválido")
-
-    pedido = get_object_or_404(Pedido, pk=pk)
-    pedido.estado = state
-    pedido.save(update_fields=["estado"])
-    return JsonResponse({"ok": True, "id": pedido.id, "estado": pedido.estado})

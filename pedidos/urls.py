@@ -41,6 +41,7 @@ urlpatterns = [
     path('panel-alertas/data/', views.panel_alertas_data, name='panel_alertas_data'),
     path('panel-alertas/board/', views.panel_alertas, name='panel_alertas_board'),
     path('panel-alertas/anteriores/', views.panel_alertas_anteriores, name='panel_alertas_anteriores'),
+
     # Confirmación de pedido (tienda)
     path('confirmar-pedido/<int:pedido_id>/', views.confirmar_pedido, name='confirmar_pedido'),
     # Alias opcional por si algún botón viejo apunta a esta ruta
@@ -72,24 +73,23 @@ urlpatterns = [
     path('panel-alertas/cadetes.json', views.panel_alertas_data, name='panel_cadetes_data'),
     path('panel-alertas/asignar/<int:pedido_id>/', views.panel_asignar_cadete, name='panel_asignar_cadete'),
     path('panel-alertas/reimprimir/<int:pedido_id>/', views.reimprimir_ticket, name='reimprimir_ticket'),
-    
-    # transferencia mp
+
+    # Transferencia
     path('pago/transferencia/instrucciones/', views.transferencia_instrucciones, name='transferencia_instrucciones'),
     path('pago/transferencia/avise/<int:pedido_id>/', views.transferencia_avise, name='transferencia_avise'),
-
     # Pago transferencia desde panel
-    path(
-        'panel-alertas/pago-transferencia/<int:pedido_id>/',
-        views.panel_marcar_pago_transferencia,
-        name='panel_marcar_pago_transferencia'
-    ),
-    path("api/location/set/", views.api_set_location, name="api_set_location"),
-    path("api/location/can-order/", views.api_can_order, name="api_can_order"),
-    path("api/set-location/", views.api_set_location, name="api_set_location"),
-    
-    path(
-        "panel-alertas/set-estado/<int:pk>/",
-        views.panel_alertas_set_estado,
-        name="panel_alertas_set_estado",
-    ),
+    path('panel-alertas/pago-transferencia/<int:pedido_id>/', views.panel_marcar_pago_transferencia, name='panel_marcar_pago_transferencia'),
+
+    # --- Geolocalización / radio de entrega ---
+    # Canónico
+    path('api/location/set/', views.api_set_location, name='api_set_location'),
+    path('api/location/can-order/', views.api_can_order, name='api_can_order'),
+    # Alias de compatibilidad (nombre distinto para no pisar el canónico)
+    path('api/set-location/', views.api_set_location, name='api_set_location_compat'),
+
+    # --- Estado desde panel (la vista completa maneja estado y cadete) ---
+    path('panel-alertas/set-estado/<int:pedido_id>/', views.panel_alertas_set_estado, name='panel_alertas_set_estado'),
+
+    # --- Diagnóstico / Comandera ---
+    path('comandera-test/', views.comandera_test, name='comandera_test'),
 ]
