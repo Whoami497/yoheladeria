@@ -19,6 +19,7 @@ from django.http import JsonResponse, HttpRequest
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.apps import apps
+from .models import CadeteProfile, Categoria
 from .utils.geo import haversine_km
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 import json
@@ -26,6 +27,8 @@ import mercadopago
 import requests
 import re
 import base64
+from django.http import HttpResponseRedirect
+from django.core.cache import cache
 from urllib.parse import quote_plus
 from django.template import TemplateDoesNotExist
 from django.contrib import messages
@@ -1394,10 +1397,20 @@ def panel_alertas(request):
             setattr(p, 'logs', logs_qs)
         return qs
 
+    # 👇 NUEVO: cadeteprofile “seguro” y categorías
+    cadeteprofile = None
+    if request.user.is_authenticated:
+        cadeteprofile = CadeteProfile.objects.filter(user=request.user).select_related('user').first()
+
+    categorias = Categoria.objects.all().order_by('orden')
+
     ctx = {
         'pedidos_hoy': enrich(pedidos_hoy),
         'pedidos_ayer': enrich(pedidos_ayer),
         'entregados_hoy': enrich(entregados_hoy),
+        # 👇 NUEVO en el contexto
+        'cadeteprofile': cadeteprofile,
+        'categorias': categorias,
     }
     return render(request, 'pedidos/panel_alertas.html', ctx)
 
@@ -1951,28 +1964,54 @@ except NameError:
 # =========================
 @require_GET
 def tienda_estado_json(request):
-    return JsonResponse({'abierta': _get_tienda_abierta()})
+    abierta = _get_setting_bool(TIENDA_KEY, True)
+    msg = _get_setting_text(TIENDA_MSG_KEY, "")
+    return JsonResponse({"abierta": abierta, "mensaje": msg})
 
 @require_GET
 def tienda_estado(request):
+    # alias simple para compatibilidad con el front
     return tienda_estado_json(request)
 
 @staff_member_required
 @require_POST
 def tienda_set_estado(request):
-    raw = (request.POST.get('abierta') or '').strip().lower()
-    val = True if raw in ('1', 'true', 't', 'yes', 'y', 'si', 'sí') else False
-    abierta = _set_tienda_abierta(val)
-    _broadcast_tienda_estado(abierta)
-    return JsonResponse({'ok': True, 'abierta': abierta})
+    # acepta form-urlencoded: abierta=1/0 y msg=...
+    raw = (request.POST.get("abierta") or "1").strip().lower()
+    abierta = raw in ("1", "true", "t", "yes", "y", "si", "sí")
+    msg = (request.POST.get("msg") or "").strip()
+
+    _set_setting_bool(TIENDA_KEY, abierta)
+    _set_setting_text(TIENDA_MSG_KEY, msg)
+
+    # avisar a websockets/panel
+    try:
+        _broadcast_tienda_estado(abierta)
+    except Exception:
+        pass
+
+    messages.success(request, f"Tienda {'abierta' if abierta else 'cerrada'}")
+    next_url = request.POST.get("next") or reverse("panel_alertas")
+    return HttpResponseRedirect(next_url)
 
 @staff_member_required
 @require_POST
 def tienda_toggle(request):
-    nueva = not _get_tienda_abierta()
-    abierta = _set_tienda_abierta(nueva)
-    _broadcast_tienda_estado(abierta)
-    return JsonResponse({'ok': True, 'abierta': abierta})
+    abierta = _get_setting_bool(TIENDA_KEY, True)
+    nueva = not abierta
+    _set_setting_bool(TIENDA_KEY, nueva)
+
+    # no tocamos el mensaje en toggle
+    try:
+        _broadcast_tienda_estado(nueva)
+    except Exception:
+        pass
+
+    if request.headers.get("x-requested-with") == "XMLHttpRequest":
+        return JsonResponse({"ok": True, "abierta": nueva})
+
+    messages.success(request, f"Tienda {'abierta' if nueva else 'cerrada'}")
+    return HttpResponseRedirect(request.META.get("HTTP_REFERER") or reverse("panel_alertas"))
 
 def _marcar_estado(pedido, nuevo_estado: str, actor=None, fuente: str = '', meta: dict | None = None):
     """
@@ -3036,3 +3075,26 @@ def assert_inside_or_redirect(request):
         messages.error(request, "Estás fuera de la zona de cobertura.")
         return False
     return True
+# ==== Helpers persistentes de estado de tienda (usa GlobalSetting + cache corta) ====
+TIENDA_KEY = "TIENDA_ABIERTA"
+TIENDA_MSG_KEY = "TIENDA_MSG"
+
+def _get_setting_text(key, default=""):
+    cache_key = f"gs:{key}"
+    val = cache.get(cache_key)
+    if val is None:
+        obj = GlobalSetting.objects.filter(key=key).first()
+        val = obj.value_text if obj else default
+        cache.set(cache_key, val, 15)  # 15s de cache
+    return val
+
+def _set_setting_text(key, value):
+    GlobalSetting.objects.update_or_create(key=key, defaults={"value_text": str(value)})
+    cache.delete(f"gs:{key}")
+
+def _get_setting_bool(key, default=False):
+    val = _get_setting_text(key, "1" if default else "0")
+    return str(val).lower() in ("1", "true", "yes", "on")
+
+def _set_setting_bool(key, value: bool):
+    _set_setting_text(key, "1" if value else "0")
