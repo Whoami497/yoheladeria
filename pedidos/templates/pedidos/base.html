@@ -459,50 +459,84 @@
     </script>
 
     {# ===== WS: actualiza el banner de tienda en vivo ===== #}
-    <script>
-      (function(){
-        const banner = document.getElementById('tienda-banner');
-        if(!banner) return;
+    {# ===== WS: actualiza el banner de tienda en vivo + fallback polling ===== #}
+<script>
+  (function(){
+    const banner = document.getElementById('tienda-banner');
+    if(!banner) return;
 
-        const textEl = document.getElementById('tienda-banner-text');
-        function applyBannerState(isOpen){
-          banner.dataset.open = isOpen ? '1' : '0';
-          banner.classList.toggle('alert-success', !!isOpen);
-          banner.classList.toggle('alert-warning', !isOpen);
-          textEl.innerHTML = isOpen
-            ? '<strong>🟢 Estamos tomando pedidos online ahora.</strong>'
-            : '<strong>🔴 No estamos tomando pedidos online en este momento.</strong>';
-          const help = banner.querySelector('.small-help');
-          if(help){
-            const HORARIO = '13–16 hs y 21–00 hs';
-            const TH = '{{ FREE_SHIPPING_THRESHOLD|floatformat:0 }}';
-            const shippingHTML = (TH && TH !== '0')
-              ? `<span class="ms-1">🛵 Envío <strong>gratis</strong> a partir de <strong>$${TH}</strong>.</span>`
-              : '';
+    const textEl = document.getElementById('tienda-banner-text');
+    const URL_ESTADO = "{% url 'tienda_estado_json' %}";
+    const HORARIO_TXT = "13–16 hs y 21–00 hs";
+    const THRESH = "{{ FREE_SHIPPING_THRESHOLD|floatformat:0 }}";
 
-            help.innerHTML = isOpen
-              ? `Podés ver el catálogo y armar el carrito. ${shippingHTML}`
-              : `Podés ver el catálogo y armar el carrito. El checkout se habilita cuando abrimos: <strong>${HORARIO}</strong>. ${shippingHTML}`;
-          }
+    function shippingHTML(){
+      return (THRESH && THRESH !== "0")
+        ? ` <span class="ms-1">🛵 Envío <strong>gratis</strong> a partir de <strong>$${THRESH}</strong>.</span>`
+        : "";
+    }
+
+    function applyBannerState(isOpen){
+      banner.dataset.open = isOpen ? "1" : "0";
+      banner.classList.toggle("alert-success", !!isOpen);
+      banner.classList.toggle("alert-warning", !isOpen);
+
+      textEl.innerHTML = isOpen
+        ? "<strong>🟢 Estamos tomando pedidos online ahora.</strong>"
+        : "<strong>🔴 No estamos tomando pedidos online en este momento.</strong>";
+
+      const help = banner.querySelector(".small-help");
+      if (help){
+        help.innerHTML = isOpen
+          ? `Podés ver el catálogo y armar el carrito.${shippingHTML()}`
+          : `Podés ver el catálogo y armar el carrito. El checkout se habilita cuando abrimos: <strong>${HORARIO_TXT}</strong>.${shippingHTML()}`;
+      }
+    }
+
+    // Estado inicial de lo que vino del server
+    applyBannerState(banner.dataset.open === "1");
+
+    // ---- Polling seguro (sin romper nada si no hay WS)
+    async function fetchEstado(){
+      try{
+        const r = await fetch(URL_ESTADO, {cache: "no-store", headers: {"X-Requested-With":"XMLHttpRequest"}});
+        if(!r.ok) return;
+        const j = await r.json();
+        if (j && typeof j.abierta === "boolean"){
+          applyBannerState(j.abierta);
         }
+      }catch(_){}
+    }
 
-        applyBannerState(banner.dataset.open === '1');
+    // Arranca sincronizado y refresca cada 30s
+    fetchEstado();
+    const pollTimer = setInterval(fetchEstado, 30000);
+    document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) fetchEstado(); });
 
+    // ---- WebSocket (si está disponible llega “en vivo”)
+    try{
+      const wsProtocol = (location.protocol === "https:") ? "wss://" : "ws://";
+      const websocketUrl = wsProtocol + location.host + "/ws/pedidos/notifications/";
+      const sock = new WebSocket(websocketUrl);
+
+      sock.onmessage = function(e){
         try{
-          const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-          const websocketUrl = wsProtocol + window.location.host + '/ws/pedidos/notifications/';
-          const sock = new WebSocket(websocketUrl);
-          sock.onmessage = function(e){
-            try{
-              const data = JSON.parse(e.data || '{}');
-              if(data && data.message === 'tienda_estado' && data.order_data){
-                applyBannerState(!!data.order_data.abierta);
-              }
-            }catch(_){}
-          };
+          const data = JSON.parse(e.data || "{}");
+          if (data && data.message === "tienda_estado" && data.order_data){
+            applyBannerState(!!data.order_data.abierta);
+          }
         }catch(_){}
-      })();
-    </script>
+      };
+
+      // si el WS se cierra, el polling ya queda cubriendo el estado
+      sock.onclose = function(){ /* noop */ };
+    }catch(_){ /* si falla WS, queda el polling */ }
+
+    // Limpieza si el usuario cierra el banner manualmente
+    banner.addEventListener("closed.bs.alert", ()=> clearInterval(pollTimer));
+  })();
+</script>
+
 
     <!-- ===== GEO: versión NO bloqueante con guardas de config ===== -->
     <script>
