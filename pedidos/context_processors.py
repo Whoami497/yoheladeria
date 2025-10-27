@@ -2,6 +2,7 @@
 from django.conf import settings
 from decimal import Decimal
 
+
 def store_status(request):
     """
     Variables globales disponibles en todos los templates.
@@ -42,6 +43,7 @@ def store_status(request):
         'GOOGLE_MAPS_API_KEY': maps_key,
     }
 
+
 def transferencia(request):
     return {
         'TRANSFERENCIA_ALIAS': getattr(settings, 'TRANSFERENCIA_ALIAS', ''),
@@ -49,12 +51,17 @@ def transferencia(request):
         'TRANSFERENCIA_CUIT': getattr(settings, 'TRANSFERENCIA_CUIT', ''),
     }
 
+
 def shop_extras(_request):
+    """
+    Expone flags/valores usados por el front (geocerca y promo de envío gratis).
+    Los valores de envío gratis pueden venir de GlobalSetting si existe.
+    """
     # Defaults de settings (fallback)
     threshold_default = Decimal(str(getattr(settings, "FREE_SHIPPING_THRESHOLD", "10000")))
     active_default = bool(getattr(settings, "FREE_SHIPPING_ACTIVE", True))
 
-    # Intentar GlobalSetting
+    # Intentar leer de GlobalSetting (si está disponible)
     try:
         from .models import GlobalSetting
         active = GlobalSetting.get_bool("FREE_SHIPPING_ACTIVE", active_default)
@@ -68,13 +75,20 @@ def shop_extras(_request):
         threshold = threshold_default
 
     return {
-        "TIENDA_ABIERTA": True,
-        "FREE_SHIPPING_THRESHOLD": threshold,            # ← usado por front si querés mostrarlo
-        "PROMO_FREE_SHIPPING_ACTIVE": active,            # ← NUEVO: estado visible en templates
-        "PROMO_FREE_SHIPPING_THRESHOLD": threshold,      # ← NUEVO: umbral visible en templates
+        # promo envío gratis
+        "FREE_SHIPPING_THRESHOLD": threshold,
+        "PROMO_FREE_SHIPPING_ACTIVE": active,
+        "PROMO_FREE_SHIPPING_THRESHOLD": threshold,
 
-        # ya existentes en tu archivo:
+        # geocerca / mapas
         "STORE_COORDS": getattr(settings, "STORE_COORDS", {}),
         "DELIVERY_RADIUS_KM": getattr(settings, "DELIVERY_RADIUS_KM", None),
         "REASK_THRESHOLD_METERS": getattr(settings, "REASK_THRESHOLD_METERS", 250),
+    }
+
+
+def pwa_flags(_request):
+    """Bandera simple para habilitar/deshabilitar la PWA desde settings."""
+    return {
+        'PWA_ENABLE': getattr(settings, 'PWA_ENABLE', False),
     }
