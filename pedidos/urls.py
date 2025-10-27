@@ -92,4 +92,8 @@ urlpatterns = [
 
     # --- Diagnóstico / Comandera ---
     path('comandera-test/', views.comandera_test, name='comandera_test'),
+
+    path('promo/envio-gratis/toggle/', views.promo_envio_gratis_toggle, name='promo_envio_gratis_toggle'),
+    path('promo/envio-gratis/set/<int:flag>/', views.promo_envio_gratis_set, name='promo_envio_gratis_set'),  # 1=on,0=off
+
 ]

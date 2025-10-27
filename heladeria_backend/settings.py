@@ -289,6 +289,11 @@ ALLOW_PICKUP_OUTSIDE_RADIUS = False
 # Re-pedir ubicación si cambió > X metros o si pasaron 24h
 REASK_THRESHOLD_METERS = 250
 
+FREE_SHIPPING_THRESHOLD = Decimal("10000")
+FREE_SHIPPING_DEFAULT_ACTIVE = False
+
+
+
 
 
 

@@ -50,16 +50,31 @@ def transferencia(request):
     }
 
 def shop_extras(_request):
+    # Defaults de settings (fallback)
+    threshold_default = Decimal(str(getattr(settings, "FREE_SHIPPING_THRESHOLD", "10000")))
+    active_default = bool(getattr(settings, "FREE_SHIPPING_ACTIVE", True))
+
+    # Intentar GlobalSetting
+    try:
+        from .models import GlobalSetting
+        active = GlobalSetting.get_bool("FREE_SHIPPING_ACTIVE", active_default)
+        th_raw = GlobalSetting.get("FREE_SHIPPING_THRESHOLD", str(threshold_default))
+        try:
+            threshold = Decimal(str(th_raw or threshold_default))
+        except Exception:
+            threshold = threshold_default
+    except Exception:
+        active = active_default
+        threshold = threshold_default
+
     return {
         "TIENDA_ABIERTA": True,
-        "FREE_SHIPPING_THRESHOLD": getattr(settings, "FREE_SHIPPING_THRESHOLD", Decimal("0")),
-        # === claves nuevas para geocerca ===
+        "FREE_SHIPPING_THRESHOLD": threshold,            # ← usado por front si querés mostrarlo
+        "PROMO_FREE_SHIPPING_ACTIVE": active,            # ← NUEVO: estado visible en templates
+        "PROMO_FREE_SHIPPING_THRESHOLD": threshold,      # ← NUEVO: umbral visible en templates
+
+        # ya existentes en tu archivo:
         "STORE_COORDS": getattr(settings, "STORE_COORDS", {}),
         "DELIVERY_RADIUS_KM": getattr(settings, "DELIVERY_RADIUS_KM", None),
         "REASK_THRESHOLD_METERS": getattr(settings, "REASK_THRESHOLD_METERS", 250),
-    }
-def pwa_flags(_request):
-    from django.conf import settings
-    return {
-        'PWA_ENABLE': getattr(settings, 'PWA_ENABLE', False),
     }

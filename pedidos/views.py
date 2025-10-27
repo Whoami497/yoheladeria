@@ -440,6 +440,9 @@ def api_costo_envio(request):
         except Exception:
             pass
 
+    # ¿aplica envío gratis?
+    free = _aplica_envio_gratis(total_cart)
+
     # Sin dirección ⇒ pickup
     if not direccion:
         return JsonResponse({
@@ -447,7 +450,7 @@ def api_costo_envio(request):
             'costo_envio': 0.0,
             'distancia_km': 0.0,
             'mode': 'pickup',
-            'free_shipping': _aplica_envio_gratis(total_cart),
+            'free_shipping': free,
         })
 
     # Armar dirección legible (por coords o por texto)
@@ -466,8 +469,8 @@ def api_costo_envio(request):
     # Calcular costo/ distancia
     costo, km = _calcular_costo_envio(direccion)
 
-    # Envío gratis si supera umbral
-    if _aplica_envio_gratis(total_cart):
+    # Envío gratis si corresponde por flag + umbral
+    if free:
         costo = Decimal('0.00')
 
     return JsonResponse({
@@ -477,8 +480,21 @@ def api_costo_envio(request):
         'mode': 'maps',
         'direccion_legible': addr_full,
         'direccion_corta': _short_address(addr_full),
-        'free_shipping': _aplica_envio_gratis(total_cart),
+        'free_shipping': free,
     })
+
+# —— helper: decide si aplica el envío gratis según flag + umbral
+from decimal import Decimal  # por las dudas
+
+def _aplica_envio_gratis(subtotal: Decimal) -> bool:
+    """
+    Devuelve True solo si la promo está ACTIVA y el subtotal de productos
+    supera (o iguala) el umbral configurado.
+    """
+    try:
+        return bool(_free_shipping_active() and subtotal >= _free_shipping_threshold())
+    except Exception:
+        return False
 
 
 def _short_address(formatted: str, max_len: int = 60) -> str:
@@ -3106,3 +3122,50 @@ except Exception:
     # fallback robusto por si el import relativo falla en Render
     from django.apps import apps
     GlobalSetting = apps.get_model('pedidos', 'GlobalSetting')
+
+# --- En la zona de imports de views.py ---
+from decimal import Decimal
+from django.conf import settings
+from django.apps import apps
+from django.contrib.admin.views.decorators import staff_member_required
+from django.http import JsonResponse, HttpResponseRedirect
+from django.urls import reverse
+
+# Intentar cargar GlobalSetting (si el modelo existe)
+try:
+    GlobalSetting = apps.get_model('pedidos', 'GlobalSetting')
+except Exception:
+    GlobalSetting = None
+
+# Helpers de promo "envío gratis"
+def _free_shipping_threshold() -> Decimal:
+    return getattr(settings, 'FREE_SHIPPING_THRESHOLD', Decimal('0'))
+
+def _free_shipping_active() -> bool:
+    default_flag = getattr(settings, 'FREE_SHIPPING_DEFAULT_ACTIVE', False)
+    if GlobalSetting:
+        try:
+            return GlobalSetting.get_bool('ENVIO_GRATIS_ACTIVO', default_flag)
+        except Exception:
+            return default_flag
+    return default_flag
+
+def _set_free_shipping_active(flag: bool) -> None:
+    if GlobalSetting:
+        try:
+            GlobalSetting.set_bool('ENVIO_GRATIS_ACTIVO', bool(flag))
+        except Exception:
+            pass
+
+# Botón staff: alternar ON/OFF
+@staff_member_required
+def promo_envio_gratis_toggle(request):
+    flag = not _free_shipping_active()
+    _set_free_shipping_active(flag)
+    return HttpResponseRedirect(reverse('panel_alertas'))
+
+# Botón staff: fijar explícito ON(1)/OFF(0)
+@staff_member_required
+def promo_envio_gratis_set(request, flag: int):
+    _set_free_shipping_active(bool(flag))
+    return HttpResponseRedirect(reverse('panel_alertas'))
