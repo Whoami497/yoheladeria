@@ -4,6 +4,17 @@
 {% block content %}
 <div class="container my-5">
   <h2 class="section-title text-center mb-1">Panel de Alertas de Pedidos</h2>
+  <div class="d-flex align-items-center gap-2 mb-3">
+  {% if free_shipping_active %}
+    <span class="badge text-bg-success">Envío gratis: ON</span>
+    <a class="btn btn-outline-danger btn-sm" href="{% url 'promo_envio_gratis_toggle' %}">Apagar</a>
+  {% else %}
+    <span class="badge text-bg-secondary">Envío gratis: OFF</span>
+    <a class="btn btn-outline-success btn-sm" href="{% url 'promo_envio_gratis_toggle' %}">Encender</a>
+  {% endif %}
+  <small class="text-muted ms-2">Umbral: ${{ free_shipping_threshold|floatformat:0 }}</small>
+</div>
+
   <p class="text-center text-muted mb-4">Llegan en tiempo real y quedan visibles aun si recargás la página.</p>
 
   <!-- ===== ESTADO TIENDA + TOGGLE ===== -->
@@ -60,7 +71,7 @@
             </div>
 
             <div class="small text-muted mb-1 d-flex align-items-center flex-wrap gap-1">
-              <span>Cliente: <span class="fw-semibold">{{ p.cliente_nombre|default:"N/A" }}</span></span>
+              <span>Cliente : <span class="fw-semibold">{{ p.cliente_nombre|default:"N/A" }}</span></span>
               <span>· {{ p.cliente_telefono|default:"—" }}</span>
               <span class="addr-ellipsis" title="{{ p.direccion_legible|default:'—' }}">· {{ p.direccion_legible|default:"—" }}</span>
               {% if p.map_url %}
@@ -411,15 +422,15 @@ function computeMetricasFromTs(t){
   };
 }
 
-function renderTimelineHTML(timestamps, metricas, logs){
-  const ts = timestamps || {};
-  const m = metricas || computeMetricasFromTs(ts);
+function renderTimelineHTML(ts, metricas, logs){
+  const t = ts || {};
+  const m = metricas || computeMetricasFromTs(t);
   const rows = `
     <table class="timeline-table">
-      <tr><th>Recibido → Preparación</th><td>${fmt(m.m_recibido_a_preparacion)}</td><td class="muted">${ts.fecha_en_preparacion || '—'}</td></tr>
-      <tr><th>Preparación → Asignado</th><td>${fmt(m.m_preparacion_a_asignado)}</td><td class="muted">${ts.fecha_asignado || '—'}</td></tr>
-      <tr><th>Asignado → En camino</th><td>${fmt(m.m_asignado_a_en_camino)}</td><td class="muted">${ts.fecha_en_camino || '—'}</td></tr>
-      <tr><th>En camino → Entregado</th><td>${fmt(m.m_en_camino_a_entregado)}</td><td class="muted">${ts.fecha_entregado || '—'}</td></tr>
+      <tr><th>Recibido → Preparación</th><td>${fmt(m.m_recibido_a_preparacion)}</td><td class="muted">${t.fecha_en_preparacion || '—'}</td></tr>
+      <tr><th>Preparación → Asignado</th><td>${fmt(m.m_preparacion_a_asignado)}</td><td class="muted">${t.fecha_asignado || '—'}</td></tr>
+      <tr><th>Asignado → En camino</th><td>${fmt(m.m_asignado_a_en_camino)}</td><td class="muted">${t.fecha_en_camino || '—'}</td></tr>
+      <tr><th>En camino → Entregado</th><td>${fmt(m.m_en_camino_a_entregado)}</td><td class="muted">${t.fecha_entregado || '—'}</td></tr>
       <tr class="sep"><td colspan="3"></td></tr>
       <tr class="total"><th>Total</th><td>${fmt(m.m_total)}</td><td></td></tr>
     </table>`;
@@ -520,8 +531,7 @@ function buildCard(order){
       <div class="dropdown mb-2">
         <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">Estado</button>
         <ul class="dropdown-menu dropdown-menu-end">
-          <li><button class="dropdown-item btn-set-state" data-state="EN_PREPARACION" data-url="${URL_SET_ESTADO_BASE}${order.id}/">En preparación</button></li>
-          <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO" data-url="${URL_SET_ESTADO_BASE}${order.id}/">En camino</button></li>
+          <li><button class="dropdown-item btn-set-state" data-state="EN_CAMINO"  data-url="${URL_SET_ESTADO_BASE}${order.id}/">En camino</button></li>
           <li><button class="dropdown-item btn-set-state" data-state="ENTREGADO" data-url="${URL_SET_ESTADO_BASE}${order.id}/">Entregado</button></li>
           <li><hr class="dropdown-divider"></li>
           <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="${URL_SET_ESTADO_BASE}${order.id}/">Cancelar</button></li>
@@ -635,7 +645,7 @@ document.addEventListener('click', async (ev)=>{
             <li><button class="dropdown-item text-danger btn-set-state" data-state="CANCELADO" data-url="${stateUrl}">Cancelar</button></li>
           </ul>
         </div>`;
-    }else{
+    } else{
       window.location.href=url;
     }
   }catch(e){
@@ -674,7 +684,7 @@ document.addEventListener('click', async (ev)=>{
         const order = { id, estado, total_pedido: total, cliente_nombre: cliente, cadete };
         const chip = buildChip(order, true);
         const empty = alertsHoyFinalizados.querySelector('.alert');
-        if(empty) empty.remove();
+        if (empty) empty.remove();
         alertsHoyFinalizados.prepend(chip);
         root.remove();
         if(!alertsHoy.querySelector('.order-card')){
@@ -815,7 +825,7 @@ function wsSetStatus(colorClass, text){
   wsStatus.className = 'badge ' + colorClass;
   wsStatus.textContent = text;
 }
-function connectWS(){
+function connect(){
   try{ socket = new WebSocket(WS_PATH); }
   catch(e){ scheduleReconnect(); return; }
 
@@ -844,9 +854,9 @@ function connectWS(){
         const total = card.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
         const cliente = card.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
         const cadeteNode = card.querySelector('.cadete-name');
-        const cadete = cadeteNode ? cadeteNode.textContent.trim() : '—';
-        const simple = { id: orderId, estado: estadoActual, total_pedido: total, cliente_nombre: cliente, cadete };
-        const chip = buildChip(simple, true);
+        const cadete = (cadeteNode ? cadeteNode.textContent.trim() : '—');
+        const order = { id: orderId, estado: estadoActual, total_pedido: total, cliente_nombre: cliente, cadete };
+        const chip = buildChip(order, true);
         const empty = alertsHoyFinalizados.querySelector('.alert');
         if (empty) empty.remove();
         alertsHoyFinalizados.prepend(chip);
@@ -986,25 +996,3 @@ async function refreshCadeteName(orderId){
 .badge-sm{font-size:.75rem}
 </style>
 {% endblock %}
-
-{% if request.user.is_staff %}
-<div class="alert {{ PROMO_FREE_SHIPPING_ACTIVE|yesno:'alert-success,alert-secondary' }} d-flex justify-content-between align-items-center mb-3">
-  <div>
-    <div class="fw-semibold">Promo “Envío gratis”</div>
-    <div class="small mb-0">
-      Estado: <span class="fw-semibold">
-        {{ PROMO_FREE_SHIPPING_ACTIVE|yesno:"ACTIVA,INACTIVA" }}
-      </span>
-      · Umbral: ${{ PROMO_FREE_SHIPPING_THRESHOLD|floatformat:0 }}
-    </div>
-  </div>
-  <div class="d-flex gap-2">
-    <a class="btn btn-outline-secondary btn-sm" href="{% url 'promo_envio_gratis_toggle' %}">Toggle</a>
-    {% if PROMO_FREE_SHIPPING_ACTIVE %}
-      <a class="btn btn-outline-danger btn-sm" href="{% url 'promo_envio_gratis_set' 0 %}">Desactivar</a>
-    {% else %}
-      <a class="btn btn-outline-success btn-sm" href="{% url 'promo_envio_gratis_set' 1 %}">Activar</a>
-    {% endif %}
-  </div>
-</div>
-{% endif %}

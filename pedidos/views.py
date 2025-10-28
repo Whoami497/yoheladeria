@@ -484,7 +484,7 @@ def api_costo_envio(request):
     })
 
 # —— helper: decide si aplica el envío gratis según flag + umbral
-from decimal import Decimal  # por las dudas
+
 
 def _aplica_envio_gratis(subtotal: Decimal) -> bool:
     """
@@ -1428,6 +1428,8 @@ def panel_alertas(request):
         # 👇 NUEVO en el contexto
         'cadeteprofile': cadeteprofile,
         'categorias': categorias,
+        'free_shipping_active': _free_shipping_active(),
+        'free_shipping_threshold': _free_shipping_threshold(),
     }
     return render(request, 'pedidos/panel_alertas.html', ctx)
 
@@ -2980,13 +2982,6 @@ def panel_marcar_pago_transferencia(request, pedido_id: int):
 
     return JsonResponse({'ok': True, 'estado': pedido.estado, 'pedido_id': pedido.id})
 
-def _aplica_envio_gratis(total_productos: Decimal) -> bool:
-    try:
-        th = Decimal(str(getattr(settings, 'FREE_SHIPPING_THRESHOLD', '0') or '0'))
-    except Exception:
-        th = Decimal('0')
-    return th > 0 and Decimal(total_productos) >= th
-
 
 # Helpers de config con defaults seguros
 STORE_COORDS = getattr(settings, "STORE_COORDS", {"lat": -28.4725234, "lng": -65.7937524})
@@ -3120,14 +3115,12 @@ try:
     from .models import GlobalSetting  # <— este es el nombre en tu app
 except Exception:
     # fallback robusto por si el import relativo falla en Render
-    from django.apps import apps
+    
     GlobalSetting = apps.get_model('pedidos', 'GlobalSetting')
 
 # --- En la zona de imports de views.py ---
 from decimal import Decimal
 from django.conf import settings
-from django.apps import apps
-from django.contrib.admin.views.decorators import staff_member_required
 from django.http import JsonResponse, HttpResponseRedirect
 from django.urls import reverse
 
