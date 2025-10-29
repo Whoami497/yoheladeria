@@ -465,10 +465,8 @@
     const THRESH = "{{ FREE_SHIPPING_THRESHOLD|floatformat:0 }}";
 
     function shippingHTML(){
-      return (THRESH && THRESH !== "0")
-        ? ` <span class="ms-1">🛵 Envío <strong>gratis</strong> a partir de <strong>$${THRESH}</strong>.</span>`
-        : "";
-    }
+  return "";  // ← Envío gratis DESACTIVADO
+}
 
     function applyBannerState(isOpen){
       banner.dataset.open = isOpen ? "1" : "0";
