@@ -175,14 +175,8 @@
                 Podés ver el catálogo y armar el carrito.
                 {% if not TIENDA_ABIERTA %}
                   El checkout se habilita cuando abrimos de 13 a 16 hs y de 21 a 00hs.
-                {% endif %}
-                {% if FREE_SHIPPING_THRESHOLD and FREE_SHIPPING_THRESHOLD|floatformat:0 != "0" %}
-                  <span class="ms-1">
-                    🛵 Envío <strong>gratis</strong> a partir de
-                    <strong>${{ FREE_SHIPPING_THRESHOLD|floatformat:0 }}</strong>.
-                  </span>
-                {% endif %}
-              </div>
+                
+                </div>
             </div>
             <!-- Config de geocerca para JS -->
             <div id="geo-config"
