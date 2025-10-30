@@ -270,7 +270,9 @@
 
 <script>
 // ================== CONFIG ==================
-const WS_PATH = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/pedidos/notifications/';const POLL_URL = "{% url 'panel_alertas_data' %}?scope=hoy";
+const WS_PATH = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/pedidos/notifications/';
+
+// === AÑADE ESTO AQUÍ ===
 console.log('Intentando conectar a WS_PATH:', WS_PATH);
 socket = new WebSocket(WS_PATH);
 socket.onopen = () => console.log('WS conectado!');
