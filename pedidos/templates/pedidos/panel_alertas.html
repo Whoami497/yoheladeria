@@ -269,27 +269,22 @@
 </div>
 
 <script>
-// ================== CONFIG ==================
+/* ================== CONFIG ================== */
 const WS_PATH = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/pedidos/notifications/';
-
-// === AÑADE ESTO AQUÍ ===
-console.log('Intentando conectar a WS_PATH:', WS_PATH);
-socket = new WebSocket(WS_PATH);
-socket.onopen = () => console.log('WS conectado!');
-socket.onerror = (e) => console.log('WS error:', e);
-socket.onclose = () => console.log('WS cerrado');
+const POLL_URL = "{% url 'panel_alertas_data' %}?scope=hoy";   // ← usado por baseline/poll
 const POLL_MS = 20000; // 20s
 const RELOAD_MIN = 10; // si pasan 10 min sin WS, recarga
 const orderSoundUrl = "{% static 'pedidos/sounds/new-order.mp3' %}";
+let lastWsOkAt = Date.now();
 
-// URL base correcta para set-estado
+/* URL base correcta para set-estado */
 const URL_SET_ESTADO_BASE = "{% url 'panel_alertas_set_estado' 0 %}".replace('/0/', '/');
 
-// ===== Endpoints cadetes =====
+/* ===== Endpoints cadetes ===== */
 const urlCadetesData = "{% url 'panel_alertas_data' %}?scope=cadetes";
 const urlAsignarBase = "{% url 'panel_asignar_cadete' 0 %}"; // reemplazar /0/ por /<pedido_id>/
 
-// ===== CSRF =====
+/* ===== CSRF ===== */
 function getCookie(name){
   const cookies = document.cookie ? document.cookie.split('; ') : [];
   for (let i=0; i<cookies.length; i++){
@@ -300,7 +295,7 @@ function getCookie(name){
 }
 const csrftoken = getCookie('csrftoken');
 
-// ================== SONIDO ==================
+/* ================== SONIDO ================== */
 let soundEnabled = (localStorage.getItem('panel_sound') ?? 'on') !== 'off';
 const btnToggleSound = document.getElementById('toggle-sound');
 const btnTestSound = document.getElementById('test-sound');
@@ -316,12 +311,9 @@ function updateSoundBtn(){
 }
 function unlockAudio(){
   audioEl.play().then(()=>{
-    audioEl.pause(); audioEl.currentTime = 0;
-    audioUnlocked = true;
-    soundStatus.classList.add('d-none');
+    audioEl.pause(); audioEl.currentTime = 0; audioUnlocked = true; soundStatus.classList.add('d-none');
   }).catch(()=>{
-    audioUnlocked = false;
-    soundStatus.classList.remove('d-none');
+    audioUnlocked = false; soundStatus.classList.remove('d-none');
   });
 }
 function playSound(){
@@ -330,29 +322,23 @@ function playSound(){
   try{ audioEl.currentTime = 0; audioEl.play().catch(()=>{}); }catch(e){}
 }
 btnToggleSound.addEventListener('click', ()=>{
-  soundEnabled = !soundEnabled;
-  localStorage.setItem('panel_sound', soundEnabled ? 'on':'off');
-  updateSoundBtn();
-  if(soundEnabled) unlockAudio();
+  soundEnabled = !soundEnabled; localStorage.setItem('panel_sound', soundEnabled ? 'on':'off');
+  updateSoundBtn(); if(soundEnabled) unlockAudio();
 });
 btnTestSound.addEventListener('click', ()=>{
-  unlockAudio();
-  if(soundEnabled){ try{ audioEl.currentTime=0; audioEl.play().catch(()=>{});}catch(e){} }
+  unlockAudio(); if(soundEnabled){ try{ audioEl.currentTime=0; audioEl.play().catch(()=>{});}catch(e){} }
 });
 ['click','touchstart','keydown'].forEach(evt=>{
   document.addEventListener(evt, function once(){
-    if(!audioUnlocked) unlockAudio();
-    document.removeEventListener(evt, once, {passive:true});
+    if(!audioUnlocked) unlockAudio(); document.removeEventListener(evt, once, {passive:true});
   }, {passive:true});
 });
 updateSoundBtn();
 
-// ================== LAST SEEN ==================
+/* ================== LAST SEEN / BASELINE ================== */
 function getLastSeen(){ return parseInt(localStorage.getItem('last_seen_order_id') || '0', 10); }
 function setLastSeen(id){ if(id) localStorage.setItem('last_seen_order_id', String(id)); }
 
-// Tomar baseline al entrar
-let baselineDone = false;
 async function baselineFromServer(){
   try{
     const r = await fetch(POLL_URL, {cache:'no-store'});
@@ -360,12 +346,11 @@ async function baselineFromServer(){
     if(j && j.ok && Array.isArray(j.pedidos)){
       const maxId = j.pedidos.reduce((m,p)=>Math.max(m, Number(p.id||0)), 0);
       if(getLastSeen() === 0) setLastSeen(maxId);
-      baselineDone = true;
     }
   }catch(e){}
 }
 
-// ================== HELPERS UI ==================
+/* ================== HELPERS UI ================== */
 const alertsHoy=document.getElementById('alerts-hoy');
 const alertsHoyFinalizados=document.getElementById('alerts-hoy-finalizados');
 const alertsAyer=document.getElementById('alerts-ayer');
@@ -408,7 +393,7 @@ function orderExists(id){
   return document.getElementById(`order-${id}`) || document.getElementById(`chip-${id}`) || document.getElementById(`chip-hoy-${id}`);
 }
 
-// ====== TIMELINE ======
+/* ====== TIMELINE ====== */
 const fmt = n => (n==null || Number.isNaN(n)) ? '—' : `${n.toFixed(2)} min`;
 const toDate = s => s ? new Date(s) : null;
 const diffMin = (a,b) => (a && b) ? Math.round(((b - a) / 60000) * 100) / 100 : null;
@@ -724,14 +709,14 @@ document.addEventListener('click', async (ev)=>{
   }
 });
 
-// ===== Limpiar UI
+/* ===== Limpiar UI ===== */
 document.getElementById('clear-alerts').addEventListener('click',()=>{
   alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
   alertsHoyFinalizados.innerHTML='<div class="alert alert-light border text-center">Sin pedidos finalizados de hoy.</div>';
   alertsAyer.innerHTML='';
 });
 
-// ====== CADETES: listado + selects ======
+/* ====== CADETES: listado + selects ====== */
 async function cargarCadetes(){
   try{
     const r = await fetch(urlCadetesData, {credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}});
@@ -822,107 +807,115 @@ document.addEventListener('click', (ev)=>{
 cargarCadetes();
 setInterval(cargarCadetes, 15000);
 
-// ===== WEBSOCKET (FIXED) =====
-let socket = null;
+/* ===== WEBSOCKET (FIXED) ===== */
+let ws = null;
+let wsPing = null;
+let reconnectDelay = 1500; // backoff simple
 
-function connectWS() {
-  console.log('Intentando conectar a WS_PATH:', WS_PATH);
-  socket = new WebSocket(WS_PATH);
+function setWsBadge(ok){
+  if(!wsStatus) return;
+  wsStatus.className = 'badge ' + (ok ? 'bg-success' : 'bg-secondary');
+  wsStatus.textContent = ok ? 'Conectado' : 'Reconectando…';
+}
 
-  socket.onopen = () => {
-    console.log('WS conectado!');
-    document.getElementById('ws-status').textContent = 'Conectado';
-    document.getElementById('ws-status').className = 'badge bg-success align-self-center';
-  };
+function handleIncoming(msg){
+  // Estructura emitida por views.py:
+  // { message: 'nuevo_pedido' | 'actualizacion_pedido' | 'tienda_estado',
+  //   order_id: <int>,
+  //   order_data: {...} }
+  const type = msg.message;
+  const id = msg.order_id;
+  const data = msg.order_data || {};
 
-  socket.onerror = (e) => {
-    console.log('WS error:', e);
-    document.getElementById('ws-status').textContent = 'Error';
-    document.getElementById('ws-status').className = 'badge bg-danger align-self-center';
-  };
+  // 1) Estado tienda
+  if (type === 'tienda_estado' && data && typeof data.abierta !== 'undefined'){
+    applyStoreState(!!data.abierta);
+    return;
+  }
 
-  socket.onclose = () => {
-    console.log('WS cerrado');
-    document.getElementById('ws-status').textContent = 'Desconectado';
-    document.getElementById('ws-status').className = 'badge bg-danger align-self-center';
-    setTimeout(connectWS, 5000); // Reintenta en 5s
-  };
-
-  socket.onmessage = (ev) => {
-    console.log('WS mensaje recibido:', ev.data);
-    try {
-      const data = JSON.parse(ev.data);
-      const kind = data.message || "";
-      const orderId = Number(data.order_id || 0);
-      const orderData = data.order_data || {};
-
-      if (kind === 'tienda_estado') {
-        applyStoreState(!!(orderData && orderData.abierta));
-        return;
-      }
-
-      if (kind === 'nuevo_pedido') {
-        if (!orderExists(orderId)) {
-          orderData.id = orderId;
-          const card = buildCard(orderData);
-          alertsHoy.prepend(card);
-          const lastSeen = getLastSeen();
-          if (orderId > lastSeen) { playSound(); setLastSeen(orderId); }
-          cargarCadetes();
-        } else {
-          const card = document.getElementById(`order-${orderId}`);
-          if (card) {
-            renderTimelineInto(card, orderData);
-            if (orderData.cadete) {
-              const n = card.querySelector('.cadete-name');
-              if (n) n.textContent = orderData.cadete;
-            }
-          }
-        }
-        return;
-      }
-
-      if (kind === 'actualizacion_pedido') {
-        const estado = orderData.estado;
-        const card = document.getElementById(`order-${orderId}`);
-        const chipHoy = document.getElementById(`chip-hoy-${orderId}`);
-        const chipAyer = document.getElementById(`chip-${orderId}`);
-
-        if (card) {
-          const badge = card.querySelector('.badge');
-          if (estado && badge) {
-            badge.className = 'badge ' + badgeClass(estado);
-            badge.textContent = estado;
-          }
-          if (orderData.cadete) {
-            const n = card.querySelector('.cadete-name');
-            if (n) n.textContent = orderData.cadete;
-          }
-          renderTimelineInto(card, orderData || null);
-          if (estado === 'ENTREGADO' || estado === 'CANCELADO') {
-            moveToFinalizadosFromCard(card, estado);
-          }
-        } else if (chipHoy || chipAyer) {
-          const chip = chipHoy || chipAyer;
-          const b = chip.querySelector('.badge');
-          if (estado && b) {
-            b.className = 'badge ' + badgeClass(estado);
-            b.textContent = estado;
-          }
-        } else {
-          location.reload();
-        }
-        return;
-      }
-    } catch (e) {
-      console.error('Error procesando mensaje WS:', e);
+  // 2) Nuevo pedido
+  if (type === 'nuevo_pedido' && data && id){
+    if (orderExists(id)) return; // no duplicar
+    const card = buildCard({ id, ...data, timestamps: data.timestamps || null });
+    if (alertsHoy){
+      const empty = alertsHoy.querySelector('.alert');
+      if (empty) empty.remove();
+      alertsHoy.prepend(card);
     }
+    playSound();
+    setLastSeen(Number(id));
+    return;
+  }
+
+  // 3) Actualización de pedido
+  if (type === 'actualizacion_pedido' && id){
+    const root = document.getElementById(`order-${id}`) || document.getElementById(`chip-${id}`) || document.getElementById(`chip-hoy-${id}`);
+    if(!root) return;
+
+    const newEstado = data.estado || root.dataset.estado;
+    const badge = root.querySelector('.badge');
+    if(badge && newEstado){
+      badge.className = 'badge ' + badgeClass(newEstado);
+      badge.textContent = newEstado;
+    }
+
+    // Cadete
+    const cadNode = root.querySelector('.cadete-name');
+    if(cadNode && ('cadete' in data)) cadNode.textContent = data.cadete || '—';
+
+    // Mover a finalizados si corresponde
+    if((newEstado === 'ENTREGADO' || newEstado === 'CANCELADO') && root.classList.contains('order-card')){
+      const total = root.querySelector('small.text-muted')?.textContent.replace('Total: $','') || '0.00';
+      const cliente = root.querySelector('.small.text-muted .fw-semibold')?.textContent || 'N/A';
+      const cadete = data.cadete || (cadNode ? cadNode.textContent.trim() : '—');
+      const order = { id, estado: newEstado, total_pedido: total, cliente_nombre: cliente, cadete, costo_envio: data.costo_envio };
+      const chip = buildChip(order, true);
+      const empty = alertsHoyFinalizados?.querySelector('.alert');
+      if (empty) empty.remove();
+      alertsHoyFinalizados?.prepend(chip);
+      root.remove();
+      if(!alertsHoy.querySelector('.order-card')){
+        alertsHoy.innerHTML='<div class="alert alert-info text-center" role="alert">No hay pedidos activos de hoy.</div>';
+      }
+    }
+  }
+}
+
+function connectWS(){
+  try { if (ws) { ws.close(); } } catch(e){}
+  setWsBadge(false);
+  ws = new WebSocket(WS_PATH);
+
+  ws.onopen = () => {
+    lastWsOkAt = Date.now();
+    setWsBadge(true);
+    reconnectDelay = 1500; // reset
+    if (wsPing) clearInterval(wsPing);
+    wsPing = setInterval(() => {
+      try { ws?.readyState === 1 && ws.send(JSON.stringify({type: 'ping'})); } catch(e){}
+    }, 25000);
+  };
+
+  ws.onmessage = (e) => {
+    lastWsOkAt = Date.now();
+    try {
+      const msg = JSON.parse(e.data || '{}');
+      handleIncoming(msg);
+    } catch(err) {
+      console.error('WS parse error', err);
+    }
+  };
+
+  ws.onerror = () => { setWsBadge(false); };
+
+  ws.onclose = () => {
+    setWsBadge(false);
+    if (wsPing) { clearInterval(wsPing); wsPing = null; }
+    setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 1.5, 15000); connectWS(); }, reconnectDelay);
   };
 }
 
-connectWS(); // Inicia la conexión
-
-// ================== POLLING (fallback) ==================
+/* ================== POLLING (fallback) ================== */
 async function poll(){
   try{
     const r = await fetch(POLL_URL, {cache:'no-store'});
@@ -937,23 +930,23 @@ async function poll(){
   }catch(e){}
 }
 
-// ================== AUTO-RELOAD anti-zombies ==================
+/* ================== AUTO-RELOAD anti-zombies ================== */
 setInterval(()=>{
   const msFromWsOk = Date.now() - lastWsOkAt;
   if(msFromWsOk > RELOAD_MIN * 60 * 1000){ location.reload(); }
 }, 60000);
 
-// Arranque
+/* Arranque */
 connectWS();
 baselineFromServer();
 setInterval(poll, POLL_MS);
 
-// Re-baseline al volver de background
+/* Re-baseline al volver de background */
 document.addEventListener('visibilitychange', ()=>{
   if(!document.hidden){ baselineFromServer(); poll(); }
 });
 
-// ===== util: refrescar cadete desde feed =====
+/* ===== util: refrescar cadete desde feed ===== */
 async function refreshCadeteName(orderId){
   try{
     const res = await fetch("{% url 'panel_alertas_data' %}?scope=hoy", {headers:{'X-Requested-With':'XMLHttpRequest'}});
