@@ -270,7 +270,7 @@
 
 <script>
 // ================== CONFIG ==================
-const WS_PATH = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/pedidos/notifications/';
+const WS_PATH = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/panel-alertas/';
 const POLL_URL = "{% url 'panel_alertas_data' %}?scope=hoy";
 const POLL_MS = 20000; // 20s
 const RELOAD_MIN = 10; // si pasan 10 min sin WS, recarga
