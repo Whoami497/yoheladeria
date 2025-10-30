@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="es">
   <head>
+    {% load static %}
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Yo Heladerías</title>
@@ -653,5 +654,15 @@
     </script>
 
     {% block extra_js %}{% endblock %}
+    <!-- Service Worker -->
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/static/sw.js')
+      .then(reg => console.log('SW registrado'))
+      .catch(err => console.log('SW error:', err));
+  });
+}
+</script>
   </body>
 </html>
