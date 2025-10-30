@@ -1,0 +1,22 @@
+{
+  "name": "Yo Heladerías",
+  "short_name": "Yo Helados",
+  "description": "Tu heladería favorita, ahora en tu celular. ¡Pedí online y ahorrá!",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#073653",
+  "theme_color": "#007bff",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/static/images/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/images/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
