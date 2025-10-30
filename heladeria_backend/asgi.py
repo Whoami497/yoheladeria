@@ -1,30 +1,25 @@
 # heladeria_backend/asgi.py
-
 import os
-import django # Asegúrate de que django esté importado aquí
+import django
 from django.core.asgi import get_asgi_application
-from channels.routing import ProtocolTypeRouter, URLRouter
-from channels.auth import AuthMiddlewareStack
-from channels.security.websocket import AllowedHostsOriginValidator
 
-# Importa el routing de tu aplicación 'pedidos'
-# Asegúrate de que esta línea esté correcta
-from pedidos import routing
-
+# 1. CONFIGURAR DJANGO ANTES DE CARGAR NADA
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'heladeria_backend.settings')
-
-# Configura Django
 django.setup()
 
+# 2. AHORA SÍ IMPORTAR RUTAS
+from pedidos import routing
+
+# 3. CREAR LA APP ASGI
+application = get_asgi_application()
+
+# 4. PROTOCOL TYPE ROUTER (para WebSocket + HTTP)
+from channels.routing import ProtocolTypeRouter, URLRouter
+from channels.auth import AuthMiddlewareStack
+
 application = ProtocolTypeRouter({
-    "http": get_asgi_application(), # Conexiones HTTP normales (vistas de Django)
-    "websocket": AllowedHostsOriginValidator( # Seguridad para WebSockets
-        AuthMiddlewareStack( # Para que los WebSockets puedan acceder a request.user
-            URLRouter(
-                # Las URLs de tus WebSockets de la app 'pedidos'
-                # Asegúrate que 'routing' aquí se refiera al módulo 'pedidos/routing.py'
-                routing.websocket_urlpatterns
-            )
-        )
+    "http": get_asgi_application(),
+    "websocket": AuthMiddlewareStack(
+        URLRouter(routing.websocket_urlpatterns)
     ),
 })
