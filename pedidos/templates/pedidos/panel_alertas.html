@@ -822,40 +822,105 @@ document.addEventListener('click', (ev)=>{
 cargarCadetes();
 setInterval(cargarCadetes, 15000);
 
-// ================== WEBSOCKET + RECONNECT ==================
-// ===== WEBSOCKET =====
+// ===== WEBSOCKET (FIXED) =====
 let socket = null;
 
-function connectWS(){
+function connectWS() {
   console.log('Intentando conectar a WS_PATH:', WS_PATH);
   socket = new WebSocket(WS_PATH);
 
   socket.onopen = () => {
     console.log('WS conectado!');
-    wsStatus.textContent = 'Conectado';
-    wsStatus.classList.add('bg-success');
-    wsStatus.classList.remove('bg-danger');
+    document.getElementById('ws-status').textContent = 'Conectado';
+    document.getElementById('ws-status').className = 'badge bg-success align-self-center';
   };
 
   socket.onerror = (e) => {
     console.log('WS error:', e);
-    wsStatus.textContent = 'Error';
-    wsStatus.classList.add('bg-danger');
+    document.getElementById('ws-status').textContent = 'Error';
+    document.getElementById('ws-status').className = 'badge bg-danger align-self-center';
   };
 
   socket.onclose = () => {
     console.log('WS cerrado');
-    wsStatus.textContent = 'Desconectado';
-    wsStatus.classList.add('bg-danger');
+    document.getElementById('ws-status').textContent = 'Desconectado';
+    document.getElementById('ws-status').className = 'badge bg-danger align-self-center';
     setTimeout(connectWS, 5000); // Reintenta en 5s
   };
 
   socket.onmessage = (ev) => {
-    console.log('WS mensaje:', ev.data);
-    // ... (el código original de onmessage)
+    console.log('WS mensaje recibido:', ev.data);
+    try {
+      const data = JSON.parse(ev.data);
+      const kind = data.message || "";
+      const orderId = Number(data.order_id || 0);
+      const orderData = data.order_data || {};
+
+      if (kind === 'tienda_estado') {
+        applyStoreState(!!(orderData && orderData.abierta));
+        return;
+      }
+
+      if (kind === 'nuevo_pedido') {
+        if (!orderExists(orderId)) {
+          orderData.id = orderId;
+          const card = buildCard(orderData);
+          alertsHoy.prepend(card);
+          const lastSeen = getLastSeen();
+          if (orderId > lastSeen) { playSound(); setLastSeen(orderId); }
+          cargarCadetes();
+        } else {
+          const card = document.getElementById(`order-${orderId}`);
+          if (card) {
+            renderTimelineInto(card, orderData);
+            if (orderData.cadete) {
+              const n = card.querySelector('.cadete-name');
+              if (n) n.textContent = orderData.cadete;
+            }
+          }
+        }
+        return;
+      }
+
+      if (kind === 'actualizacion_pedido') {
+        const estado = orderData.estado;
+        const card = document.getElementById(`order-${orderId}`);
+        const chipHoy = document.getElementById(`chip-hoy-${orderId}`);
+        const chipAyer = document.getElementById(`chip-${orderId}`);
+
+        if (card) {
+          const badge = card.querySelector('.badge');
+          if (estado && badge) {
+            badge.className = 'badge ' + badgeClass(estado);
+            badge.textContent = estado;
+          }
+          if (orderData.cadete) {
+            const n = card.querySelector('.cadete-name');
+            if (n) n.textContent = orderData.cadete;
+          }
+          renderTimelineInto(card, orderData || null);
+          if (estado === 'ENTREGADO' || estado === 'CANCELADO') {
+            moveToFinalizadosFromCard(card, estado);
+          }
+        } else if (chipHoy || chipAyer) {
+          const chip = chipHoy || chipAyer;
+          const b = chip.querySelector('.badge');
+          if (estado && b) {
+            b.className = 'badge ' + badgeClass(estado);
+            b.textContent = estado;
+          }
+        } else {
+          location.reload();
+        }
+        return;
+      }
+    } catch (e) {
+      console.error('Error procesando mensaje WS:', e);
+    }
   };
 }
-connectWS();
+
+connectWS(); // Inicia la conexión
 
 // ================== POLLING (fallback) ==================
 async function poll(){
