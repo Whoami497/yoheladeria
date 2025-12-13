@@ -188,7 +188,7 @@
               <div class="small-help text-muted">
                 Podés ver el catálogo y armar el carrito.
                 {% if not TIENDA_ABIERTA %}
-                  El checkout se habilita cuando abrimos de 13 a 16 hs y de 21 a 00hs.
+                  El checkout se habilita cuando abrimos de 13 a 17 hs y de 21 a 01:00 hs.
                 {% endif %}
               </div>
             </div>
@@ -475,7 +475,7 @@
 
     const textEl = document.getElementById('tienda-banner-text');
     const URL_ESTADO = "{% url 'tienda_estado_json' %}";
-    const HORARIO_TXT = "13–16 hs y 21–00 hs";
+    const HORARIO_TXT = "13 – 17 hs y 21 – 01:00 hs";
     //const THRESH = "{{ FREE_SHIPPING_THRESHOLD|floatformat:0 }}";
 
     function shippingHTML(){
